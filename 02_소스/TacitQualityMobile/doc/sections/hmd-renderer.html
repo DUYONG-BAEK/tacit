@@ -1,0 +1,46 @@
+<div class="section-head">
+  <h3>C4 HmdRenderer 구현 — 결정을 BLE 쪽지로 · 순번·재전송</h3>
+  <span class="date-badge">2026-09-20</span>
+  <span class="status confirmed">완료</span>
+</div>
+
+<p>조립 순서 4번 <strong>C4 HmdRenderer</strong>를 착수·완료했다. 상태 기계가 내린 결정
+(<code>ShowCommand</code>)을 HMD가 알아듣는 0.2~0.4KB BLE "쪽지"로 바꿔 보낸다.
+그림(프레임)은 담지 않고 <code>frame_ref</code> 경로만 싣는다 — 영상은 굵은 선(Wi-Fi)으로 간다.</p>
+
+<h4>설계 판단 — 중복 제거</h4>
+<p>상태 기계(C3)가 이미 <code>core.ShowCommand</code>를 만들므로 C4에서 화면 공장을 다시 만들지 않는다.
+C4는 <strong>seq 부여 · 와이어 직렬화 · 480B 검증 · ACK 대기·재전송</strong>만 담당한다.
+가이드가 ACK 실패 시 <code>EdgeUnreachable</code>를 올리던 부분은 의미상 부적절(HMD 채널 문제)이라
+<code>onAckFailed</code> 콜백으로 분리해 Edge 문제와 섞지 않았다.</p>
+
+<h4>진행 내역</h4>
+<ul class="checklist">
+  <li class="done"><code>core.ShowCommand</code>에 <code>windowId</code> 정식 필드 추가 — 제스처 창 식별자(HMD가 GESTURE로 되돌려 문맥 게이팅)</li>
+  <li class="done"><strong>hmd 패키지 신설</strong>(<code>kr.co.snail.tacitq.mobile.hmd</code>) — 3개 파일</li>
+  <li class="done"><code>ShowWire.kt</code> — 전선 계약 DTO. <code>@SerialName</code>으로 HMD 합의 snake_case 고정
+      (<code>cmd·ttl_ms·gesture_window·window_id</code>) + <code>toWire(seq)</code> 매퍼</li>
+  <li class="done"><code>BleLink.kt</code> — BLE GATT 쓰기 포트(인터페이스). 장비 없이 가짜로 갈아끼워 시험</li>
+  <li class="done"><code>HmdRenderer.kt</code> — seq 단조 증가 · 480B 검증 · ACK 200ms 대기 → 1회만 재전송(같은 seq=HMD 멱등) → 실패 콜백</li>
+  <li class="done"><strong>단위 시험 4건 전부 통과</strong> — coroutines-test 가상 시간으로 ACK 지연을 즉시 흘려보냄</li>
+</ul>
+
+<h4>단위 시험 결과</h4>
+<table class="col-table">
+  <tr><th>시험</th><th>검증</th><th>결과</th></tr>
+  <tr><td>모든 SHOW는 480바이트 이하이고 seq는 단조 증가</td><td>완료확인 ①② (1패킷·역전 방지)</td><td class="ok">통과</td></tr>
+  <tr><td>ACK 정상이면 한 번만 보낸다</td><td>재전송 절제</td><td class="ok">통과</td></tr>
+  <tr><td>ACK 없으면 두 번 보내고 실패를 알린다</td><td>완료확인 ③ (200ms×2 후 실패)</td><td class="ok">통과</td></tr>
+  <tr><td>와이어 JSON은 계약 필드명을 쓴다</td><td>HMD 팀 계약 (snake_case)</td><td class="ok">통과</td></tr>
+</table>
+
+<div class="note-box">
+  <strong>왜 재전송을 딱 1회만:</strong> 계속 재전송하면 오래된 화면 지시가 뒤늦게 도착해 새 화면을 덮는다.
+  HMD 쪽 seq 검사가 막아주지만 애초에 안 만드는 편이 낫다.
+</div>
+
+<div class="warn-box">
+  <strong>누적 검증:</strong> C3(5) + C4(4) + C5(3) = <strong>단위 시험 12건 전부 통과</strong>(장비 없이 노트북).
+  <strong>다음:</strong> 가짜 HMD 도구(SHOW 손 주입 → HMD 화면 10종 병렬 개발) ·
+  서비스 디스패처(상태 기계 Effect → HmdRenderer·LocalStore 배선). 실장비 필요한 C1·C2는 통합 단계.
+</div>

@@ -1,0 +1,29 @@
+<div class="section-head">
+  <h3>다음 계획 — 상태 기계 우선</h3>
+  <span class="date-badge">2026-09-18</span>
+  <span class="status plan">계획</span>
+</div>
+
+<p>개발 환경·버전관리가 준비됐다. 다음은 장비 없이 만들 수 있고 리스크가 가장 큰
+<strong>상태 기계(C3)부터</strong> 착수한다. 개발가이드도 "순서를 지키면 장비 없이 70%가 끝난다"고 명시.</p>
+
+<h4>우선순위</h4>
+<ol>
+  <li><strong>테스트 의존성 추가</strong> — 현재 <code>build.gradle</code>에 JUnit 없음. 상태 기계 단위 시험(V-M05)용으로 추가.</li>
+  <li><strong>상태 기계(C3) 구현</strong> — R01~R20 전이 규칙. 순수 함수(입력 이벤트 + 현재 상태 → 출력)로 분리해 장비 없이 시험 가능하게.</li>
+  <li><strong>단위 시험(V-M05)</strong> — 순서 뒤바뀜(R06)·중복(R07)·지연 회수(R05)·선투입(R08)·타임아웃(R12) 5케이스. "불합격이 합격으로 덮이는 사례 0건" 검증.</li>
+  <li><strong>가짜 Edge/HMD 도구</strong> — 쪽지(JSON)를 손으로 주입하는 PC 도구. HMD·모바일 팀이 서로 안 기다리게.</li>
+</ol>
+
+<h4>장비·타 팀 의존 (나중 통합 단계)</h4>
+<table class="col-table">
+  <tr><th>ID</th><th>안건</th><th>비고</th></tr>
+  <tr><td>V-M01</td><td>Wi-Fi Direct + 사내 Wi-Fi <strong>동시 연결</strong> 실측</td><td>실패 시 앱 구조 변경. 최우선 실기기 확인. S26 최신칩이라 지원 가능성 높음</td></tr>
+  <tr><td>V-M02/03</td><td>발열·배터리 (주머니 2시간)</td><td>S26 플래그십이라 리스크 낮음</td></tr>
+  <tr><td>—</td><td>HMD(RealWear)·Edge 서버 확보</td><td>실제 중계·통합 검증에 필수. 없으면 가짜 도구로만 검증</td></tr>
+</table>
+
+<div class="note-box">
+  현재 미구현 스텁: <code>RelayService.pump()</code>(HMD·Edge 소켓), <code>DualQueue.hmdPending</code>(BLE 상태 수신),
+  M-03 대표 프레임 로드, 교대 마감 화면, 인증(세션·역할 기반 접근).
+</div>

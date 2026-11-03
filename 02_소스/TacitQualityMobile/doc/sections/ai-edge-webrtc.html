@@ -1,0 +1,29 @@
+<div class="section-head">
+  <h3>실제 AI 서버 연동 (WebRTC) — 1차</h3>
+  <span class="date-badge">2026-10-10</span>
+  <span class="status confirmed">1차 완료 · 실장비 종단 통과</span>
+</div>
+
+<p>설계서 §9. HMD → 폰 → AI 판정 서버(<code>192.168.1.11:8080</code>, ST-02) → HMD 표시. PC 없이 사내 Wi-Fi(21snail5) 단일 망.</p>
+
+<h4>진행 내역</h4>
+<ul class="checklist">
+  <li class="done">모바일 <code>ai/</code> — AiEdgeLink(WebRTC · JPEG→I420 · VP8 · 재연결 · 송출 통계) · AiFlow/AiMessages(판정 매핑, 단위 시험 6건) · AiResultsApi</li>
+  <li class="done">M-01 엣지 종류 선택(AI 서버 / 모의 엣지) · AI 주소 · 스테이션 · M-07 영상 탭에 AI 서버 상태</li>
+  <li class="done">HMD MJPEG 기본 1920×1080 (<code>--es res 720</code> 옵션)</li>
+  <li class="done">단위 시험 모바일 32건 · 엣지 21건 통과</li>
+  <li>2차: HMD 진행 안내 · POST /decision · overlay 표시</li>
+</ul>
+
+<h4>실장비 결과 (2026-10-10 사무실)</h4>
+<table class="col-table">
+  <tr><th style="width:30%">항목</th><th>결과</th></tr>
+  <tr><td>연결</td><td class="ok">POST /offer 수락 → 연결 0.02초 · 데이터 채널 개설</td></tr>
+  <tr><td>720p</td><td>계속 <code>too_small</code> — 종이가 화면 가로 95% 필요 → 판정 불가</td></tr>
+  <tr><td>1080p</td><td class="ok">서버 수신 1920×1080 · 8~9fps · 해상도 저하 없음 → hold → captured → result</td></tr>
+  <tr><td>판정 5건</td><td class="ok">모두 HMD 불합격 표시 · captured → result 약 0.2초 · 연속 NG alert 수신</td></tr>
+  <tr><td>판정 내용</td><td>5건 모두 NG(0.16~0.21, 기준 0.124) — 결과 이미지상 가장자리 배경 · 접힌 자국 · 역광. 가모델 정확도 영역</td></tr>
+</table>
+
+<div class="warn-box"><strong>조치:</strong> WebRTC가 초기 저대역에서 해상도를 줄일 수 있어 연결 후 <code>MAINTAIN_RESOLUTION</code> · 2~6Mbps 재적용.
+작업 문서: <code>doc/ppt/TacitQ_AI서버연동_현황.pptx</code></div>

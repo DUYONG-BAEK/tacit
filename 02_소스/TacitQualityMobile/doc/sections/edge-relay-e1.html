@@ -1,0 +1,40 @@
+<div class="section-head">
+  <h3>C2 StreamRelay + 모의 엣지 — HMD 영상 → 폰 → 로컬 PC 엣지 (E1)</h3>
+  <span class="date-badge">2026-10-02</span>
+  <span class="status confirmed">완료 · 실장비 검증</span>
+</div>
+
+<p>HMD 영상을 폰이 받아 <strong>엣지 서버로 실시간 중계</strong>하고, 엣지 판정을 상태기계(C3)로 되돌리는 길을 만들었다.
+엣지는 개발자 PC에서 도는 <strong>모의 서버(Python)</strong>로 시험한다. 설계서: <code>doc/design/TacitQualityMobile_설계서.html</code>
+(미정 사항은 "가장 쉬운 방법"으로 확정).</p>
+
+<h4>결정</h4>
+<table class="col-table">
+  <tr><th style="width:24%">항목</th><th>결정</th></tr>
+  <tr><td>영상 형식</td><td>E1 = HMD <strong>MJPEG</strong>(JPEG 연속, 실시간) 그대로 중계 — 재압축 없음. E2에서 H.265 + WebRTC</td></tr>
+  <tr><td>폰 → 엣지</td><td><strong>WebSocket</strong> <code>ws://&lt;PC&gt;:8765/v1/stream</code> — FRAME 바이너리([길이][헤더 JSON][JPEG]) + HELLO</td></tr>
+  <tr><td>엣지 → 폰</td><td>HB(1초) · JUDGE · PATTERN (JSON) — 엣지 규격서 부재로 우리가 초안 확정</td></tr>
+  <tr><td>지연(R05)</td><td>시계 맞추기 없이 <strong>폰 시계만</strong>: 판정의 마지막 프레임 수신 시각 → 판정 도착</td></tr>
+  <tr><td>FGS 타입</td><td><code>connectedDevice</code> 유지 — <code>dataSync</code>는 Android 15에서 하루 6시간 제한이라 8시간 교대에 부적합</td></tr>
+</table>
+
+<h4>진행 내역</h4>
+<ul class="checklist">
+  <li class="done"><strong>HMD</strong> <code>MjpegServer</code> — 새 프레임마다 1회만 송신(기존: 66ms 고정 재송신 → 중복·누락), <code>X-Seq</code>·<code>X-Captured-At</code> 헤더</li>
+  <li class="done"><strong>모바일</strong> <code>relay/</code> — <code>MjpegReader</code> · <code>HmdVideoSource</code> · <code>Frame</code>/<code>FrameCodec</code> · <code>Transport</code>/<code>WebSocketTransport</code>(OkHttp) · <code>EdgeMessages</code> · <code>StreamRelay</code></li>
+  <li class="done"><code>StreamRelay</code> — 큐 900장/64MB · 90% Overflow 알림 · 가득 차면 버리되 순번 소비(엣지가 누락으로 셈) · HB 3초 무소식 → EdgeUnreachable · 5초 고정 재연결 → EdgeRecovered · 쌓인 프레임 순서대로</li>
+  <li class="done"><code>InspectionService</code> — 교대 시작/마감(<code>ShiftStarted</code>·<code>ShiftClosed</code>) + 중계 실행. M-01 "검사 시작"이 이 서비스를 켠다 + 개발용 연결 설정(HMD·엣지 주소)·중계 상태 한 줄</li>
+  <li class="done">빈 껍데기 <code>RelayService</code>·<code>DualQueue</code>(가장 오래된 것 몰래 버림 — 가이드 위반) 삭제. 평문 통신 허용(개발 단계)</li>
+  <li class="done"><strong>엣지</strong> 새 프로젝트 <code>TacitQEdgeServer</code> — aiohttp, 대시보드(실시간 영상·fps·누락·판정 버튼), 가짜 판정기, 가짜 폰 도구</li>
+  <li class="done"><strong>T1</strong> 엣지 pytest 10건 통과 · <strong>T2</strong> 모바일 단위시험 24건 통과(신규 7) · <strong>T3</strong> 가짜 폰 → 엣지: 13.5fps · 누락 0 · 판정 10건 회신</li>
+  <li class="done"><strong>T4</strong> 실장비 HMD→폰→PC 30fps·누락 0 · <strong>T5</strong> 판정→상태기계(R03)·진동 · <strong>T6</strong> 엣지 끊김 즉시 감지·8초 내 복구·누락 0 · <strong>T7</strong> 판정 지연 15~70ms (2026-10-05, C1 섹션 참고)</li>
+</ul>
+
+<div class="note-box">
+  <strong>시험 중 발견·수정:</strong> 같은 세션에서 폰 순번이 1부터 다시 시작하면(앱 재시작) 엣지 판정 구간이 꼬임 → 역행 감지 시 구간 초기화.
+</div>
+
+<div class="warn-box">
+  <strong>실장비 시험 준비:</strong> ① PC 방화벽 TCP 8765 인바운드 허용(사용자) ② 세 장비 같은 망 ③ M-01에 HMD·엣지 주소 입력 (현재 PC IP <code>192.168.1.23</code>).
+  <strong>다음:</strong> T4~T7 → C1 BleLink(판정이 HMD 화면까지).
+</div>

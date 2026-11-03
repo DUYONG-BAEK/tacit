@@ -1,0 +1,49 @@
+<div class="section-head">
+  <h3>서비스 디스패처 — 이벤트를 한 줄로 세워 C3·C4·C5를 잇다</h3>
+  <span class="date-badge">2026-09-20</span>
+  <span class="status confirmed">완료</span>
+</div>
+
+<p>부품(C3·C4·C5)이 처음으로 <strong>한 줄로 연결</strong>됐다. 개발가이드 §2 "이벤트를 한 줄로 세운다".
+BLE 제스처·Edge 판정·트레이 센서·타이머는 서로 다른 스레드에서 초당 수 건씩 들어온다.
+락으로 막으면 교착, 안 막으면 경쟁 상태 — 해법은 락이 아니라 <strong>줄 세우기</strong>다.
+모든 입력을 <code>Channel&lt;Event&gt;</code> 하나로 모아 단일 스레드에서 하나씩 꺼내 상태 기계에 넣는다.</p>
+
+<h4>설계 판단 — 가이드보다 개선</h4>
+<p>가이드는 <code>Persist</code>/<code>Enqueue</code>를 <code>ioScope.launch</code>로 던진다. 그러면 outbox 삽입 순서가
+뒤섞여 C5의 "순서가 생명이다" 불변식이 깨진다. 그래서 <strong>느린 것(ShowScreen의 ACK 대기·StartTimer의 delay)만
+별도 스코프로 던지고, 영속화(Persist·Enqueue·NotifyLead)는 상태 루프 안에서 순차로 await</strong>하게 했다.
+outbox 순서 = 이벤트 처리 순서.</p>
+<p>또 <strong>순수 엔진 / 안드로이드 호스트를 분리</strong>했다 — 로직은 android 무의존 <code>InspectionEngine</code>에,
+포그라운드·잠금·알림·실물 주입은 <code>InspectionService</code>에. 덕분에 동시성·순서를 노트북에서 검증할 수 있다.</p>
+
+<h4>진행 내역</h4>
+<ul class="checklist">
+  <li class="done"><code>service/EffectSinks.kt</code> — 상태 기계 출력이 나가는 바깥 경계(인터페이스). 시험은 가짜로 갈아끼움</li>
+  <li class="done"><code>service/InspectionEngine.kt</code> — 심장. Channel + 단일 스레드 루프 + 이펙트 분배 + 타이머 왕복 (android 무의존)</li>
+  <li class="done"><code>service/InspectionService.kt</code> — LifecycleService 호스트. 포그라운드·WakeLock·WifiLock·알림 문구 갱신, 실물(LocalStore·HmdRenderer·진동) 주입</li>
+  <li class="done">AndroidManifest 에 <code>InspectionService</code> 등록(<code>foregroundServiceType=connectedDevice</code>)</li>
+  <li class="done"><strong>엔진 단위 시험 5건 전부 통과</strong> — 실제 멀티스레드로 검증</li>
+</ul>
+
+<h4>엔진 단위 시험 결과</h4>
+<table class="col-table">
+  <tr><th>시험</th><th>검증</th><th>결과</th></tr>
+  <tr><td>여러 스레드 8개에서 1000건을 밀어넣어도 유실 없이 모두 처리</td><td>완료확인 ② (경쟁 상태 없음)</td><td class="ok">통과</td></tr>
+  <tr><td>이벤트는 보낸 순서대로 처리된다</td><td>완료확인 ① (FIFO·단일 소비자)</td><td class="ok">통과</td></tr>
+  <tr><td>PASS 는 자동 통과로 저장되고 H-02 를 띄운다</td><td>C3→C5·C4 배선</td><td class="ok">통과</td></tr>
+  <tr><td>확인 시간 초과가 엔진을 거쳐 TIMEOUT 으로 남는다</td><td>타이머 왕복 R12</td><td class="ok">통과</td></tr>
+  <tr><td>트레이 투입이 먼저 오면 TIMEOUT 없이 확인된다</td><td>CancelTimer R08</td><td class="ok">통과</td></tr>
+</table>
+
+<div class="note-box">
+  <strong>누적 검증:</strong> C3(5) + C4(4) + <strong>엔진(5)</strong> + C5(3) = <strong>단위 시험 17건 전부 통과</strong>(장비 없이 노트북).
+  이제 부품이 아니라 <strong>하나의 흐름</strong>으로 돈다: 입력 → 줄 세우기 → 상태 기계 → (화면·저장·진동·타이머).
+</div>
+
+<div class="warn-box">
+  <strong>C1/C2 대기 지점:</strong> <code>InspectionService</code>의 BLE 는 자리표시자(<code>placeholderBle</code>, 로그만).
+  ConnectionManager(C1)·StreamRelay(C2)가 실물 BLE·Wi-Fi Direct·Edge 소켓을 제공하면 교체하고 이 서비스에서 start 한다.
+  AppState 스냅샷 복원(콜드 스타트 시 마지막 상태 이어받기)도 남은 과제.
+  <strong>다음:</strong> 가짜 HMD 도구(HMD팀 병렬 개발) 또는 C1 ConnectionManager(실장비 필요).
+</div>

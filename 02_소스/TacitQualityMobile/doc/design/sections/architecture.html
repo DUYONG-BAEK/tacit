@@ -1,0 +1,36 @@
+<div class="section-head">
+  <h3>2. 구성 · 데이터 경로</h3>
+  <span class="status confirmed">확정</span>
+</div>
+
+<h4>데이터 경로</h4>
+<pre style="background:#f8fafc;border:1px solid var(--line);border-radius:10px;padding:14px;font-size:12px;line-height:1.6;overflow-x:auto">
+ ┌──────── HMD (RealWear 520) ────────┐        ┌────────────── 폰 (TacitQualityMobile) ──────────────┐        ┌──── 로컬 PC (TacitQEdgeServer) ────┐
+ │ CameraX → JPEG → MjpegServer :8080 │ ─HTTP─▶│ HmdVideoSource ─▶ StreamRelay(큐 900) ─▶ Transport   │ ─WS──▶ │ /v1/stream  수신·통계·저장         │
+ │   + X-Seq · X-Captured-At 헤더     │ MJPEG  │   (MJPEG 파싱)     (메타 부착·건강검사)  (WebSocket) │ binary │   └▶ 가짜 판정기                    │
+ └────────────────────────────────────┘        │                                          ▲          │        │ GET /  대시보드(실시간 영상·통계)   │
+          ▲ BLE (C1, 이번 범위 밖)              │ InspectionEngine ◀─ Event.JudgeResult ─ EdgeMessages│ ◀─WS── │   JUDGE · PATTERN · HB (JSON 텍스트)│
+          └──────── SHOW 쪽지 ◀── HmdRenderer ◀┘ (상태기계 C3)                                     │  text  └────────────────────────────────────┘
+</pre>
+
+<h4>구성 요소</h4>
+<table class="col-table">
+  <tr><th style="width:22%">위치</th><th style="width:26%">요소</th><th>역할</th></tr>
+  <tr><td>HMD</td><td><code>MjpegServer</code> (기존)</td><td>프레임마다 <code>X-Seq</code>·<code>X-Captured-At</code> 파트 헤더 추가. 브라우저 호환은 그대로</td></tr>
+  <tr><td rowspan="4">폰</td><td><code>relay/HmdVideoSource</code></td><td>HMD MJPEG HTTP 수신 · multipart 파싱 → 프레임(바이트+메타)</td></tr>
+  <tr><td><code>relay/StreamRelay</code> (C2)</td><td>큐(900프레임/64MB) · 송신 루프 · 건강검사(3초) · 재연결(5초 고정) · 이벤트 발행</td></tr>
+  <tr><td><code>relay/Transport</code> · <code>WebSocketTransport</code></td><td>개발가이드 §5 인터페이스. E2에서 <code>WebRtcTransport</code>로 교체</td></tr>
+  <tr><td><code>relay/EdgeMessages</code></td><td>엣지 JSON(JUDGE·PATTERN·HB) → <code>Event</code> 변환</td></tr>
+  <tr><td rowspan="3">로컬 PC</td><td><code>edge/server.py</code></td><td>aiohttp 한 포트(<strong>8765</strong>)에 WebSocket + 대시보드 HTTP</td></tr>
+  <tr><td><code>edge/fake_judge.py</code></td><td>N초마다 부품 1개 판정(합격/불합격/REVIEW 확률) + 대시보드 버튼으로 강제 판정</td></tr>
+  <tr><td><code>tools/fake_mobile.py</code></td><td>폰 없이 엣지 시험 — 이미지 파일/웹캠을 같은 규격으로 송신</td></tr>
+</table>
+
+<h4>네트워크 (시험 구성)</h4>
+<ul class="checklist">
+  <li>HMD · 폰 · PC를 <strong>같은 망</strong>에 둔다 — 사무실 Wi-Fi(<code>21snail5</code>) 또는 폰 핫스팟에 PC 접속.
+      (현재 PC는 <code>172.20.10.2</code> = 아이폰 핫스팟 대역)</li>
+  <li>PC <strong>Windows 방화벽</strong>에 TCP 8765 인바운드 허용 필요 (최초 1회, 사용자가 직접)</li>
+  <li>주소 설정: 폰 M-01에 개발용 "연결 설정" — HMD IP, 엣지 주소(<code>ws://&lt;PC-IP&gt;:8765/v1/stream</code>). 값은 기기에 저장.
+      HMD IP는 C1 이후 BLE HELLO로 자동화</li>
+</ul>

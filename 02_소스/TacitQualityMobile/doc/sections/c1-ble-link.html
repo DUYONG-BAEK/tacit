@@ -1,0 +1,43 @@
+<div class="section-head">
+  <h3>C1 BleLink — 폰 → HMD 화면 지시(BLE) · 실장비 종단 시험</h3>
+  <span class="date-badge">2026-10-05</span>
+  <span class="status confirmed">완료</span>
+</div>
+
+<p>엣지 판정 → 폰 상태기계 → <strong>BLE → HMD 화면</strong>까지 처음으로 끝까지 이어졌다.
+상태기계가 만든 SHOW 쪽지가 이제 실제 BLE GATT 로 HMD 에 가고, HMD 는 그려서 ACK 를 돌려준다.</p>
+
+<h4>구현</h4>
+<table class="col-table">
+  <tr><th style="width:24%">항목</th><th>내용</th></tr>
+  <tr><td><code>hmd/GattBleLink.kt</code></td><td>서비스 UUID <code>9e7a1000-…</code> 스캔 → 처음 보이는 HMD 연결 → MTU 512(실측 517) → UP notify → 준비. DOWN write(응답 있음, 한 번에 하나). ACK → <code>HmdRenderer.onAck</code>. 1초 PING. 끊기면 5초 재스캔. 연결 준비 15초 초과 시 재시도</td></tr>
+  <tr><td><code>InspectionService</code></td><td>자리표시자 BLE 제거 → <code>GattBleLink</code>. 연결되면 현재 화면 재전송. <strong>ACK 실패 시 BLE 재설정</strong>. 교대 마감은 대기 화면을 보낸 뒤 0.5초 후 끊기</td></tr>
+  <tr><td>M-01</td><td>검사 시작 시 블루투스 권한 요청, 상태줄에 "화면 HMD 연결됨"</td></tr>
+  <tr><td>진동</td><td>미디어 → <strong>경보(ALARM)</strong> 용도 — 미디어 진동 세기에 묶이지 않게</td></tr>
+  <tr><td>HMD</td><td><strong>화면 켜짐 유지</strong>(매니페스트 <code>keepScreenOn</code> 은 효과 없음 → Window 플래그) · <strong>OVERLAY 띠</strong>(서버 지연) · 구독 기록 없어도 ACK 송신 · 정상 마감 후 끊김은 H-09 대신 대기 화면</td></tr>
+  <tr><td>모의 엣지</td><td>대시보드 <strong>[▣ 확인(트레이 투입)]</strong> → <code>{"type":"TRAY"}</code> → 폰 <code>TrayDetected</code>(R08) — 트레이 센서 대역</td></tr>
+</table>
+
+<h4>실장비 시험 (2026-10-05, 키즈카페 — USB 경로: adb forward/reverse)</h4>
+<table class="col-table">
+  <tr><th style="width:6%">#</th><th style="width:26%">시험</th><th>결과</th></tr>
+  <tr><td>1</td><td>BLE 연결</td><td class="ok">스캔 0.2초 · 준비 1.3초 · H-01 조준 화면 ACK</td></tr>
+  <tr><td>2</td><td>불합격 → 확인</td><td class="ok">"✕ 불합격 · Major" + 진동 3회 → [확인] 시 조준 화면 복귀, 완료 수 0→1</td></tr>
+  <tr><td>3</td><td>합격</td><td class="ok">"✓ 합격" → 1.5초 후 대기 화면</td></tr>
+  <tr><td>4</td><td>REVIEW</td><td class="ok">"? 확인 요청" + 진동 2회</td></tr>
+  <tr><td>5</td><td>연속불량</td><td class="ok">"⚠ 연속 불량" + [정지 요청]/[계속]</td></tr>
+  <tr><td>6</td><td>폰 끊김</td><td class="ok">BLE 끊김 3.3초 후 HMD 스스로 H-09 "수동 판정" · 정상 마감 시엔 "교대 마감 · 연결 대기"</td></tr>
+  <tr><td>7</td><td>엣지 끊김·복구 (T6)</td><td class="ok">즉시 감지 → HMD "⚠ 서버 지연" 띠 → 재기동 8초 후 자동 재연결 · 쌓인 프레임 누락 0</td></tr>
+  <tr><td>-</td><td>지연</td><td class="ok">BLE 화면 지시 4~11ms(ACK 포함) · 엣지 판정 지연 15~70ms(모의)</td></tr>
+</table>
+
+<div class="note-box">
+  <strong>시험 중 발견·수정:</strong> ① HMD 화면 자동 꺼짐 → 카메라 정지(영상 끊김) ② HMD 앱만 재시작되면 ACK 가 막혀 폰이 OFFLINE 판단
+  ③ OVERLAY 가 "알 수 없는 화면"으로 판정 화면을 덮음 ④ 정상 마감인데 HMD 가 장애(H-09) 표시 — 모두 수정·재시험 통과.
+</div>
+
+<div class="warn-box">
+  <strong>참고:</strong> 이 망(키즈카페 Wi-Fi)은 기기 간 통신 차단(AP 격리) → USB 경로로 시험. 집·사무실은 주소만 바꾸면 무선.
+  화면 가운데 "마이크를 재활성화…"는 RealWear 시스템 안내(작업 버튼으로 해제). 어두운 곳에선 카메라 fps 30→10 으로 떨어짐(자동 노출).
+  <strong>다음:</strong> 제스처(끄덕/젓기) · HMD 주소 BLE 자동 전달(HELLO) · Wi-Fi Direct.
+</div>

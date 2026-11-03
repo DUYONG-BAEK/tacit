@@ -1,0 +1,50 @@
+<div class="section-head">
+  <h3>HMD 앱 2단계 — BLE로 SHOW 쪽지 수신 → HUD 화면 표시</h3>
+  <span class="date-badge">2026-10-02</span>
+  <span class="status confirmed">완료 · 실장비 검증</span>
+</div>
+
+<p>1단계(영상 송출)에 이어, 모바일이 BLE로 보내는 <strong>SHOW 쪽지</strong>를 HMD가 받아
+<strong>H-01~H-09 화면</strong>으로 그리고 <strong>ACK</strong>를 돌려주는 부분을 만든다.
+상대편은 모바일 <code>HmdRenderer</code>·<code>ShowWire</code>(C4, 단위시험 완료)이다.</p>
+
+<h4>설계 판단</h4>
+<table class="col-table">
+  <tr><th>항목</th><th>결정</th><th>근거</th></tr>
+  <tr><td>BLE 역할</td><td><strong>HMD = GATT 서버(광고)</strong>, 모바일 = 클라이언트</td><td>개발가이드 <code>ble.connect(HMD_MAC)</code></td></tr>
+  <tr><td>UUID</td><td>설계서에 없음 → <strong>우리가 정의</strong>, 서비스 1 + 특성 2(DOWN=write, UP=notify)</td><td>양쪽 앱이 같은 상수 공유</td></tr>
+  <tr><td>seq</td><td>마지막 그린 seq보다 작으면 무시, <strong>같으면 ACK만</strong>(재전송 멱등)</td><td>구조설계서 §3</td></tr>
+  <tr><td>ACK</td><td><code>{"type":"ACK","seq":N,"rendered_at":ms}</code> notify</td><td>§3 메시지 목록 (HMD→M은 <code>type</code> 키)</td></tr>
+  <tr><td>ttl_ms</td><td>&gt;0 이면 시간 후 H-01 대기 화면으로 복귀</td><td>H-02 합격 1.5초 소거</td></tr>
+  <tr><td>H-09</td><td>쪽지/PING <strong>3초 무소식</strong> 시 HMD가 스스로 표시</td><td>R16 · V-M04</td></tr>
+  <tr><td>화면 방식</td><td>공통 HUD 틀 1개(상단줄·큰 글씨·본문·키 안내·배경색) + 화면별 매핑</td><td>프로토타입 10화면 구조 동일, 기존 View 방식 유지</td></tr>
+</table>
+
+<h4>진행 내역</h4>
+<ul class="checklist">
+  <li class="done"><code>protocol/Wire.kt</code> — <code>ShowWire</code>(모바일과 동일 필드) · <code>AckWire</code> · <code>BleUuids</code> · 깨진 쪽지는 예외 없이 무시</li>
+  <li class="done"><code>hud/ShowGate.kt</code> — seq 검사(작으면 무시·같으면 ACK만) · <strong>새 연결 시 seq 초기화</strong>(재시작한 모바일은 1부터 셈) · 3초 무소식</li>
+  <li class="done"><code>hud/Screens.kt</code> — H-01~H-09(+H-1b·H-04 카운트다운) → 공통 HUD 틀, 프로토타입 색·문구</li>
+  <li class="done"><code>hud/HudController.kt</code> — 쪽지 → 화면 · ACK · ttl 소거 · H-09 자체 표시</li>
+  <li class="done"><code>link/BleServer.kt</code> — GATT 서버 + 광고(UUID), 긴 쓰기 조립, CCCD notify, 끊기면 재광고</li>
+  <li class="done">디버그 주입 — <code>am broadcast -a kr.co.snail.tacitq.hmd.SHOW --es b64 …</code></li>
+  <li class="done"><strong>단위 시험 8건 전부 통과</strong> · 디버그 APK 빌드 성공 (v0.2.0)</li>
+  <li class="done">실장비 검증 (2026-10-05) — RealWear 520 BLE 광고 지원 확인, 폰 C1 과 연결해 H-01~H-09 표시·ACK 4~11ms (C1 섹션)</li>
+</ul>
+
+<h4>BLE 주소 (HMD 정의 — 모바일 C1도 같은 값)</h4>
+<table class="col-table">
+  <tr><th>이름</th><th>UUID</th><th>용도</th></tr>
+  <tr><td>SERVICE</td><td><code>9e7a1000-3c5b-4f0e-8d21-5a7c0d4e6b01</code></td><td>광고</td></tr>
+  <tr><td>DOWN</td><td><code>9e7a1001-…</code></td><td>모바일→HMD SHOW·PING (write)</td></tr>
+  <tr><td>UP</td><td><code>9e7a1002-…</code></td><td>HMD→모바일 ACK (notify)</td></tr>
+</table>
+
+<div class="note-box">
+  <strong>H-09 오탐 방지:</strong> 모바일 PING(1초)이 아직 없어서, PING을 한 번이라도 받은 뒤에만 "PING 3초 끊김"을 감시한다.
+  BLE 연결 끊김은 바로 3초 감시. <strong>확인 필요:</strong> RealWear 520이 BLE 광고(주변기기 모드)를 지원하는지 — 미지원이면 상태줄에 "BLE 광고 미지원".
+</div>
+
+<div class="warn-box">
+  <strong>범위 밖:</strong> 모바일 쪽 실제 <code>BleLink</code> 구현(C1)은 다음 단계. 제스처(GESTURE)·HEARTBEAT·OVERLAY는 3단계.
+</div>

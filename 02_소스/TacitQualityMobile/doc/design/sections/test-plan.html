@@ -1,0 +1,17 @@
+<div class="section-head">
+  <h3>6. 시험 계획 · 완료 기준</h3>
+  <span class="status confirmed">확정</span>
+</div>
+
+<table class="col-table">
+  <tr><th style="width:8%">#</th><th style="width:30%">시험</th><th>방법 · 장비</th><th style="width:26%">통과 기준</th></tr>
+  <tr><td>T1</td><td>엣지 단위시험</td><td>pytest (노트북만)</td><td>전부 통과</td></tr>
+  <tr><td>T2</td><td>모바일 단위시험</td><td>MjpegReader 파싱 · FRAME 직렬화 · EdgeMessages · StreamRelay(가짜 Transport: 큐·3초 무소식·재연결·지연 계산)</td><td>전부 통과, 기존 17건 유지</td></tr>
+  <tr><td>T3</td><td>엣지 단독 연결</td><td><code>fake_mobile.py</code> → 엣지, 대시보드 확인</td><td>영상 보임 · JUDGE 수신</td></tr>
+  <tr><td>T4</td><td>HMD → 폰 → PC 영상</td><td>세 장비 같은 망. 폰 앱 검사 시작</td><td>대시보드 영상 ≥ 12fps, 순번 누락 0 (1분)</td></tr>
+  <tr><td>T5</td><td>판정 회신 → 상태기계</td><td>대시보드 [불합격] 버튼</td><td>폰 로그에 R03 처리 · 진동 3회 · 알림 갱신</td></tr>
+  <tr><td>T6</td><td>엣지 끊김·복구</td><td>엣지 서버 종료 → 10초 후 재기동</td><td>3초 내 DEGRADED · 재기동 후 5초 내 복구 · 쌓인 프레임 순서대로 전송</td></tr>
+  <tr><td>T7</td><td>지연 측정</td><td>폰 로그 <code>delay</code> (프레임 수신 → 판정 도착)</td><td>모의 엣지 기준 P95 &lt; 300ms (실제 AI 전 기준선)</td></tr>
+</table>
+
+<div class="note-box">T1~T3은 장비 없이 바로 가능. T4~T7은 HMD·폰을 PC에 연결해야 한다.</div>

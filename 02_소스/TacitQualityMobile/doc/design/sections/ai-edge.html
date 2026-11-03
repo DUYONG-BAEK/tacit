@@ -1,0 +1,49 @@
+<div class="section-head">
+  <h3>9. 실제 엣지(AI 서버) 연동 — WebRTC</h3>
+  <span class="status confirmed">확정 (2026-10-10) — 1차 구현 중</span>
+</div>
+
+<p><strong>범위:</strong> 우리 역할은 <strong>HMD 영상을 폰을 거쳐 엣지(AI 서버)까지 보내고</strong>, 엣지가 돌려준 판정을 HMD에 표시하는 것까지.
+판정은 엣지가 한다. 엣지 = AI 판정 서버 <code>192.168.1.11</code> (A4 용지 결함 가모델, 담당 백두용). 근거 문서: <code>01.암묵지_모바일개발/A4_WEBRTC_API.md</code>.
+최종 구성은 <strong>HMD → 폰 → AI 서버</strong> (PC 없음).</p>
+
+<h4>경로</h4>
+<pre style="background:#f8fafc;border:1px solid var(--line);border-radius:10px;padding:12px;font-size:12px">HMD 카메라 720p ─MJPEG(HTTP, 지금 그대로)─▶ 폰: JPEG 풀기 → WebRTC 영상 트랙(VP8) ─▶ AI 서버 :8080 (POST /offer)
+                                              ◀── 데이터 채널(JSON): searching · hold · captured · result · alert
+폰 상태기계 ─BLE─▶ HMD 화면 (합격 · 불합격 · 통신불량)</pre>
+
+<h4>결정 (설계서에 없는 부분은 가장 쉬운 방법)</h4>
+<table class="col-table">
+  <tr><th style="width:24%">항목</th><th>결정</th></tr>
+  <tr><td>전송</td><td><strong>WebRTC(:8080)로 바로</strong>. 기존 모의 엣지(WebSocket :8765) 경로는 그대로 두고, 폰 설정에서 <strong>엣지 종류</strong>(모의 엣지 / AI 서버)를 고른다</td></tr>
+  <tr><td>WebRTC 라이브러리</td><td><code>io.getstream:stream-webrtc-android</code> (구글 libwebrtc 빌드) · 소프트웨어 VP8 인코더(EGL 불필요)</td></tr>
+  <tr><td>영상 원천</td><td><strong>HMD는 바꾸지 않음 — MJPEG 1280×720 그대로</strong>. 폰이 JPEG를 풀어(I420) WebRTC 트랙으로 보냄. 초당 최대 10장(서버 hold 간격 0.2초 → 충분), 밀린 프레임은 버림</td></tr>
+  <tr><td>해상도 유지</td><td>WebRTC가 대역폭 부족 시 해상도를 낮추지 않도록 <code>MAINTAIN_RESOLUTION</code> · 최대 비트레이트 6Mbps</td></tr>
+  <tr><td>HMD 화질</td><td>720p로 먼저 실제 A4 시험. <code>too_small</code>만 계속 나오면 그때 HMD 해상도를 올린다(§8 H.265 1080p 재사용 또는 MJPEG 1080p)</td></tr>
+  <tr><td>신호 교환</td><td>데이터 채널을 offer 전에 열고, ICE 수집 완료 후 <code>POST /offer {sdp,type,station_id:"ST-02"}</code> → answer</td></tr>
+  <tr><td>판정 매핑</td><td><code>result.decision</code>: OK → 합격 · NG → 불합격 · <strong>REVIEW → 불합격</strong>(§판정 3가지). 부품 ID = <code>result_id</code>(그대로 저장), 순번(seq)은 폰이 부여</td></tr>
+  <tr><td>지연</td><td><code>captured</code> 수신 시각 → <code>result</code> 수신 시각 (폰 시계)</td></tr>
+  <tr><td>통신불량 · 엣지</td><td>생존 신호가 없으므로 <strong>연결 상태</strong> <code>disconnected/failed/closed</code> → 엣지 통신불량, 5초 주기 새 <code>POST /offer</code>. <code>422·403</code>은 설정 오류(재시도 안 함, 화면에 표시), <code>503</code>·접속 실패는 재시도</td></tr>
+  <tr><td>끊긴 사이 판정</td><td><code>captured</code> 후 <code>result</code> 전에 끊기면 재연결 뒤 <code>GET /results/{id}</code> 1초 간격 조회(done → 판정 반영 / failed → 버림)</td></tr>
+  <tr><td>진행 안내</td><td>1차: 폰 화면(검사·영상 탭)에 서버 상태 표시(종이 없음 · 더 가까이 · 수집 n/10 · 판정 중). HMD 안내 줄은 2차</td></tr>
+  <tr><td>연속 알림</td><td><code>alert</code> → 반장 알림 기록(화면·진동 없음, 앱은 따로 세지 않음)</td></tr>
+  <tr><td>사람 판정 보고</td><td>2차 — <code>POST /results/{id}/decision</code> (트레이 → tray, 시간 초과 → timeout). 1차는 조회 API만</td></tr>
+  <tr><td>연결 설정</td><td>M-01 개발용 설정: 엣지 종류 · AI 서버 주소 <code>http://192.168.1.11:8080</code> · 스테이션 <code>ST-02</code></td></tr>
+</table>
+
+<h4>변경 범위 (1차)</h4>
+<table class="col-table">
+  <tr><th style="width:18%">위치</th><th>변경</th></tr>
+  <tr><td>모바일</td><td><code>ai/AiMessages</code>(메시지 해석, 순수) · <code>ai/AiFlow</code>(메시지 → 상태기계 이벤트·대기 중 result_id, 순수) · <code>ai/AiResultsApi</code>(조회 HTTP) · <code>ai/JpegToI420</code> · <code>ai/AiEdgeLink</code>(WebRTC 연결·재연결) · 서비스 배선 · M-01 설정</td></tr>
+  <tr><td>HMD</td><td>변경 없음</td></tr>
+  <tr><td>모의 AI 엣지</td><td><code>TacitQEdgeServer/edge/ai_mock.py</code>(:8080, aiortc) — 실제 AI 서버와 같은 API, 사내망 밖 시험용</td></tr>
+</table>
+
+<h4>시험</h4>
+<ul class="checklist">
+  <li>단위: 메시지 해석 · OK/NG/REVIEW 매핑 · captured→result 지연 · 끊긴 사이 대기 result_id</li>
+  <li>실장비(사내 Wi-Fi — adb reverse로는 WebRTC 불가): ① 폰 → PC 모의 AI 엣지 ② 폰 → 실제 AI 서버 · A4 비추기 → hold → captured → result → HMD 표시 · 720p에서 too_small 여부</li>
+</ul>
+
+<div class="warn-box"><strong>주의:</strong> 엣지 판정 정확도는 아직 검증 단계(정상 종이도 NG 가능 — API 문서 §9). 이번 목표는 <strong>연동과 상태 흐름 확인</strong>.
+A4는 네 모서리 모두 보이게, 화면을 꽉 채우듯 가까이, 어두운 배경에서.</div>

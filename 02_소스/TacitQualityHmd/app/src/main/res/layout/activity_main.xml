@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 카메라 미리보기(맨 아래) 위에 HUD 틀을 겹친다. RealWear 520 = 1280×720 (853×480dp). -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#000000">
+
+    <!-- 구형 카메라 HAL 은 이 표면이 있어야 카메라가 열린다 — HUD 가 덮어도 지우지 말 것 -->
+    <androidx.camera.view.PreviewView
+        android:id="@+id/preview"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <!-- E2(H.265) 모드 미리보기 — Camera2 가 여기와 인코더에 동시에 그린다. MJPEG 모드에선 숨김 -->
+    <TextureView
+        android:id="@+id/cameraTexture"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone" />
+
+    <LinearLayout
+        android:id="@+id/hud"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:paddingStart="28dp"
+        android:paddingEnd="28dp"
+        android:paddingTop="18dp"
+        android:paddingBottom="18dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/topLeft"
+                style="@style/HudTop"
+                android:layout_width="0dp"
+                android:layout_weight="1" />
+
+            <TextView
+                android:id="@+id/topRight"
+                style="@style/HudTop"
+                android:layout_width="wrap_content" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/big"
+                style="@style/HudText"
+                android:gravity="center"
+                android:textSize="44sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/lines"
+                style="@style/HudText"
+                android:layout_marginTop="10dp"
+                android:gravity="center"
+                android:lineSpacingExtra="4dp"
+                android:textColor="#C9D4E0"
+                android:textSize="22sp" />
+
+            <LinearLayout
+                android:id="@+id/options"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:orientation="horizontal" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/keys"
+            style="@style/HudText"
+            android:layout_width="match_parent"
+            android:gravity="center"
+            android:textColor="#C9D4E0"
+            android:textSize="22sp" />
+    </LinearLayout>
+
+    <!-- 예외 띠(OVERLAY) — 서버 지연 등. 판정 화면 위 상단 가운데에 겹친다 -->
+    <TextView
+        android:id="@+id/overlayText"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|center_horizontal"
+        android:layout_marginTop="56dp"
+        android:background="#E6F0A95C"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp"
+        android:paddingTop="6dp"
+        android:paddingBottom="6dp"
+        android:textColor="#101620"
+        android:textSize="20sp"
+        android:textStyle="bold"
+        android:visibility="gone" />
+
+    <!-- 개발용 상태줄: 영상 주소 · BLE 상태 · 마지막 seq -->
+    <TextView
+        android:id="@+id/statusText"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|end"
+        android:layout_margin="4dp"
+        android:background="#88000000"
+        android:fontFamily="monospace"
+        android:padding="4dp"
+        android:textColor="#8FA2B5"
+        android:textSize="11sp"
+        android:text="준비 중…" />
+</FrameLayout>

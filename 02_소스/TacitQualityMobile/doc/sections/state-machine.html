@@ -1,0 +1,56 @@
+<div class="section-head">
+  <h3>상태 기계(C3) 구현 — R01~R20 + 단위 시험 V-M05</h3>
+  <span class="date-badge">2026-09-19</span>
+  <span class="status confirmed">완료</span>
+</div>
+
+<p>장비 없이 만들 수 있고 리스크가 가장 큰 <strong>상태 기계(C3)</strong>를 착수·완료했다.
+설계서 §2 전이 규칙표 R01~R20 을 <strong>순수 Kotlin</strong>(안드로이드 무의존)으로 옮겨,
+노트북에서 전부 시험 가능한 순수 함수 <code>reduce(Event) → (AppState, List&lt;Effect&gt;)</code> 로 구현했다.
+개발가이드의 원칙 그대로 "가장 먼저, 가장 정성껏".</p>
+
+<h4>진행 내역</h4>
+<ul class="checklist">
+  <li class="done"><strong>테스트 의존성 추가</strong> — <code>libs.versions.toml</code> 에 JUnit4 <code>4.13.2</code>,
+      <code>app/build.gradle.kts</code> 에 <code>testImplementation(libs.junit)</code></li>
+  <li class="done"><strong>core 패키지 신설</strong>(<code>kr.co.snail.tacitq.mobile.core</code>) — 6개 파일,
+      <code>import android.</code> 0줄</li>
+  <li class="done"><code>State.kt</code> — Mode(7) · PartPhase(7) · Part · Profile · AppState. 판정 어휘는 코드 정의서 <code>model.Verdict</code> 재사용(단일 정의)</li>
+  <li class="done"><code>Event.kt</code> · <code>Effect.kt</code> — 입력(세션·Edge·HMD·현장·설비) / 출력(ShowScreen·Vibrate·Persist·Enqueue·Timer·NotifyLead), 쪽지 <code>ShowCommand</code>(§3 계약), 저장 <code>InspectionRecord</code></li>
+  <li class="done"><code>StateMachine.kt</code> — R01~R20 전 규칙 구현(주석에 규칙 번호). 판정 분기 R01~R07 은 안전 핵심</li>
+  <li class="done"><code>Screens.kt</code> · <code>Records.kt</code> — 화면 H-01~H-09 공장, 저장 레코드 공장(enum 코드만 사용), 결정적 <code>Sampler</code>(R02)</li>
+  <li class="done"><strong>단위 시험 5건 전부 통과</strong> — <code>gradlew testDebugUnitTest</code> · 실패 0 · 에러 0</li>
+</ul>
+
+<h4>안전 규칙 — "불합격이 합격으로 덮이는 사례 0건"</h4>
+<table class="col-table">
+  <tr><th>규칙</th><th>내용</th><th>없으면 생기는 사고</th></tr>
+  <tr><td><strong>R06</strong></td><td>순서 역전 무시 (seq ≤ lastSeq 폐기)</td><td>오래된 합격이 새 불합격을 덮어 불량품이 양품 트레이로</td></tr>
+  <tr><td><strong>R07</strong></td><td>중복 무시 (멱등 · 처리한 partId 재처리 안 함)</td><td>재전송된 결과가 상태를 두 번 흔듦</td></tr>
+  <tr><td><strong>R05</strong></td><td>지연 판정 + 선투입 → 회수 화면(H-08)</td><td>이미 트레이에 든 불량을 못 잡음</td></tr>
+  <tr><td><strong>R04</strong></td><td>일치율 &lt; 하한이면 REVIEW(신뢰도 높아도)</td><td>프레임 흔들린 오판을 그대로 통과</td></tr>
+  <tr><td><strong>R12</strong></td><td>확인 초과 → TIMEOUT(안전측 유지, 합격으로 안 바뀜)</td><td>미확인 불합격이 합격으로 둔갑</td></tr>
+</table>
+
+<h4>V-M05 단위 시험 결과</h4>
+<table class="col-table">
+  <tr><th>시험</th><th>검증 규칙</th><th>결과</th></tr>
+  <tr><td>오래된 판정은 무시된다</td><td>R06</td><td class="ok">통과</td></tr>
+  <tr><td>중복 판정은 한 번만 처리된다</td><td>R07</td><td class="ok">통과</td></tr>
+  <tr><td>지연된 불합격은 회수 화면을 띄운다</td><td>R05</td><td class="ok">통과</td></tr>
+  <tr><td>일치율이 낮으면 REVIEW 로 간다</td><td>R04</td><td class="ok">통과</td></tr>
+  <tr><td>확인 시간 초과는 안전측으로 남는다</td><td>R12</td><td class="ok">통과</td></tr>
+</table>
+
+<div class="note-box">
+  <strong>설계 준수 확인:</strong> ① core 에 <code>import android.</code> 없음 ·
+  ② <code>reduce()</code> 는 같은 입력 → 같은 출력(Sampler 결정적) ·
+  ③ 설계서 R01~R20 중 코드에 없는 규칙 없음(주석 번호 대조) ·
+  ④ 단위 시험 5건 CI 자동화 가능.
+</div>
+
+<div class="warn-box">
+  <strong>다음:</strong> 가짜 모바일 도구(SHOW 주입 PC 도구)로 HMD 화면 10종 렌더 확인 →
+  이후 C5 LocalStore(강제 종료 후 복구) → C4 HmdRenderer(가짜 HMD로 쪽지 seq·바이트 확인).
+  실장비(HMD·Edge)가 필요한 C1·C2 는 통합 단계에서.
+</div>

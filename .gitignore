@@ -1,0 +1,19 @@
+# Gradle / 빌드 산출물
+.gradle/
+build/
+*.apk
+*.aab
+
+# 로컬 환경
+local.properties
+.idea/
+*.iml
+.DS_Store
+
+# 서명 정보 (절대 커밋 금지)
+keystore.properties
+*.jks
+*.keystore
+
+# Python
+__pycache__/

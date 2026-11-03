@@ -1,0 +1,34 @@
+<div class="section-head">
+  <h3>5. 모의 엣지 서버 — TacitQEdgeServer (Python)</h3>
+  <span class="status confirmed">확정</span>
+</div>
+
+<p>새 프로젝트 <code>C:\Projects\keenEye\TacitQEdgeServer</code>. Python 3.11(PC 설치 확인됨) + <strong>aiohttp</strong> 하나로
+WebSocket과 대시보드를 한 포트(8765)에서 처리한다. 나중에 실제 AI(OpenCV·PyTorch)를 붙이기 쉬운 구조로 둔다.</p>
+
+<h4>구성</h4>
+<table class="col-table">
+  <tr><th style="width:28%">파일</th><th>내용</th></tr>
+  <tr><td><code>edge/protocol.py</code></td><td>FRAME 바이너리 해석 · JSON 메시지 생성 (§3과 1:1). pytest 대상</td></tr>
+  <tr><td><code>edge/session.py</code></td><td>세션 상태: 받은 프레임 수 · fps · 대역폭 · 순번 누락 · 최근 프레임</td></tr>
+  <tr><td><code>edge/fake_judge.py</code></td><td>가짜 판정기 — 기본 4초마다 부품 1개. 확률 합격 70 · 불합격 20 · REVIEW 10. <code>part_id</code> A_0001부터. 5건 중 불합격 3건 이상이면 PATTERN</td></tr>
+  <tr><td><code>edge/server.py</code></td><td><code>/v1/stream</code>(WS) · <code>/</code>(대시보드) · <code>/live.mjpg</code>(받은 영상 그대로 재생) · <code>/stats</code> · <code>POST /judge?verdict=FAIL</code>(강제 판정)</td></tr>
+  <tr><td><code>tools/fake_mobile.py</code></td><td>폰 없이 시험 — 웹캠 또는 이미지 폴더를 §3 규격으로 송신, 받은 JUDGE 출력</td></tr>
+  <tr><td><code>tests/</code></td><td>pytest — 규격 왕복 · 세션 통계 · 가짜 판정 순번</td></tr>
+</table>
+
+<h4>대시보드 (브라우저 <code>http://localhost:8765/</code>)</h4>
+<ul class="checklist">
+  <li>받은 영상 실시간 표시 (폰이 보낸 JPEG 그대로)</li>
+  <li>통계: 수신 fps · Mbps · 누적 프레임 · 순번 누락 수 · 폰 연결 상태 · session_id</li>
+  <li>최근 판정 목록 + 버튼 [합격] [불합격] [REVIEW] [연속불량] — 누르면 즉시 해당 JUDGE/PATTERN 회신</li>
+  <li>자동 판정 켜기/끄기 · 주기 조절</li>
+</ul>
+
+<h4>저장 (선택)</h4>
+<p><code>--record</code> 옵션 시 <code>recordings/&lt;session_id&gt;/&lt;seq&gt;.jpg</code>로 저장 — 나중에 AI 학습·재현용. 기본은 꺼짐(디스크 보호).</p>
+
+<h4>실행</h4>
+<pre style="background:#f8fafc;border:1px solid var(--line);border-radius:10px;padding:12px;font-size:12px">cd C:\Projects\keenEye\TacitQEdgeServer
+python -m venv .venv ; .venv\Scripts\activate ; pip install -r requirements.txt
+python -m edge.server --port 8765 [--record] [--auto-judge 4]</pre>

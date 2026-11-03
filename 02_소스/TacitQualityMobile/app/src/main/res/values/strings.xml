@@ -1,0 +1,10 @@
+<resources>
+    <string name="app_name">품질검사</string>
+    <string name="channel_relay">스트림 중계</string>
+    <string name="notif_relay_title">검사 진행 중</string>
+    <string name="notif_relay_text">HMD → Edge 중계 중 · 화면을 꺼도 됩니다</string>
+    <string name="tab_inspect">검사</string>
+    <string name="tab_history">이력</string>
+    <string name="tab_collect">수거</string>
+    <string name="tab_admin">관리</string>
+</resources>

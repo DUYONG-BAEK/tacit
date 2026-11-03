@@ -1,0 +1,47 @@
+<div class="section-head">
+  <h3>개발 환경 구축 · 첫 실기기 구동</h3>
+  <span class="date-badge">2026-09-18</span>
+  <span class="status confirmed">완료</span>
+</div>
+
+<p>Android Studio 설치부터 제공된 골격 소스를 실기기(Galaxy S26 Ultra)에서 구동하기까지 완료.
+README에 "컴파일 검증 안 거침"이라던 소스가 <strong>수정 없이 한 번에 빌드·구동</strong>됐다.</p>
+
+<h4>진행 내역</h4>
+<ul class="checklist">
+  <li class="done">Android Studio 설치 (Quail 2026.1.4) — 사용통계 전송 거부, 병렬 sync 활성화</li>
+  <li class="done">골격 소스 압축 해제 (<code>모바일_TacitQualityMobile_앱소스.zip</code>)</li>
+  <li class="done">Gradle Sync — wrapper 자동 생성됨(<code>gradlew</code> 등)</li>
+  <li class="done">Build → Assemble Project 성공 (1m 14s, BUILD SUCCESSFUL)</li>
+  <li class="done">S26 USB 디버깅 연결·인증 (SM-S948N)</li>
+  <li class="done">앱 설치·구동 — M-01 교대 준비 화면 표시 확인</li>
+</ul>
+
+<h4>발생 이슈 · 해결</h4>
+<table class="col-table">
+  <tr><th>이슈</th><th>원인</th><th>해결</th></tr>
+  <tr>
+    <td>Gradle Sync 실패<br>"non-ASCII characters"</td>
+    <td>경로에 한글 폴더명(<code>01.암묵지_모바일개발</code>) 포함 — 안드로이드 빌드/NDK가 한글 경로에서 실패</td>
+    <td>영문 경로 <code>C:\Projects\keenEye\TacitQualityMobile</code>로 소스 재배치</td>
+  </tr>
+  <tr>
+    <td>기기 <code>unauthorized</code></td>
+    <td>폰에서 USB 디버깅 승인 전</td>
+    <td>폰에서 "이 컴퓨터 항상 허용" → 허용</td>
+  </tr>
+</table>
+
+<div class="ok-box">
+  <strong>결과:</strong> 코드 수정 후 ▶ 한 번으로 S26에서 즉시 확인 가능한 개발 루프 확보.
+  현재 앱은 샘플 데이터로 화면 6종만 도는 상태 (중계 서비스·상태 기계는 미구현 스텁).
+</div>
+
+<h4>구성</h4>
+<table class="col-table">
+  <tr><th>항목</th><th>값</th></tr>
+  <tr><td>AGP / Kotlin</td><td>8.7.3 / 2.0.21</td></tr>
+  <tr><td>compileSdk / minSdk / targetSdk</td><td>35 / 30 / 34</td></tr>
+  <tr><td>UI</td><td>Jetpack Compose (Material3)</td></tr>
+  <tr><td>실기기</td><td>Galaxy S26 Ultra 1TB (SM-S948N)</td></tr>
+</table>

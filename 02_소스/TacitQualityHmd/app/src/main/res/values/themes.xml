@@ -1,0 +1,25 @@
+<resources>
+    <style name="Theme.TacitQHmd" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowFullscreen">true</item>
+    </style>
+
+    <!-- HUD 글자 — 카메라 영상 위에서도 읽히도록 그림자. 본문 최소 20sp(HudActivity 지침) -->
+    <style name="HudText">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:textColor">#C9D4E0</item>
+        <item name="android:textSize">20sp</item>
+        <item name="android:shadowColor">#CC000000</item>
+        <item name="android:shadowRadius">4</item>
+        <item name="android:shadowDx">0</item>
+        <item name="android:shadowDy">1</item>
+    </style>
+
+    <style name="HudTop" parent="HudText">
+        <item name="android:textSize">20sp</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:maxLines">1</item>
+        <item name="android:ellipsize">end</item>
+    </style>
+</resources>

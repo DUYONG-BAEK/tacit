@@ -1,0 +1,26 @@
+<div class="section-head">
+  <h3>판정 단순화 — 합격 · 불합격 · 통신불량(엣지/모바일) 3가지</h3>
+  <span class="date-badge">2026-10-07</span>
+  <span class="status confirmed">완료 · 실장비 재확인 대기</span>
+</div>
+
+<p><strong>원칙:</strong> 합격·불합격은 AI(엣지)가 판단하고, 폰은 <strong>받은 결과를 그대로</strong> HMD에 표시한다.
+폰이 자체 기준으로 판정을 바꾸는 규칙은 제거. AI 결과가 합격·불합격 외의 값(REVIEW 등)이면 <strong>불합격</strong>으로 표시(애매하면 불합격).</p>
+
+<h4>변경 계획</h4>
+<table class="col-table">
+  <tr><th style="width:30%">기존 규칙</th><th>변경</th></tr>
+  <tr><td>R04 일치율 미달·REVIEW → 확인 요청(H-04)</td><td>삭제 — REVIEW·기타 값은 불합격(H-03)</td></tr>
+  <tr><td>R02 합격 무작위 표본 확인</td><td>삭제 — 합격은 1.5초 후 자동 소거(R01)</td></tr>
+  <tr><td>R05 늦은 판정 → 회수 화면(H-08)</td><td>삭제 — 판정 결과 그대로 표시</td></tr>
+  <tr><td>R13 연속 불량 → 경고 화면(H-06)·진동</td><td>화면·진동 없음, 반장 알림 기록만</td></tr>
+  <tr><td>R06·R07 순서 역전·중복 차단</td><td>유지 (판정이 아닌 안전장치)</td></tr>
+  <tr><td>통신불량 · 엣지 / 모바일</td><td>유지 — 서버 지연 띠 / HMD 수동 판정(H-09)</td></tr>
+</table>
+
+<ul class="checklist">
+  <li class="done">모바일 <code>StateMachine.onJudge</code> 단순화 — 단위 시험 25건 통과(신규 3: AI 결과 그대로 · 애매→불합격 · 연속 불량 화면 없음)</li>
+  <li class="done">모의 엣지 대시보드: 합격 · 불합격 · 애매(→불합격) · 확인, 무작위 비율 75/20/5 — pytest 12건 통과</li>
+  <li class="done">PPT 2·6·8·9·10·11·14장 반영 (PowerPoint PNG 확인, 넘침·겹침 없음)</li>
+  <li>실장비 재확인 — 장비 연결 시 (폰 앱 재설치 필요, HMD 앱 변경 없음)</li>
+</ul>

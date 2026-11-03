@@ -1,0 +1,47 @@
+<div class="section-head">
+  <h3>로컬 개발 서버 — 6화면 데이터 API (Ktor + PostgreSQL)</h3>
+  <span class="date-badge">2026-09-20</span>
+  <span class="status confirmed">완료</span>
+</div>
+
+<p>모바일 화면 6종(M-01~M-06)이 <code>InMemory</code> 샘플에서 벗어나 <strong>실제 HTTP + DB</strong>로
+개발할 수 있도록, 별도 프로젝트 <code>TacitQMockServer</code>에 개발용 모의 백엔드를 세웠다.
+운영 서버(타 팀·05 엑셀 관계형 스키마)가 준비되면 대체되는 <strong>개발 언블록용</strong> 도구다.</p>
+
+<h4>설계 판단 — 앱 모델을 복사해 계약 일치</h4>
+<p>앱의 <code>model/Codes.kt</code>·<code>Entities.kt</code>·<code>data/SampleData.kt</code>가 전부
+<strong>순수 Kotlin</strong>(안드로이드 무의존)인 점을 활용해 서버로 그대로 복사했다.
+서버가 내려주는 JSON이 앱의 데이터 클래스와 <strong>100% 일치</strong>하므로, 나중에 모바일 Retrofit
+계약이 정확히 맞아떨어진다. 운영 관계형 스키마(05)는 타 팀 소유라, 여기서는 컬럼 400개 DDL 없이
+<strong>PostgreSQL JSONB 문서 저장</strong>으로 계약만 맞춘다.</p>
+
+<h4>진행 내역</h4>
+<ul class="checklist">
+  <li class="done"><strong>프로젝트 골격</strong> — Ktor(Kotlin) + PostgreSQL(Docker) · <code>docker-compose.yml</code></li>
+  <li class="done"><strong>앱 모델 3파일 복사</strong> — Codes·Entities·SampleData (순수 Kotlin이라 그대로 재사용)</li>
+  <li class="done"><code>Db.kt</code> — PostgreSQL(JSONB) <code>entity(collection,doc_id,data)</code> 시드·조회 (멱등 upsert)</li>
+  <li class="done"><code>Application.kt</code> — Ktor 라우팅. 컬렉션 11종 + <code>/api/users/me</code> + <code>/health</code></li>
+  <li class="done"><strong>Docker PostgreSQL 기동 → 서버 :8081 → 실데이터 검증 완료</strong></li>
+</ul>
+
+<h4>검증 결과 (라이브 서버 실제 응답)</h4>
+<table class="col-table">
+  <tr><th>엔드포인트</th><th>결과</th><th>화면</th></tr>
+  <tr><td><code>/api/inspections</code></td><td class="ok">5건</td><td>M-05 검사 이력</td></tr>
+  <tr><td><code>/api/trays</code></td><td class="ok">6건</td><td>M-03·M-04</td></tr>
+  <tr><td><code>/api/defect-items</code></td><td class="ok">74건 (23+31+12+8)</td><td>M-04 재고</td></tr>
+  <tr><td><code>/api/shift-checks</code></td><td class="ok">6항목</td><td>M-01 점검</td></tr>
+  <tr><td><code>/api/users/me</code></td><td class="ok">길○○ WORKER</td><td>공통</td></tr>
+  <tr><td><code>/api/nope</code></td><td class="ok">404 + available 목록</td><td>검증</td></tr>
+</table>
+
+<div class="note-box">
+  <strong>실행:</strong> <code>docker compose up -d</code> → <code>gradlew run</code> ·
+  서버 :8081 / DB :5432 · JSON은 앱 <code>Inspection</code> 등 모델과 필드 단위로 일치.
+</div>
+
+<div class="warn-box">
+  <strong>다음:</strong> ① 쓰기(POST) 엔드포인트(M-02 조치·M-03 등록·M-04 승인) ·
+  ② 모바일 <code>RemoteQualityRepository</code>(Retrofit) 배선 — <code>QualityRepository</code> 인터페이스만
+  갈아끼우면 UI는 그대로. 지금은 화면이 여전히 <code>InMemory</code>를 쓴다.
+</div>

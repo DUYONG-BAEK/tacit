@@ -1,0 +1,24 @@
+<div class="section-head">
+  <h3>폰 앱 영상 모니터링 화면 (M-07)</h3>
+  <span class="date-badge">2026-10-08</span>
+  <span class="status dev">진행 중</span>
+</div>
+
+<p>검사 중 HMD에서 폰으로 들어오는 영상을 폰 화면에서 바로 확인. 엣지 대시보드 없이 현장에서 "영상이 제대로 가는지" 확인용.</p>
+
+<h4>계획 (가장 쉬운 방법)</h4>
+<ul class="checklist">
+  <li>하단 탭에 <strong>영상</strong> 추가 (검사 · 영상 · 이력 · 수거 · 관리) → 새 화면 M-07</li>
+  <li>HMD에 따로 붙지 않음 — 서비스가 이미 받는 프레임 중 <strong>마지막 1장</strong>만 공유(HMD·Wi-Fi 부하 증가 없음)</li>
+  <li>화면이 켜져 있을 때만 그림으로 변환(초당 최대 10장) · 화면 꺼지면 변환 안 함</li>
+  <li>표시: 영상 · 해상도 · 초당 장수 · HMD 영상/화면(BLE)/엣지 연결 · 보냄/버림 · 마지막 판정과 지연</li>
+  <li>검사 전: "검사 시작 후 표시" 안내 · H.265 수신 중: "H.265 미리보기 미지원" 안내(기본값 MJPEG이라 해당 없음)</li>
+</ul>
+
+<h4>진행 내역</h4>
+<ul class="checklist">
+  <li class="done"><code>InspectionService.liveFrame</code> — HMD 프레임 수신 시 마지막 1장 갱신, 마감 시 비움</li>
+  <li class="done"><code>ui/screen/M07LiveView.kt</code> + 하단 탭 "영상" · 화면 꺼지면 수집 중단(collectAsStateWithLifecycle)</li>
+  <li class="done">빌드 · 단위 시험 26건 통과</li>
+  <li>실장비 확인 (폰·HMD 연결 시)</li>
+</ul>

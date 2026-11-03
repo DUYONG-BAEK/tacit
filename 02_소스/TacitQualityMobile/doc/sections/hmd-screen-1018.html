@@ -1,0 +1,21 @@
+<div class="section-head">
+  <h3>현장 피드백 반영 — 화면 전환 · 버튼 · 연동 순서</h3>
+  <span class="date-badge">2026-10-18</span>
+  <span class="status confirmed">완료 · 사무실 실제 AI 서버 확인 남음</span>
+</div>
+
+<p>카페(사내망 밖)에서 노트북 모의 AI 서버로 실장비 확인. 작업 문서: <code>doc/ppt/TacitQ_연결자동화_현황.pptx</code></p>
+
+<h4>변경</h4>
+<ul class="checklist">
+  <li class="done">AI 서버 자동 선택 — 연결 때마다 사무실 AI(192.168.1.11) → 노트북 모의 AI 순서로 접속 시도 (0.8초씩)</li>
+  <li class="done">HMD 화면 깨우기 — 앞으로 나올 때 꺼진 화면 켜기 (영상까지 약 20초 → 약 2초)</li>
+  <li class="done">불합격 화면 2초 뒤 카메라 (기존: 트레이 확인까지 유지 → AI 서버엔 신호 없어 카메라 가림)</li>
+  <li class="done">진행 안내 HINT — 종이를 비춰 주세요 · 더 가까이 · 수집 n/10 · 판정 중 (BLE, 바뀔 때만)</li>
+  <li class="done">HMD 버튼 2개(볼륨 업·다운 신호) → 판정 화면에서 바로 카메라 · 앱이 앞에 있을 때 볼륨 변경 안 함</li>
+  <li class="done">판정 화면 자동/수동 설정 (M-01) — 수동이면 버튼을 눌러야 카메라</li>
+  <li class="done">검사 시작 → HMD 영상 들어오면 영상 탭(M-07) 1회 자동 전환</li>
+  <li class="done">테스터 지적 "HMD 앱 먼저 조작하면 연동 안 됨" — 앱 화면 2개 생성(8080 포트·BLE 서버 중복)이 원인 → singleTask · 뒤로 가기 = 뒤로만</li>
+  <li class="done">단위 시험 모바일 34건 · HMD 통과</li>
+  <li>사무실 실제 AI 서버로 종단 확인 · 옛 설계 문구 정리 · POST /decision</li>
+</ul>

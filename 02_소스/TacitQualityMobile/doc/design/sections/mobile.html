@@ -1,0 +1,36 @@
+<div class="section-head">
+  <h3>4. 모바일 C2 StreamRelay</h3>
+  <span class="status confirmed">확정</span>
+</div>
+
+<h4>파일 (패키지 <code>kr.co.snail.tacitq.mobile.relay</code>)</h4>
+<table class="col-table">
+  <tr><th style="width:28%">파일</th><th>내용</th></tr>
+  <tr><td><code>Frame.kt</code></td><td><code>data class Frame(seq, hmdSeq, capturedAt, receivedAt, jpeg: ByteArray)</code> + FRAME 바이너리 직렬화</td></tr>
+  <tr><td><code>MjpegReader.kt</code></td><td>순수 Kotlin multipart 파서(InputStream → Frame 흐름). 단위시험 대상</td></tr>
+  <tr><td><code>HmdVideoSource.kt</code></td><td>HTTP로 HMD <code>:8080</code> 연결 → MjpegReader. 끊기면 5초 후 재연결</td></tr>
+  <tr><td><code>Transport.kt</code></td><td>개발가이드 §5 인터페이스 확장: <code>open(url)</code>, <code>sendFrame(bytes)</code>, <code>sendText(json)</code>, <code>incoming: Flow&lt;String&gt;</code>, <code>isHealthy</code>, <code>close()</code></td></tr>
+  <tr><td><code>WebSocketTransport.kt</code></td><td>OkHttp WebSocket 구현 (의존성 추가: <code>com.squareup.okhttp3:okhttp:4.12.0</code>)</td></tr>
+  <tr><td><code>StreamRelay.kt</code></td><td>큐 · 송신 루프 · 수신 루프 · 건강검사 · seq→received_at 기억. 엔진에 이벤트 발행</td></tr>
+  <tr><td><code>EdgeMessages.kt</code></td><td>JUDGE/PATTERN/HB JSON → <code>Event</code> (kotlinx.serialization, snake_case 고정)</td></tr>
+</table>
+
+<h4>동작 규칙 (개발가이드 §5 준수)</h4>
+<table class="col-table">
+  <tr><th style="width:24%">상황</th><th>동작</th></tr>
+  <tr><td>평상시</td><td>프레임을 <strong>손대지 않고</strong>(재압축·리사이즈·솎아내기 금지) 메타만 붙여 순서대로 송신</td></tr>
+  <tr><td>엣지 느림</td><td>큐 적재(최대 900프레임 또는 64MB). 90% 넘으면 <code>Event.RelayOverflow</code> → 작업자 알림. <strong>몰래 화질 낮추지 않음</strong></td></tr>
+  <tr><td>큐 가득</td><td>새 프레임 버리고 <strong>버린 수를 기록</strong>(M-06 프레임 드롭률)</td></tr>
+  <tr><td>엣지 3초 무소식(HB 없음)</td><td><code>Event.EdgeUnreachable</code> → DEGRADED(R17). 큐 적재 계속</td></tr>
+  <tr><td>재연결</td><td><strong>5초 고정 주기</strong> 무한 재시도(지수 백오프 금지). 붙으면 같은 session_id로 HELLO → <code>Event.EdgeRecovered</code>(R18) → 큐를 순서대로 송신</td></tr>
+  <tr><td>JUDGE 수신</td><td>→ <code>Event.JudgeResult</code>(지연 계산은 §3) → <code>InspectionEngine.send()</code></td></tr>
+</table>
+
+<h4>서비스 배선</h4>
+<ul class="checklist">
+  <li><code>InspectionService</code>: <code>onCreate</code>의 <code>TODO(C1/C2)</code> 자리에서 <code>relay.start()</code>를 ioScope로 실행. 포그라운드 타입에 <code>dataSync</code> 추가(개발가이드 요구)</li>
+  <li>M-01 "검사 시작" → <code>InspectionService</code> 시작 + <code>Event.ShiftStarted(line, partNo, profile)</code>.
+      "교대 마감" → <code>ShiftClosed</code> + 서비스 종료</li>
+  <li>기존 <code>relay/RelayService.kt</code>·<code>DualQueue.kt</code>(빈 껍데기, 가장 오래된 것 몰래 버림 — 가이드 위반) <strong>삭제</strong>, Manifest 정리</li>
+  <li>M-01에 개발용 "연결 설정"(HMD IP · 엣지 주소) — SharedPreferences 저장. 화면에 중계 상태(송신 fps · 큐 · 엣지 연결) 한 줄 표시</li>
+</ul>

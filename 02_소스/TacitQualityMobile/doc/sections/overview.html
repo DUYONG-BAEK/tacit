@@ -1,0 +1,31 @@
+<div class="section-head">
+  <h3>프로젝트 개요 · 나의 역할</h3>
+  <span class="date-badge">2026-09-18</span>
+  <span class="status confirmed">완료</span>
+</div>
+
+<p><strong>암묵지 품질관리</strong> — 베테랑 검사원(명장)의 설명되지 않는 검사 "감"을,
+작업자가 AI 판정에 <strong>이의를 제기하는 순간</strong>을 포착해 AI에 재학습시켜 물려받는 사업이다.
+프레스 라인에서 작업자가 HMD(스마트글래스)를 쓰고 부품을 돌리면 영상이 촬영되고, AI가 판정하며,
+작업자는 손·목소리 없이 머리 제스처·발·트레이 투입으로만 확인한다.</p>
+
+<h4>전체 시스템 4종</h4>
+<table class="col-table">
+  <tr><th>SW</th><th>역할</th><th>담당</th></tr>
+  <tr><td>① HMD 앱</td><td>촬영 · 화면 10종 렌더 · 제스처 인식</td><td>타 팀</td></tr>
+  <tr><td><strong>② 모바일 앱</strong></td><td><strong>중계 + 판단 + HMD 화면 제어 + 사람 화면 6종</strong></td><td><strong>★ 나</strong></td></tr>
+  <tr><td>③ Edge 서버</td><td>프레임 선별 · 앙상블 · AI 추론</td><td>AI 팀</td></tr>
+  <tr><td>④ 관리자 웹</td><td>조회 · 기준 관리 · 명장 리뷰</td><td>타 팀</td></tr>
+</table>
+
+<h4>나의 역할 — 모바일 앱 (핵심)</h4>
+<p>"화면 6종 만들기"가 아니다. 앱은 두 덩어리이고, <strong>화면 없는 백그라운드 서비스가 코드의 약 75%</strong>다.</p>
+<ul>
+  <li><strong>UI 25%</strong> — 화면 6종(M-01~M-06). 작업자가 하루 ~10분만 본다.</li>
+  <li><strong>서비스 75%</strong> — 영상 무가공 중계, <strong>상태 기계(R01~R20)</strong>로 HMD 화면 원격 제어, 오프라인 큐, 재전송. 주머니 속 8시간 무중단.</li>
+</ul>
+
+<div class="note-box">
+  상세 이해 정리는 <code>01.암묵지_모바일개발\프로젝트_이해_정리.md</code> 참조.
+  설계 원본은 <code>모바일앱_구조설계서.html</code>(상태 기계·메시지 규격), <code>모바일앱_개발가이드.html</code>(구현 순서).
+</div>

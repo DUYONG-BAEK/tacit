@@ -1,0 +1,49 @@
+<div class="section-head">
+  <h3>8. E2 — H.265 1080p 전환</h3>
+  <span class="status confirmed">구현 완료 · 기본값 보류 (2026-10-07)</span>
+</div>
+
+<p><strong>목표:</strong> HMD 영상을 MJPEG 640×480 → <strong>H.265(HEVC) 1920×1080 · 30fps · 약 8Mbps</strong>로 전환.
+HMD 하드웨어 인코더로 압축해 HMD 처리 부담(현재 720p JPEG에서 약 20fps 한계)을 없앤다.</p>
+
+<div class="warn-box"><strong>운영 기본값:</strong> MJPEG 1280×720(약 22fps). H.265 1080p는 구현·실장비 검증 완료, 필요 시 HMD 설정으로 전환.</div>
+
+<h4>사전 확인 (2026-10-07, RealWear 520 실장비)</h4>
+<ul class="checklist">
+  <li class="done">하드웨어 HEVC 인코더 <code>OMX.qcom.video.encoder.hevc</code> (Qualcomm bengal)</li>
+  <li class="done">카메라 1920×1080 출력, 30~60fps 범위 지원</li>
+</ul>
+
+<h4>결정 (설계서에 없는 부분은 가장 쉬운 방법)</h4>
+<table class="col-table">
+  <tr><th style="width:24%">항목</th><th>결정</th></tr>
+  <tr><td>전송 방식</td><td><strong>지금 경로 그대로</strong>(HMD HTTP → 폰 → WebSocket → 엣지). 설계의 WebRTC는 보류 — 같은 망 시험에선 지연 차이가 작고 작업량이 큼</td></tr>
+  <tr><td>HMD 촬영</td><td>CameraX → <strong>Camera2 직접</strong>: 출력 2개(화면 미리보기 + 인코더 입력 표면). 녹화용 표준 구성(TEMPLATE_RECORD)</td></tr>
+  <tr><td>인코딩</td><td>MediaCodec HEVC, 1920×1080 · 30fps · 8Mbps · <strong>키프레임 1초마다</strong>. 키프레임마다 코덱 설정(VPS/SPS/PPS)을 붙여 아무 때나 붙은 수신자도 1초 안에 화면 복원</td></tr>
+  <tr><td>HMD → 폰 규격</td><td>지금 multipart 그대로, 파트 1개 = 프레임 1개(HEVC Annex-B). 헤더 <code>Content-Type: video/hevc</code> · <code>X-Seq</code> · <code>X-Captured-At</code> · <code>X-Key</code>(키프레임 1/0)</td></tr>
+  <tr><td>폰</td><td>압축 풀지 않고 그대로 중계(지금과 같음). FRAME 헤더에 <code>codec:"hevc"</code> · <code>key</code> 추가. 폰 쪽 변경 최소</td></tr>
+  <tr><td>엣지</td><td>PyAV(ffmpeg)로 HEVC 디코딩 → 대시보드용 JPEG(초당 10장) · 녹화(<code>.h265</code> 원본 저장). JPEG 프레임도 계속 받음(코덱 자동 구분)</td></tr>
+  <tr><td>예비</td><td>MJPEG 경로 코드는 남겨 두고 HMD 설정으로 전환 가능 — HEVC 문제 시 즉시 되돌림</td></tr>
+</table>
+
+<h4>변경 범위</h4>
+<table class="col-table">
+  <tr><th style="width:18%">위치</th><th>변경</th></tr>
+  <tr><td>HMD</td><td><code>Camera2Source</code>(신규) · <code>HevcEncoder</code>(신규) · <code>MjpegServer</code> → 범용 프레임 서버(내용 형식만 다름) · MainActivity 모드 전환</td></tr>
+  <tr><td>모바일</td><td><code>MjpegReader</code> 그대로 · <code>Frame</code>/<code>FrameCodec</code> 에 codec·key · 단위 시험</td></tr>
+  <tr><td>엣지</td><td><code>edge/decoder.py</code>(신규, PyAV) · 세션 통계에 해상도·코덱 · 대시보드 표시 · pytest</td></tr>
+</table>
+
+<h4>위험과 대응</h4>
+<table class="col-table">
+  <tr><th style="width:30%">위험</th><th>대응</th></tr>
+  <tr><td>RealWear 구형 카메라 HAL이 2개 출력을 거부</td><td>실장비 첫 확인 항목. 안 되면 미리보기 없이 인코더 출력만(HUD는 불투명 배경) 또는 MJPEG 유지</td></tr>
+  <tr><td>Wi-Fi 대역폭(8Mbps)</td><td>현재 720p JPEG(16Mbps)의 절반 — 여유 있음</td></tr>
+  <tr><td>엣지 PC 디코딩 부하</td><td>대시보드용은 초당 10장만 변환. AI는 이후 필요한 프레임만 디코딩</td></tr>
+</table>
+
+<h4>시험</h4>
+<ul class="checklist">
+  <li>단위: 모바일 FRAME 헤더(codec·key) · 엣지 HEVC 디코딩(시험용 짧은 HEVC 파일)</li>
+  <li>실장비: 1080p 30fps 수신 · 누락 0 · 대시보드 화질 · 폰/엣지 재연결 시 1초 내 화면 복원 · 지연 측정</li>
+</ul>

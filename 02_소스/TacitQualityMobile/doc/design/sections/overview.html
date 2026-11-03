@@ -1,0 +1,36 @@
+<div class="section-head">
+  <h3>1. 개요 · 범위</h3>
+  <span class="status confirmed">확정</span>
+</div>
+
+<p><strong>목표:</strong> HMD 카메라 영상을 폰이 받아 <strong>엣지 서버로 실시간 중계</strong>하고,
+엣지가 돌려준 판정을 폰 상태기계(C3)에 넣는 길을 완성한다. 엣지는 당분간 <strong>개발자 PC(로컬)</strong>에서 도는 모의 서버로 시험한다.</p>
+
+<h4>단계 구분</h4>
+<table class="col-table">
+  <tr><th style="width:18%">단계</th><th>영상 형식 · 전송</th><th style="width:28%">상태</th></tr>
+  <tr><td><strong>이번 (E1)</strong></td><td>HMD <strong>MJPEG</strong>(JPEG 프레임 연속, 640×480 · 약 14fps) → 폰 → <strong>WebSocket</strong> → 로컬 PC 엣지</td><td>이 설계서 범위</td></tr>
+  <tr><td>다음 (E2)</td><td>HMD <strong>H.265</strong> 1080p 인코딩 → 전송을 <strong>WebRTC</strong>로 교체 (MA-04)</td><td>Transport 인터페이스만 갈아끼움</td></tr>
+</table>
+
+<div class="note-box">
+  <strong>MJPEG도 실시간 영상이다.</strong> JPEG 사진을 초당 약 14장 연달아 흘려보내는 방식이라 지연은 짧고,
+  H.265 대비 단점은 <em>용량</em>뿐이다(640×480에선 부담 없음). 엣지 AI는 어차피 프레임을 한 장씩 풀어 판정하므로
+  E1 시험에는 오히려 다루기 쉽다.
+</div>
+
+<h4>이번 범위 (E1)</h4>
+<ul class="checklist">
+  <li><strong>HMD</strong>: MJPEG 각 프레임에 순번·촬영시각 헤더 추가 (작은 변경)</li>
+  <li><strong>모바일</strong>: C2 <code>StreamRelay</code> — HMD MJPEG 수신 → 메타데이터 부착 → WebSocket으로 엣지 송신,
+      엣지 판정 수신 → <code>Event.JudgeResult</code> → 상태기계</li>
+  <li><strong>모바일</strong>: M-01 "검사 시작"이 <code>InspectionService</code>를 띄우고 교대를 시작하도록 배선 (빈 껍데기 <code>RelayService</code> 정리)</li>
+  <li><strong>엣지(신규)</strong>: <code>TacitQEdgeServer</code> (Python) — 영상 수신 · 브라우저 실시간 보기 · 통계 · <strong>가짜 판정 회신</strong></li>
+</ul>
+
+<h4>범위 밖</h4>
+<ul class="checklist">
+  <li>실제 AI 추론(게이팅·면 분할·앙상블) — 모의 엣지는 가짜 판정</li>
+  <li>판정이 <strong>HMD 화면</strong>까지 가는 것 — 폰의 실제 BLE 연결(C1 <code>BleLink</code>)이 필요. 이번엔 폰 로그·알림으로 확인, C1에서 연결</li>
+  <li>HMD 로컬 링버퍼·소급 판정(UPLOAD_REQ), Wi-Fi Direct</li>
+</ul>

@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>설계서 — TacitQualityMobile — 엣지 영상 중계</title>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --blue:   #4f7cff;
+      --green:  #2fb57e;
+      --yellow: #e5a63a;
+      --red:    #e45b5b;
+      --purple: #8b6cff;
+      --muted:  #66758c;
+      --line:   #d9e2ef;
+      --bg:     #f5f7fb;
+      --card:   #ffffff;
+      --sidebar-bg: #eef3fa;
+      --text:   #1e293b;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Noto Sans KR', 'Malgun Gothic', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 13px;
+      line-height: 1.7;
+      display: grid;
+      grid-template-columns: 300px 1fr;
+      min-height: 100vh;
+    }
+    .sidebar {
+      background: var(--sidebar-bg);
+      border-right: 1px solid var(--line);
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow-y: auto;
+      padding: 24px 0 40px;
+    }
+    .sidebar-title {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--text);
+      padding: 0 20px 16px;
+      border-bottom: 1px solid var(--line);
+      margin-bottom: 12px;
+    }
+    .sidebar-title span { color: var(--blue); }
+    .nav-item {
+      display: block;
+      padding: 7px 20px 7px 28px;
+      font-size: 12.5px;
+      color: #3a4a5c;
+      text-decoration: none;
+      border-left: 3px solid transparent;
+      transition: all 0.15s;
+    }
+    .nav-item:hover { background: #dce8f7; border-left-color: var(--blue); color: var(--blue); }
+    .nav-item.active { background: #dce8f7; border-left-color: var(--blue); color: var(--blue); font-weight: 600; }
+    .main {
+      padding: 36px 40px;
+      max-width: 1100px;
+    }
+    .main-title { font-size: 22px; font-weight: 700; color: var(--text); margin-bottom: 6px; }
+    .main-sub { font-size: 12px; color: var(--muted); margin-bottom: 32px; }
+    section {
+      display: none;
+      background: var(--card);
+      border-radius: 22px;
+      box-shadow: 0 14px 36px rgba(20,34,56,0.08);
+      padding: 28px 32px;
+      margin-bottom: 24px;
+    }
+    section.active { display: block; }
+    .section-head {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 20px;
+      padding-bottom: 14px;
+      border-bottom: 1px solid var(--line);
+    }
+    .section-head h3 { font-size: 16px; font-weight: 700; flex: 1; }
+    .status { font-size: 11px; font-weight: 700; border-radius: 20px; padding: 3px 10px; white-space: nowrap; }
+    .status.confirmed { background: #d1fae5; color: #065f46; }
+    .status.draft     { background: #fef3c7; color: #92400e; }
+    .status.pending   { background: #ede9fe; color: #5b21b6; }
+    .status.issue     { background: #fee2e2; color: #991b1b; }
+    .accordion { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; margin-bottom: 12px; }
+    .accordion-item { border-bottom: 1px solid var(--line); }
+    .accordion-item:last-child { border-bottom: none; }
+    .accordion-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 12px 16px; cursor: pointer; font-weight: 600; font-size: 13px;
+      background: #f8fafc; user-select: none; transition: background 0.15s;
+    }
+    .accordion-header:hover { background: #eef3fa; }
+    .accordion-header .arrow { font-size: 11px; color: var(--muted); transition: transform 0.2s; }
+    .accordion-item.open .accordion-header { background: #eef3fa; }
+    .accordion-item.open .accordion-header .arrow { transform: rotate(180deg); }
+    .accordion-body { display: none; padding: 16px; background: #fff; }
+    .accordion-item.open .accordion-body { display: block; }
+    .col-table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 12px; margin-top: 8px; }
+    .col-table th { background: #f1f5fb; padding: 8px 10px; text-align: left; font-weight: 600; color: var(--muted); border-bottom: 2px solid var(--line); }
+    .col-table td { padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; word-break: break-word; }
+    .col-table tr:last-child td { border-bottom: none; }
+    .col-table tr:hover td { background: #f8fafc; }
+    .note-box { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 10px; padding: 12px 16px; color: #1e40af; font-size: 12.5px; margin: 12px 0; }
+    .warn-box { background: #fffbeb; border: 1px solid #fde68a; border-radius: 10px; padding: 12px 16px; color: #92400e; font-size: 12.5px; margin: 12px 0; }
+    .checklist { list-style: none; padding: 0; }
+    .checklist li { padding: 5px 0; display: flex; align-items: flex-start; gap: 8px; font-size: 13px; }
+    .checklist li::before { content: "\2610"; color: var(--muted); flex-shrink: 0; }
+    .checklist li.done::before { content: "\2611"; color: var(--green); }
+    code { background: #f1f5fb; border: 1px solid var(--line); border-radius: 5px; padding: 1px 6px; font-size: 12px; font-family: 'Consolas', monospace; color: #c0392b; }
+    .divider { border: none; border-top: 1px solid var(--line); margin: 16px 0; }
+    @media (max-width: 900px) { body { grid-template-columns: 1fr; } .sidebar { position: relative; height: auto; } }
+  </style>
+</head>
+<body>
+
+<aside class="sidebar">
+  <div class="sidebar-title"><span>TacitQualityMobile — 엣지 영상 중계</span> 설계서</div>
+  <nav id="sidebar-nav">
+    <a class="nav-item" href="#overview">1. 개요 · 범위</a>
+    <a class="nav-item" href="#architecture">2. 구성 · 데이터 경로</a>
+    <a class="nav-item" href="#protocol">3. 전송 규격 (WebSocket)</a>
+    <a class="nav-item" href="#mobile">4. 모바일 C2 StreamRelay</a>
+    <a class="nav-item" href="#edge">5. 모의 엣지 서버 (Python)</a>
+    <a class="nav-item" href="#test-plan">6. 시험 계획 · 완료 기준</a>
+    <a class="nav-item" href="#issues">7. 열린 문제 · 결정 필요</a>
+    <a class="nav-item" href="#e2-hevc">8. E2 — H.265 1080p 전환</a>
+    <a class="nav-item" href="#ai-edge">9. 실제 엣지(AI 서버) 연동</a>
+  </nav>
+</aside>
+
+<main class="main">
+  <div class="main-title">TacitQualityMobile — 엣지 영상 중계 설계서</div>
+  <div class="main-sub">작성일: 2026-10-02 | 버전: v1.0 (2026-10-02 확정 — 미정 사항은 가장 쉬운 방법)</div>
+
+<!-- ── 섹션 슬롯 (build.py가 내용을 삽입) ── -->
+<section id="overview">
+<div class="section-head">
+  <h3>1. 개요 · 범위</h3>
+  <span class="status confirmed">확정</span>
+</div>
+
+<p><strong>목표:</strong> HMD 카메라 영상을 폰이 받아 <strong>엣지 서버로 실시간 중계</strong>하고,
+엣지가 돌려준 판정을 폰 상태기계(C3)에 넣는 길을 완성한다. 엣지는 당분간 <strong>개발자 PC(로컬)</strong>에서 도는 모의 서버로 시험한다.</p>
+
+<h4>단계 구분</h4>
+<table class="col-table">
+  <tr><th style="width:18%">단계</th><th>영상 형식 · 전송</th><th style="width:28%">상태</th></tr>
+  <tr><td><strong>이번 (E1)</strong></td><td>HMD <strong>MJPEG</strong>(JPEG 프레임 연속, 640×480 · 약 14fps) → 폰 → <strong>WebSocket</strong> → 로컬 PC 엣지</td><td>이 설계서 범위</td></tr>
+  <tr><td>다음 (E2)</td><td>HMD <strong>H.265</strong> 1080p 인코딩 → 전송을 <strong>WebRTC</strong>로 교체 (MA-04)</td><td>Transport 인터페이스만 갈아끼움</td></tr>
+</table>
+
+<div class="note-box">
+  <strong>MJPEG도 실시간 영상이다.</strong> JPEG 사진을 초당 약 14장 연달아 흘려보내는 방식이라 지연은 짧고,
+  H.265 대비 단점은 <em>용량</em>뿐이다(640×480에선 부담 없음). 엣지 AI는 어차피 프레임을 한 장씩 풀어 판정하므로
+  E1 시험에는 오히려 다루기 쉽다.
+</div>
+
+<h4>이번 범위 (E1)</h4>
+<ul class="checklist">
+  <li><strong>HMD</strong>: MJPEG 각 프레임에 순번·촬영시각 헤더 추가 (작은 변경)</li>
+  <li><strong>모바일</strong>: C2 <code>StreamRelay</code> — HMD MJPEG 수신 → 메타데이터 부착 → WebSocket으로 엣지 송신,
+      엣지 판정 수신 → <code>Event.JudgeResult</code> → 상태기계</li>
+  <li><strong>모바일</strong>: M-01 "검사 시작"이 <code>InspectionService</code>를 띄우고 교대를 시작하도록 배선 (빈 껍데기 <code>RelayService</code> 정리)</li>
+  <li><strong>엣지(신규)</strong>: <code>TacitQEdgeServer</code> (Python) — 영상 수신 · 브라우저 실시간 보기 · 통계 · <strong>가짜 판정 회신</strong></li>
+</ul>
+
+<h4>범위 밖</h4>
+<ul class="checklist">
+  <li>실제 AI 추론(게이팅·면 분할·앙상블) — 모의 엣지는 가짜 판정</li>
+  <li>판정이 <strong>HMD 화면</strong>까지 가는 것 — 폰의 실제 BLE 연결(C1 <code>BleLink</code>)이 필요. 이번엔 폰 로그·알림으로 확인, C1에서 연결</li>
+  <li>HMD 로컬 링버퍼·소급 판정(UPLOAD_REQ), Wi-Fi Direct</li>
+</ul>
+</section>
+
+<section id="architecture">
+<div class="section-head">
+  <h3>2. 구성 · 데이터 경로</h3>
+  <span class="status confirmed">확정</span>
+</div>
+
+<h4>데이터 경로</h4>
+<pre style="background:#f8fafc;border:1px solid var(--line);border-radius:10px;padding:14px;font-size:12px;line-height:1.6;overflow-x:auto">
+ ┌──────── HMD (RealWear 520) ────────┐        ┌────────────── 폰 (TacitQualityMobile) ──────────────┐        ┌──── 로컬 PC (TacitQEdgeServer) ────┐
+ │ CameraX → JPEG → MjpegServer :8080 │ ─HTTP─▶│ HmdVideoSource ─▶ StreamRelay(큐 900) ─▶ Transport   │ ─WS──▶ │ /v1/stream  수신·통계·저장         │
+ │   + X-Seq · X-Captured-At 헤더     │ MJPEG  │   (MJPEG 파싱)     (메타 부착·건강검사)  (WebSocket) │ binary │   └▶ 가짜 판정기                    │
+ └────────────────────────────────────┘        │                                          ▲          │        │ GET /  대시보드(실시간 영상·통계)   │
+          ▲ BLE (C1, 이번 범위 밖)              │ InspectionEngine ◀─ Event.JudgeResult ─ EdgeMessages│ ◀─WS── │   JUDGE · PATTERN · HB (JSON 텍스트)│
+          └──────── SHOW 쪽지 ◀── HmdRenderer ◀┘ (상태기계 C3)                                     │  text  └────────────────────────────────────┘
+</pre>
+
+<h4>구성 요소</h4>
+<table class="col-table">
+  <tr><th style="width:22%">위치</th><th style="width:26%">요소</th><th>역할</th></tr>
+  <tr><td>HMD</td><td><code>MjpegServer</code> (기존)</td><td>프레임마다 <code>X-Seq</code>·<code>X-Captured-At</code> 파트 헤더 추가. 브라우저 호환은 그대로</td></tr>
+  <tr><td rowspan="4">폰</td><td><code>relay/HmdVideoSource</code></td><td>HMD MJPEG HTTP 수신 · multipart 파싱 → 프레임(바이트+메타)</td></tr>
+  <tr><td><code>relay/StreamRelay</code> (C2)</td><td>큐(900프레임/64MB) · 송신 루프 · 건강검사(3초) · 재연결(5초 고정) · 이벤트 발행</td></tr>
+  <tr><td><code>relay/Transport</code> · <code>WebSocketTransport</code></td><td>개발가이드 §5 인터페이스. E2에서 <code>WebRtcTransport</code>로 교체</td></tr>
+  <tr><td><code>relay/EdgeMessages</code></td><td>엣지 JSON(JUDGE·PATTERN·HB) → <code>Event</code> 변환</td></tr>
+  <tr><td rowspan="3">로컬 PC</td><td><code>edge/server.py</code></td><td>aiohttp 한 포트(<strong>8765</strong>)에 WebSocket + 대시보드 HTTP</td></tr>
+  <tr><td><code>edge/fake_judge.py</code></td><td>N초마다 부품 1개 판정(합격/불합격/REVIEW 확률) + 대시보드 버튼으로 강제 판정</td></tr>
+  <tr><td><code>tools/fake_mobile.py</code></td><td>폰 없이 엣지 시험 — 이미지 파일/웹캠을 같은 규격으로 송신</td></tr>
+</table>
+
+<h4>네트워크 (시험 구성)</h4>
+<ul class="checklist">
+  <li>HMD · 폰 · PC를 <strong>같은 망</strong>에 둔다 — 사무실 Wi-Fi(<code>21snail5</code>) 또는 폰 핫스팟에 PC 접속.
+      (현재 PC는 <code>172.20.10.2</code> = 아이폰 핫스팟 대역)</li>
+  <li>PC <strong>Windows 방화벽</strong>에 TCP 8765 인바운드 허용 필요 (최초 1회, 사용자가 직접)</li>
+  <li>주소 설정: 폰 M-01에 개발용 "연결 설정" — HMD IP, 엣지 주소(<code>ws://&lt;PC-IP&gt;:8765/v1/stream</code>). 값은 기기에 저장.
+      HMD IP는 C1 이후 BLE HELLO로 자동화</li>
+</ul>
+</section>
+
+<section id="protocol">
+<div class="section-head">
+  <h3>3. 전송 규격 (WebSocket) — 폰 ↔ 엣지</h3>
+  <span class="status confirmed">확정</span>
+</div>
+
+<p>엣지 팀 규격서가 없어(개발가이드 §0 "Edge 팀 규격서 참조") <strong>이번에 초안을 정한다.</strong>
+실제 엣지가 생기면 이 문서를 기준으로 맞춘다.</p>
+
+<h4>연결</h4>
+<table class="col-table">
+  <tr><th style="width:22%">항목</th><th>값</th></tr>
+  <tr><td>주소</td><td><code>ws://&lt;엣지&gt;:8765/v1/stream</code></td></tr>
+  <tr><td>세션</td><td>교대 1회 = 세션 1개. 폰이 연결 직후 <code>HELLO</code>를 보내고, 끊겼다 다시 붙으면 <strong>같은 session_id</strong>로 HELLO</td></tr>
+  <tr><td>방향별 형식</td><td>폰→엣지 영상 = <strong>바이너리</strong> 메시지 · 그 외 제어 = <strong>JSON 텍스트</strong> 메시지 (<code>type</code> 키로 구분)</td></tr>
+</table>
+
+<h4>① HMD → 폰: MJPEG 파트 헤더 (추가)</h4>
+<pre style="background:#f8fafc;border:1px solid var(--line);border-radius:10px;padding:12px;font-size:12px">--frame
+Content-Type: image/jpeg
+Content-Length: 41230
+X-Seq: 1532                 ← HMD 프레임 순번 (앱 시작부터 1씩)
+X-Captured-At: 1727851234567 ← HMD 시계 epoch ms (참고용)</pre>
+
+<h4>② 폰 → 엣지: FRAME (바이너리)</h4>
+<pre style="background:#f8fafc;border:1px solid var(--line);border-radius:10px;padding:12px;font-size:12px">[4바이트 빅엔디언: 헤더 길이 N][헤더 JSON N바이트 UTF-8][JPEG 원본 바이트 — 손대지 않음]
+
+헤더 JSON 예:
+{"seq":1532, "hmd_seq":1532, "captured_at":1727851234567, "received_at":1727851234611,
+ "codec":"jpeg", "bytes":41230}</pre>
+<table class="col-table">
+  <tr><th style="width:22%">필드</th><th>뜻</th></tr>
+  <tr><td><code>seq</code></td><td>폰이 붙이는 세션 내 프레임 순번(끊김 없이 1씩). 엣지 판정이 "몇 번~몇 번 프레임으로 판정했는지"를 이걸로 가리킨다</td></tr>
+  <tr><td><code>hmd_seq</code> · <code>captured_at</code></td><td>HMD가 준 값 그대로 (HMD 시계)</td></tr>
+  <tr><td><code>received_at</code></td><td>폰이 HMD에서 받은 시각 (폰 시계)</td></tr>
+</table>
+
+<h4>③ 폰 → 엣지: HELLO (텍스트)</h4>
+<pre style="background:#f8fafc;border:1px solid var(--line);border-radius:10px;padding:12px;font-size:12px">{"type":"HELLO","session_id":"S-20261002-0930-A","line":"A","part_no":"PRS-4410",
+ "view_total":3,"codec":"jpeg","app":"TacitQualityMobile 0.x"}</pre>
+
+<h4>④ 엣지 → 폰 (텍스트)</h4>
+<table class="col-table">
+  <tr><th style="width:14%">type</th><th style="width:16%">언제</th><th>필드</th></tr>
+  <tr><td><code>HB</code></td><td>1초마다</td><td><code>{"type":"HB","recv_frames":8123,"fps":14.2,"queue":0}</code> — 폰 건강검사의 근거. <strong>3초 무소식 → EdgeUnreachable</strong>(R17)</td></tr>
+  <tr><td><code>JUDGE</code></td><td>부품 판정 완료</td><td><pre style="margin:4px 0;font-size:11.5px;white-space:pre-wrap">{"type":"JUDGE","seq":12,"part_id":"A_0249","verdict":"FAIL","severity":"CRITICAL",
+ "confidence":0.93,"agree_rate":0.75,"evidence":"찍힘 · 2면(하면) 좌상단 · 4장 중 3장 검출",
+ "frame_ref":"S-20261002-0930-A/1498.jpg","bbox":[0.31,0.22,0.07,0.06],
+ "frame_seq_start":1440,"frame_seq_end":1532}</pre>
+    <code>seq</code> = 엣지 판정 순번(세션 내 단조 증가 → 상태기계 R06 근거). <code>verdict</code> = PASS|FAIL|REVIEW. <code>bbox</code> 정규화 [x,y,w,h]</td></tr>
+  <tr><td><code>PATTERN</code></td><td>연속 불량</td><td><code>{"type":"PATTERN","level":"WARN","defect_type":"DENT","hit":5,"window":20}</code> → <code>Event.PatternAlert</code>(R13)</td></tr>
+  <tr><td><code>TRAY</code></td><td>시험용</td><td><code>{"type":"TRAY","part_id":"A_0001","kind":"NG"}</code> → <code>Event.TrayDetected</code>(R08). 모의 엣지 [확인] 버튼 = 트레이 센서 대역 (2026-10-05 추가)</td></tr>
+</table>
+
+<h4>지연(R05) 계산 — 시계 맞추기 없이</h4>
+<div class="note-box">
+  상태기계는 <code>delay = arrivedAt − capturedEndAt</code>로 "결과가 늦었나"(1.5초)를 본다. HMD·폰·PC 시계는 서로 어긋나므로
+  <strong>폰 시계 하나만</strong> 쓴다: 폰은 보낸 프레임마다 <code>seq → received_at</code>을 기억하고(최근 30초),
+  JUDGE가 오면 <code>capturedEndAt = received_at[frame_seq_end]</code>, <code>arrivedAt = 지금</code>.
+  HMD→폰 구간(수십 ms)만 빠지고 나머지(중계·엣지·회신)는 정확히 잡힌다.
+</div>
+</section>
+
+<section id="mobile">
+<div class="section-head">
+  <h3>4. 모바일 C2 StreamRelay</h3>
+  <span class="status confirmed">확정</span>
+</div>
+
+<h4>파일 (패키지 <code>kr.co.snail.tacitq.mobile.relay</code>)</h4>
+<table class="col-table">
+  <tr><th style="width:28%">파일</th><th>내용</th></tr>
+  <tr><td><code>Frame.kt</code></td><td><code>data class Frame(seq, hmdSeq, capturedAt, receivedAt, jpeg: ByteArray)</code> + FRAME 바이너리 직렬화</td></tr>
+  <tr><td><code>MjpegReader.kt</code></td><td>순수 Kotlin multipart 파서(InputStream → Frame 흐름). 단위시험 대상</td></tr>
+  <tr><td><code>HmdVideoSource.kt</code></td><td>HTTP로 HMD <code>:8080</code> 연결 → MjpegReader. 끊기면 5초 후 재연결</td></tr>
+  <tr><td><code>Transport.kt</code></td><td>개발가이드 §5 인터페이스 확장: <code>open(url)</code>, <code>sendFrame(bytes)</code>, <code>sendText(json)</code>, <code>incoming: Flow&lt;String&gt;</code>, <code>isHealthy</code>, <code>close()</code></td></tr>
+  <tr><td><code>WebSocketTransport.kt</code></td><td>OkHttp WebSocket 구현 (의존성 추가: <code>com.squareup.okhttp3:okhttp:4.12.0</code>)</td></tr>
+  <tr><td><code>StreamRelay.kt</code></td><td>큐 · 송신 루프 · 수신 루프 · 건강검사 · seq→received_at 기억. 엔진에 이벤트 발행</td></tr>
+  <tr><td><code>EdgeMessages.kt</code></td><td>JUDGE/PATTERN/HB JSON → <code>Event</code> (kotlinx.serialization, snake_case 고정)</td></tr>
+</table>
+
+<h4>동작 규칙 (개발가이드 §5 준수)</h4>
+<table class="col-table">
+  <tr><th style="width:24%">상황</th><th>동작</th></tr>
+  <tr><td>평상시</td><td>프레임을 <strong>손대지 않고</strong>(재압축·리사이즈·솎아내기 금지) 메타만 붙여 순서대로 송신</td></tr>
+  <tr><td>엣지 느림</td><td>큐 적재(최대 900프레임 또는 64MB). 90% 넘으면 <code>Event.RelayOverflow</code> → 작업자 알림. <strong>몰래 화질 낮추지 않음</strong></td></tr>
+  <tr><td>큐 가득</td><td>새 프레임 버리고 <strong>버린 수를 기록</strong>(M-06 프레임 드롭률)</td></tr>
+  <tr><td>엣지 3초 무소식(HB 없음)</td><td><code>Event.EdgeUnreachable</code> → DEGRADED(R17). 큐 적재 계속</td></tr>
+  <tr><td>재연결</td><td><strong>5초 고정 주기</strong> 무한 재시도(지수 백오프 금지). 붙으면 같은 session_id로 HELLO → <code>Event.EdgeRecovered</code>(R18) → 큐를 순서대로 송신</td></tr>
+  <tr><td>JUDGE 수신</td><td>→ <code>Event.JudgeResult</code>(지연 계산은 §3) → <code>InspectionEngine.send()</code></td></tr>
+</table>
+
+<h4>서비스 배선</h4>
+<ul class="checklist">
+  <li><code>InspectionService</code>: <code>onCreate</code>의 <code>TODO(C1/C2)</code> 자리에서 <code>relay.start()</code>를 ioScope로 실행. 포그라운드 타입에 <code>dataSync</code> 추가(개발가이드 요구)</li>
+  <li>M-01 "검사 시작" → <code>InspectionService</code> 시작 + <code>Event.ShiftStarted(line, partNo, profile)</code>.
+      "교대 마감" → <code>ShiftClosed</code> + 서비스 종료</li>
+  <li>기존 <code>relay/RelayService.kt</code>·<code>DualQueue.kt</code>(빈 껍데기, 가장 오래된 것 몰래 버림 — 가이드 위반) <strong>삭제</strong>, Manifest 정리</li>
+  <li>M-01에 개발용 "연결 설정"(HMD IP · 엣지 주소) — SharedPreferences 저장. 화면에 중계 상태(송신 fps · 큐 · 엣지 연결) 한 줄 표시</li>
+</ul>
+</section>
+
+<section id="edge">
+<div class="section-head">
+  <h3>5. 모의 엣지 서버 — TacitQEdgeServer (Python)</h3>
+  <span class="status confirmed">확정</span>
+</div>
+
+<p>새 프로젝트 <code>C:\Projects\keenEye\TacitQEdgeServer</code>. Python 3.11(PC 설치 확인됨) + <strong>aiohttp</strong> 하나로
+WebSocket과 대시보드를 한 포트(8765)에서 처리한다. 나중에 실제 AI(OpenCV·PyTorch)를 붙이기 쉬운 구조로 둔다.</p>
+
+<h4>구성</h4>
+<table class="col-table">
+  <tr><th style="width:28%">파일</th><th>내용</th></tr>
+  <tr><td><code>edge/protocol.py</code></td><td>FRAME 바이너리 해석 · JSON 메시지 생성 (§3과 1:1). pytest 대상</td></tr>
+  <tr><td><code>edge/session.py</code></td><td>세션 상태: 받은 프레임 수 · fps · 대역폭 · 순번 누락 · 최근 프레임</td></tr>
+  <tr><td><code>edge/fake_judge.py</code></td><td>가짜 판정기 — 기본 4초마다 부품 1개. 확률 합격 70 · 불합격 20 · REVIEW 10. <code>part_id</code> A_0001부터. 5건 중 불합격 3건 이상이면 PATTERN</td></tr>
+  <tr><td><code>edge/server.py</code></td><td><code>/v1/stream</code>(WS) · <code>/</code>(대시보드) · <code>/live.mjpg</code>(받은 영상 그대로 재생) · <code>/stats</code> · <code>POST /judge?verdict=FAIL</code>(강제 판정)</td></tr>
+  <tr><td><code>tools/fake_mobile.py</code></td><td>폰 없이 시험 — 웹캠 또는 이미지 폴더를 §3 규격으로 송신, 받은 JUDGE 출력</td></tr>
+  <tr><td><code>tests/</code></td><td>pytest — 규격 왕복 · 세션 통계 · 가짜 판정 순번</td></tr>
+</table>
+
+<h4>대시보드 (브라우저 <code>http://localhost:8765/</code>)</h4>
+<ul class="checklist">
+  <li>받은 영상 실시간 표시 (폰이 보낸 JPEG 그대로)</li>
+  <li>통계: 수신 fps · Mbps · 누적 프레임 · 순번 누락 수 · 폰 연결 상태 · session_id</li>
+  <li>최근 판정 목록 + 버튼 [합격] [불합격] [REVIEW] [연속불량] — 누르면 즉시 해당 JUDGE/PATTERN 회신</li>
+  <li>자동 판정 켜기/끄기 · 주기 조절</li>
+</ul>
+
+<h4>저장 (선택)</h4>
+<p><code>--record</code> 옵션 시 <code>recordings/&lt;session_id&gt;/&lt;seq&gt;.jpg</code>로 저장 — 나중에 AI 학습·재현용. 기본은 꺼짐(디스크 보호).</p>
+
+<h4>실행</h4>
+<pre style="background:#f8fafc;border:1px solid var(--line);border-radius:10px;padding:12px;font-size:12px">cd C:\Projects\keenEye\TacitQEdgeServer
+python -m venv .venv ; .venv\Scripts\activate ; pip install -r requirements.txt
+python -m edge.server --port 8765 [--record] [--auto-judge 4]</pre>
+</section>
+
+<section id="test-plan">
+<div class="section-head">
+  <h3>6. 시험 계획 · 완료 기준</h3>
+  <span class="status confirmed">확정</span>
+</div>
+
+<table class="col-table">
+  <tr><th style="width:8%">#</th><th style="width:30%">시험</th><th>방법 · 장비</th><th style="width:26%">통과 기준</th></tr>
+  <tr><td>T1</td><td>엣지 단위시험</td><td>pytest (노트북만)</td><td>전부 통과</td></tr>
+  <tr><td>T2</td><td>모바일 단위시험</td><td>MjpegReader 파싱 · FRAME 직렬화 · EdgeMessages · StreamRelay(가짜 Transport: 큐·3초 무소식·재연결·지연 계산)</td><td>전부 통과, 기존 17건 유지</td></tr>
+  <tr><td>T3</td><td>엣지 단독 연결</td><td><code>fake_mobile.py</code> → 엣지, 대시보드 확인</td><td>영상 보임 · JUDGE 수신</td></tr>
+  <tr><td>T4</td><td>HMD → 폰 → PC 영상</td><td>세 장비 같은 망. 폰 앱 검사 시작</td><td>대시보드 영상 ≥ 12fps, 순번 누락 0 (1분)</td></tr>
+  <tr><td>T5</td><td>판정 회신 → 상태기계</td><td>대시보드 [불합격] 버튼</td><td>폰 로그에 R03 처리 · 진동 3회 · 알림 갱신</td></tr>
+  <tr><td>T6</td><td>엣지 끊김·복구</td><td>엣지 서버 종료 → 10초 후 재기동</td><td>3초 내 DEGRADED · 재기동 후 5초 내 복구 · 쌓인 프레임 순서대로 전송</td></tr>
+  <tr><td>T7</td><td>지연 측정</td><td>폰 로그 <code>delay</code> (프레임 수신 → 판정 도착)</td><td>모의 엣지 기준 P95 &lt; 300ms (실제 AI 전 기준선)</td></tr>
+</table>
+
+<div class="note-box">T1~T3은 장비 없이 바로 가능. T4~T7은 HMD·폰을 PC에 연결해야 한다.</div>
+</section>
+
+<section id="e2-hevc">
+<div class="section-head">
+  <h3>8. E2 — H.265 1080p 전환</h3>
+  <span class="status confirmed">구현 완료 · 기본값 보류 (2026-10-07)</span>
+</div>
+
+<p><strong>목표:</strong> HMD 영상을 MJPEG 640×480 → <strong>H.265(HEVC) 1920×1080 · 30fps · 약 8Mbps</strong>로 전환.
+HMD 하드웨어 인코더로 압축해 HMD 처리 부담(현재 720p JPEG에서 약 20fps 한계)을 없앤다.</p>
+
+<div class="warn-box"><strong>운영 기본값:</strong> MJPEG 1280×720(약 22fps). H.265 1080p는 구현·실장비 검증 완료, 필요 시 HMD 설정으로 전환.</div>
+
+<h4>사전 확인 (2026-10-07, RealWear 520 실장비)</h4>
+<ul class="checklist">
+  <li class="done">하드웨어 HEVC 인코더 <code>OMX.qcom.video.encoder.hevc</code> (Qualcomm bengal)</li>
+  <li class="done">카메라 1920×1080 출력, 30~60fps 범위 지원</li>
+</ul>
+
+<h4>결정 (설계서에 없는 부분은 가장 쉬운 방법)</h4>
+<table class="col-table">
+  <tr><th style="width:24%">항목</th><th>결정</th></tr>
+  <tr><td>전송 방식</td><td><strong>지금 경로 그대로</strong>(HMD HTTP → 폰 → WebSocket → 엣지). 설계의 WebRTC는 보류 — 같은 망 시험에선 지연 차이가 작고 작업량이 큼</td></tr>
+  <tr><td>HMD 촬영</td><td>CameraX → <strong>Camera2 직접</strong>: 출력 2개(화면 미리보기 + 인코더 입력 표면). 녹화용 표준 구성(TEMPLATE_RECORD)</td></tr>
+  <tr><td>인코딩</td><td>MediaCodec HEVC, 1920×1080 · 30fps · 8Mbps · <strong>키프레임 1초마다</strong>. 키프레임마다 코덱 설정(VPS/SPS/PPS)을 붙여 아무 때나 붙은 수신자도 1초 안에 화면 복원</td></tr>
+  <tr><td>HMD → 폰 규격</td><td>지금 multipart 그대로, 파트 1개 = 프레임 1개(HEVC Annex-B). 헤더 <code>Content-Type: video/hevc</code> · <code>X-Seq</code> · <code>X-Captured-At</code> · <code>X-Key</code>(키프레임 1/0)</td></tr>
+  <tr><td>폰</td><td>압축 풀지 않고 그대로 중계(지금과 같음). FRAME 헤더에 <code>codec:"hevc"</code> · <code>key</code> 추가. 폰 쪽 변경 최소</td></tr>
+  <tr><td>엣지</td><td>PyAV(ffmpeg)로 HEVC 디코딩 → 대시보드용 JPEG(초당 10장) · 녹화(<code>.h265</code> 원본 저장). JPEG 프레임도 계속 받음(코덱 자동 구분)</td></tr>
+  <tr><td>예비</td><td>MJPEG 경로 코드는 남겨 두고 HMD 설정으로 전환 가능 — HEVC 문제 시 즉시 되돌림</td></tr>
+</table>
+
+<h4>변경 범위</h4>
+<table class="col-table">
+  <tr><th style="width:18%">위치</th><th>변경</th></tr>
+  <tr><td>HMD</td><td><code>Camera2Source</code>(신규) · <code>HevcEncoder</code>(신규) · <code>MjpegServer</code> → 범용 프레임 서버(내용 형식만 다름) · MainActivity 모드 전환</td></tr>
+  <tr><td>모바일</td><td><code>MjpegReader</code> 그대로 · <code>Frame</code>/<code>FrameCodec</code> 에 codec·key · 단위 시험</td></tr>
+  <tr><td>엣지</td><td><code>edge/decoder.py</code>(신규, PyAV) · 세션 통계에 해상도·코덱 · 대시보드 표시 · pytest</td></tr>
+</table>
+
+<h4>위험과 대응</h4>
+<table class="col-table">
+  <tr><th style="width:30%">위험</th><th>대응</th></tr>
+  <tr><td>RealWear 구형 카메라 HAL이 2개 출력을 거부</td><td>실장비 첫 확인 항목. 안 되면 미리보기 없이 인코더 출력만(HUD는 불투명 배경) 또는 MJPEG 유지</td></tr>
+  <tr><td>Wi-Fi 대역폭(8Mbps)</td><td>현재 720p JPEG(16Mbps)의 절반 — 여유 있음</td></tr>
+  <tr><td>엣지 PC 디코딩 부하</td><td>대시보드용은 초당 10장만 변환. AI는 이후 필요한 프레임만 디코딩</td></tr>
+</table>
+
+<h4>시험</h4>
+<ul class="checklist">
+  <li>단위: 모바일 FRAME 헤더(codec·key) · 엣지 HEVC 디코딩(시험용 짧은 HEVC 파일)</li>
+  <li>실장비: 1080p 30fps 수신 · 누락 0 · 대시보드 화질 · 폰/엣지 재연결 시 1초 내 화면 복원 · 지연 측정</li>
+</ul>
+</section>
+
+<section id="ai-edge">
+<div class="section-head">
+  <h3>9. 실제 엣지(AI 서버) 연동 — WebRTC</h3>
+  <span class="status confirmed">확정 (2026-10-10) — 1차 구현 중</span>
+</div>
+
+<p><strong>범위:</strong> 우리 역할은 <strong>HMD 영상을 폰을 거쳐 엣지(AI 서버)까지 보내고</strong>, 엣지가 돌려준 판정을 HMD에 표시하는 것까지.
+판정은 엣지가 한다. 엣지 = AI 판정 서버 <code>192.168.1.11</code> (A4 용지 결함 가모델, 담당 백두용). 근거 문서: <code>01.암묵지_모바일개발/A4_WEBRTC_API.md</code>.
+최종 구성은 <strong>HMD → 폰 → AI 서버</strong> (PC 없음).</p>
+
+<h4>경로</h4>
+<pre style="background:#f8fafc;border:1px solid var(--line);border-radius:10px;padding:12px;font-size:12px">HMD 카메라 720p ─MJPEG(HTTP, 지금 그대로)─▶ 폰: JPEG 풀기 → WebRTC 영상 트랙(VP8) ─▶ AI 서버 :8080 (POST /offer)
+                                              ◀── 데이터 채널(JSON): searching · hold · captured · result · alert
+폰 상태기계 ─BLE─▶ HMD 화면 (합격 · 불합격 · 통신불량)</pre>
+
+<h4>결정 (설계서에 없는 부분은 가장 쉬운 방법)</h4>
+<table class="col-table">
+  <tr><th style="width:24%">항목</th><th>결정</th></tr>
+  <tr><td>전송</td><td><strong>WebRTC(:8080)로 바로</strong>. 기존 모의 엣지(WebSocket :8765) 경로는 그대로 두고, 폰 설정에서 <strong>엣지 종류</strong>(모의 엣지 / AI 서버)를 고른다</td></tr>
+  <tr><td>WebRTC 라이브러리</td><td><code>io.getstream:stream-webrtc-android</code> (구글 libwebrtc 빌드) · 소프트웨어 VP8 인코더(EGL 불필요)</td></tr>
+  <tr><td>영상 원천</td><td><strong>HMD는 바꾸지 않음 — MJPEG 1280×720 그대로</strong>. 폰이 JPEG를 풀어(I420) WebRTC 트랙으로 보냄. 초당 최대 10장(서버 hold 간격 0.2초 → 충분), 밀린 프레임은 버림</td></tr>
+  <tr><td>해상도 유지</td><td>WebRTC가 대역폭 부족 시 해상도를 낮추지 않도록 <code>MAINTAIN_RESOLUTION</code> · 최대 비트레이트 6Mbps</td></tr>
+  <tr><td>HMD 화질</td><td>720p로 먼저 실제 A4 시험. <code>too_small</code>만 계속 나오면 그때 HMD 해상도를 올린다(§8 H.265 1080p 재사용 또는 MJPEG 1080p)</td></tr>
+  <tr><td>신호 교환</td><td>데이터 채널을 offer 전에 열고, ICE 수집 완료 후 <code>POST /offer {sdp,type,station_id:"ST-02"}</code> → answer</td></tr>
+  <tr><td>판정 매핑</td><td><code>result.decision</code>: OK → 합격 · NG → 불합격 · <strong>REVIEW → 불합격</strong>(§판정 3가지). 부품 ID = <code>result_id</code>(그대로 저장), 순번(seq)은 폰이 부여</td></tr>
+  <tr><td>지연</td><td><code>captured</code> 수신 시각 → <code>result</code> 수신 시각 (폰 시계)</td></tr>
+  <tr><td>통신불량 · 엣지</td><td>생존 신호가 없으므로 <strong>연결 상태</strong> <code>disconnected/failed/closed</code> → 엣지 통신불량, 5초 주기 새 <code>POST /offer</code>. <code>422·403</code>은 설정 오류(재시도 안 함, 화면에 표시), <code>503</code>·접속 실패는 재시도</td></tr>
+  <tr><td>끊긴 사이 판정</td><td><code>captured</code> 후 <code>result</code> 전에 끊기면 재연결 뒤 <code>GET /results/{id}</code> 1초 간격 조회(done → 판정 반영 / failed → 버림)</td></tr>
+  <tr><td>진행 안내</td><td>1차: 폰 화면(검사·영상 탭)에 서버 상태 표시(종이 없음 · 더 가까이 · 수집 n/10 · 판정 중). HMD 안내 줄은 2차</td></tr>
+  <tr><td>연속 알림</td><td><code>alert</code> → 반장 알림 기록(화면·진동 없음, 앱은 따로 세지 않음)</td></tr>
+  <tr><td>사람 판정 보고</td><td>2차 — <code>POST /results/{id}/decision</code> (트레이 → tray, 시간 초과 → timeout). 1차는 조회 API만</td></tr>
+  <tr><td>연결 설정</td><td>M-01 개발용 설정: 엣지 종류 · AI 서버 주소 <code>http://192.168.1.11:8080</code> · 스테이션 <code>ST-02</code></td></tr>
+</table>
+
+<h4>변경 범위 (1차)</h4>
+<table class="col-table">
+  <tr><th style="width:18%">위치</th><th>변경</th></tr>
+  <tr><td>모바일</td><td><code>ai/AiMessages</code>(메시지 해석, 순수) · <code>ai/AiFlow</code>(메시지 → 상태기계 이벤트·대기 중 result_id, 순수) · <code>ai/AiResultsApi</code>(조회 HTTP) · <code>ai/JpegToI420</code> · <code>ai/AiEdgeLink</code>(WebRTC 연결·재연결) · 서비스 배선 · M-01 설정</td></tr>
+  <tr><td>HMD</td><td>변경 없음</td></tr>
+  <tr><td>모의 AI 엣지</td><td><code>TacitQEdgeServer/edge/ai_mock.py</code>(:8080, aiortc) — 실제 AI 서버와 같은 API, 사내망 밖 시험용</td></tr>
+</table>
+
+<h4>시험</h4>
+<ul class="checklist">
+  <li>단위: 메시지 해석 · OK/NG/REVIEW 매핑 · captured→result 지연 · 끊긴 사이 대기 result_id</li>
+  <li>실장비(사내 Wi-Fi — adb reverse로는 WebRTC 불가): ① 폰 → PC 모의 AI 엣지 ② 폰 → 실제 AI 서버 · A4 비추기 → hold → captured → result → HMD 표시 · 720p에서 too_small 여부</li>
+</ul>
+
+<div class="warn-box"><strong>주의:</strong> 엣지 판정 정확도는 아직 검증 단계(정상 종이도 NG 가능 — API 문서 §9). 이번 목표는 <strong>연동과 상태 흐름 확인</strong>.
+A4는 네 모서리 모두 보이게, 화면을 꽉 채우듯 가까이, 어두운 배경에서.</div>
+</section>
+
+<section id="issues">
+<div class="section-head">
+  <h3>7. 열린 문제 · 결정 필요</h3>
+  <span class="status confirmed">확정</span>
+</div>
+
+<table class="col-table">
+  <tr><th style="width:6%">#</th><th style="width:30%">문제</th><th>제안</th></tr>
+  <tr><td>Q1</td><td>엣지 규격(§3)을 우리가 정해도 되나</td><td>엣지 팀 규격서가 없으니 <strong>이 초안을 기준으로</strong> 진행, 실제 엣지 담당이 생기면 이 문서로 협의</td></tr>
+  <tr><td>Q2</td><td>판정이 HMD 화면까지 안 감</td><td>폰 BLE(C1) 필요 — 이번엔 폰에서 확인하고, <strong>바로 다음 작업으로 C1 BleLink</strong>(HMD 2단계 실장비 검증과 묶음)</td></tr>
+  <tr><td>Q3</td><td>HMD IP 수동 입력</td><td>E1은 M-01 개발용 설정에 입력. C1 후 BLE HELLO로 자동</td></tr>
+  <tr><td>Q4</td><td>PC 방화벽 8765</td><td>최초 시험 때 Windows 방화벽 인바운드 허용 — <strong>사용자가 직접</strong> (명령 안내 제공)</td></tr>
+  <tr><td>Q5</td><td>설계 문서 간 충돌: 프로세스설계 F-F07 "리사이즈·압축" vs 개발가이드 "재압축 금지"</td><td>최신 개발가이드·구조설계서를 따라 <strong>재압축 금지</strong></td></tr>
+</table>
+</section>
+
+
+</main>
+
+<script>
+  document.querySelectorAll('.nav-item').forEach(link => {
+    link.addEventListener('click', e => {
+      e.preventDefault();
+      const id = link.getAttribute('href').slice(1);
+      document.querySelectorAll('section').forEach(s => s.classList.remove('active'));
+      document.querySelectorAll('.nav-item').forEach(a => a.classList.remove('active'));
+      const target = document.getElementById(id);
+      if (target) target.classList.add('active');
+      link.classList.add('active');
+    });
+  });
+  const first = document.querySelector('.nav-item');
+  if (first) first.click();
+</script>
+</body>
+</html>
+

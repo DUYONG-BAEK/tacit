@@ -1,0 +1,975 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>작업일지 — 품질검사지원 App (모바일)</title>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --blue:   #4f7cff;
+      --green:  #2fb57e;
+      --yellow: #e5a63a;
+      --red:    #e45b5b;
+      --purple: #8b6cff;
+      --muted:  #66758c;
+      --line:   #d9e2ef;
+      --bg:     #f5f7fb;
+      --card:   #ffffff;
+      --sidebar-bg: #eef3fa;
+      --text:   #1e293b;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Noto Sans KR', 'Malgun Gothic', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 13px;
+      line-height: 1.7;
+      display: grid;
+      grid-template-columns: 300px 1fr;
+      min-height: 100vh;
+    }
+    .sidebar {
+      background: var(--sidebar-bg);
+      border-right: 1px solid var(--line);
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow-y: auto;
+      padding: 24px 0 40px;
+    }
+    .sidebar-title {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--text);
+      padding: 0 20px 16px;
+      border-bottom: 1px solid var(--line);
+      margin-bottom: 12px;
+    }
+    .sidebar-title span { color: var(--blue); }
+    .nav-item {
+      display: block;
+      padding: 7px 20px 7px 28px;
+      font-size: 12.5px;
+      color: #3a4a5c;
+      text-decoration: none;
+      border-left: 3px solid transparent;
+      transition: all 0.15s;
+    }
+    .nav-item::before {
+      content: "\25CF";
+      font-size: 9px;
+      margin-right: 8px;
+      color: #cbd5e1;
+      vertical-align: middle;
+    }
+    .nav-item.s-plan::before        { color: #60a5fa; }
+    .nav-item.s-wip::before         { color: #1890ff; }
+    .nav-item.s-dev::before         { color: #6366f1; }
+    .nav-item.s-confirmed::before   { color: #52c41a; }
+    .nav-item.s-waiting::before     { color: #fa8c16; }
+    .nav-item.s-in-progress::before { color: #f97316; }
+    .nav-item.s-analysis::before    { color: #a855f7; }
+    .nav-item:hover { background: #dce8f7; border-left-color: var(--blue); color: var(--blue); }
+    .nav-item.active { background: #dce8f7; border-left-color: var(--blue); color: var(--blue); font-weight: 600; }
+    .main {
+      padding: 36px 40px;
+      max-width: 1100px;
+    }
+    .main-title { font-size: 22px; font-weight: 700; color: var(--text); margin-bottom: 6px; }
+    .main-sub { font-size: 12px; color: var(--muted); margin-bottom: 32px; }
+    section {
+      display: none;
+      background: var(--card);
+      border-radius: 22px;
+      box-shadow: 0 14px 36px rgba(20,34,56,0.08);
+      padding: 28px 32px;
+      margin-bottom: 24px;
+    }
+    section.active { display: block; }
+    .section-head {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 20px;
+      padding-bottom: 14px;
+      border-bottom: 1px solid var(--line);
+    }
+    .section-head h3 { font-size: 16px; font-weight: 700; flex: 1; }
+    .date-badge { font-size: 11px; font-weight: 600; color: var(--muted); background: #eef3fa; border-radius: 20px; padding: 3px 10px; white-space: nowrap; }
+    .status { font-size: 11px; font-weight: 700; border-radius: 20px; padding: 3px 10px; white-space: nowrap; }
+    .status.waiting   { background: #f3e8ff; color: #6b21a8; }
+    .status.plan      { background: #dbeafe; color: #1e40af; }
+    .status.review    { background: #fef3c7; color: #92400e; }
+    .status.wip       { background: #cffafe; color: #155e75; }
+    .status.dev       { background: #e0e7ff; color: #3730a3; }
+    .status.confirmed { background: #d1fae5; color: #065f46; }
+    h4 { font-size: 13.5px; font-weight: 700; margin: 18px 0 8px; color: var(--text); }
+    p { margin: 8px 0; }
+    ul, ol { margin: 8px 0 8px 20px; }
+    li { margin: 3px 0; }
+    .col-table { width: 100%; border-collapse: collapse; font-size: 12px; margin: 10px 0; }
+    .col-table th { background: #f1f5fb; padding: 8px 10px; text-align: left; font-weight: 600; color: var(--muted); border-bottom: 2px solid var(--line); }
+    .col-table td { padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; word-break: break-word; }
+    .col-table tr:last-child td { border-bottom: none; }
+    .col-table tr:hover td { background: #f8fafc; }
+    .note-box { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 10px; padding: 12px 16px; color: #1e40af; font-size: 12.5px; margin: 12px 0; }
+    .warn-box { background: #fffbeb; border: 1px solid #fde68a; border-radius: 10px; padding: 12px 16px; color: #92400e; font-size: 12.5px; margin: 12px 0; }
+    .ok-box   { background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 10px; padding: 12px 16px; color: #065f46; font-size: 12.5px; margin: 12px 0; }
+    .checklist { list-style: none; padding: 0; margin-left: 0; }
+    .checklist li { padding: 5px 0; display: flex; align-items: flex-start; gap: 8px; font-size: 13px; }
+    .checklist li::before { content: "\2610"; color: var(--muted); flex-shrink: 0; }
+    .checklist li.done::before { content: "\2611"; color: var(--green); }
+    code { background: #f1f5fb; border: 1px solid var(--line); border-radius: 5px; padding: 1px 6px; font-size: 12px; font-family: 'Consolas', monospace; color: #c0392b; }
+    .divider { border: none; border-top: 1px solid var(--line); margin: 16px 0; }
+    @media (max-width: 900px) { body { grid-template-columns: 1fr; } .sidebar { position: relative; height: auto; } }
+  </style>
+</head>
+<body>
+
+<aside class="sidebar">
+  <div class="sidebar-title"><span>품질검사지원 App</span> 모바일 작업일지</div>
+  <nav id="sidebar-nav">
+    <a class="nav-item s-confirmed" href="#overview">프로젝트 개요 · 역할</a>
+    <a class="nav-item s-confirmed" href="#env-setup">개발 환경 · 첫 구동</a>
+    <a class="nav-item s-confirmed" href="#git-init">버전관리(Git) 구축</a>
+    <a class="nav-item s-plan" href="#next-plan">다음 계획 — 상태 기계</a>
+    <a class="nav-item s-confirmed" href="#state-machine">상태 기계(C3) 구현</a>
+    <a class="nav-item s-confirmed" href="#local-store">C5 LocalStore 구현</a>
+    <a class="nav-item s-confirmed" href="#hmd-renderer">C4 HmdRenderer 구현</a>
+    <a class="nav-item s-confirmed" href="#service-engine">서비스 디스패처 — 부품 연결</a>
+    <a class="nav-item s-confirmed" href="#local-server">로컬 개발 서버 — 6화면 API</a>
+    <a class="nav-item s-confirmed" href="#hmd-app-stage1">HMD 앱 1단계 — 영상 송출</a>
+    <a class="nav-item s-confirmed" href="#hmd-app-stage2">HMD 앱 2단계 — BLE SHOW 수신</a>
+    <a class="nav-item s-confirmed" href="#edge-relay-e1">C2 영상 중계 + 모의 엣지</a>
+    <a class="nav-item s-confirmed" href="#c1-ble-link">C1 BleLink — 폰→HMD 종단 시험</a>
+    <a class="nav-item s-dev" href="#verdict-3cases">판정 단순화 — 3가지 경우</a>
+    <a class="nav-item s-confirmed" href="#e2-hevc">E2 — H.265 1080p 전환</a>
+    <a class="nav-item s-dev" href="#ai-mock">모의 AI 엣지 — WebRTC API 흉내</a>
+    <a class="nav-item s-confirmed" href="#mobile-live-view">폰 앱 영상 모니터링 (M-07)</a>
+    <a class="nav-item s-confirmed" href="#ai-edge-webrtc">실제 AI 서버 연동 (WebRTC)</a>
+    <a class="nav-item s-confirmed" href="#auto-connect">연결 자동화 — 주소 · 앱 실행</a>
+    <a class="nav-item s-confirmed" href="#hmd-screen-1018">현장 피드백 — 화면 전환 · 버튼 · 순서</a>
+  </nav>
+</aside>
+
+<main class="main">
+  <div class="main-title">품질검사지원 App — 모바일 작업일지</div>
+  <div class="main-sub">제조암묵지기반 AI모델개발사업 (RS-2026-25590666) · ㈜스네일 · 대외비 — 외부 공개 금지</div>
+
+  <!-- ── 섹션 슬롯 (build.py가 내용을 삽입) ── -->
+  <section id="overview">
+<div class="section-head">
+  <h3>프로젝트 개요 · 나의 역할</h3>
+  <span class="date-badge">2026-09-18</span>
+  <span class="status confirmed">완료</span>
+</div>
+
+<p><strong>암묵지 품질관리</strong> — 베테랑 검사원(명장)의 설명되지 않는 검사 "감"을,
+작업자가 AI 판정에 <strong>이의를 제기하는 순간</strong>을 포착해 AI에 재학습시켜 물려받는 사업이다.
+프레스 라인에서 작업자가 HMD(스마트글래스)를 쓰고 부품을 돌리면 영상이 촬영되고, AI가 판정하며,
+작업자는 손·목소리 없이 머리 제스처·발·트레이 투입으로만 확인한다.</p>
+
+<h4>전체 시스템 4종</h4>
+<table class="col-table">
+  <tr><th>SW</th><th>역할</th><th>담당</th></tr>
+  <tr><td>① HMD 앱</td><td>촬영 · 화면 10종 렌더 · 제스처 인식</td><td>타 팀</td></tr>
+  <tr><td><strong>② 모바일 앱</strong></td><td><strong>중계 + 판단 + HMD 화면 제어 + 사람 화면 6종</strong></td><td><strong>★ 나</strong></td></tr>
+  <tr><td>③ Edge 서버</td><td>프레임 선별 · 앙상블 · AI 추론</td><td>AI 팀</td></tr>
+  <tr><td>④ 관리자 웹</td><td>조회 · 기준 관리 · 명장 리뷰</td><td>타 팀</td></tr>
+</table>
+
+<h4>나의 역할 — 모바일 앱 (핵심)</h4>
+<p>"화면 6종 만들기"가 아니다. 앱은 두 덩어리이고, <strong>화면 없는 백그라운드 서비스가 코드의 약 75%</strong>다.</p>
+<ul>
+  <li><strong>UI 25%</strong> — 화면 6종(M-01~M-06). 작업자가 하루 ~10분만 본다.</li>
+  <li><strong>서비스 75%</strong> — 영상 무가공 중계, <strong>상태 기계(R01~R20)</strong>로 HMD 화면 원격 제어, 오프라인 큐, 재전송. 주머니 속 8시간 무중단.</li>
+</ul>
+
+<div class="note-box">
+  상세 이해 정리는 <code>01.암묵지_모바일개발\프로젝트_이해_정리.md</code> 참조.
+  설계 원본은 <code>모바일앱_구조설계서.html</code>(상태 기계·메시지 규격), <code>모바일앱_개발가이드.html</code>(구현 순서).
+</div>
+</section>
+  <section id="env-setup">
+<div class="section-head">
+  <h3>개발 환경 구축 · 첫 실기기 구동</h3>
+  <span class="date-badge">2026-09-18</span>
+  <span class="status confirmed">완료</span>
+</div>
+
+<p>Android Studio 설치부터 제공된 골격 소스를 실기기(Galaxy S26 Ultra)에서 구동하기까지 완료.
+README에 "컴파일 검증 안 거침"이라던 소스가 <strong>수정 없이 한 번에 빌드·구동</strong>됐다.</p>
+
+<h4>진행 내역</h4>
+<ul class="checklist">
+  <li class="done">Android Studio 설치 (Quail 2026.1.4) — 사용통계 전송 거부, 병렬 sync 활성화</li>
+  <li class="done">골격 소스 압축 해제 (<code>모바일_TacitQualityMobile_앱소스.zip</code>)</li>
+  <li class="done">Gradle Sync — wrapper 자동 생성됨(<code>gradlew</code> 등)</li>
+  <li class="done">Build → Assemble Project 성공 (1m 14s, BUILD SUCCESSFUL)</li>
+  <li class="done">S26 USB 디버깅 연결·인증 (SM-S948N)</li>
+  <li class="done">앱 설치·구동 — M-01 교대 준비 화면 표시 확인</li>
+</ul>
+
+<h4>발생 이슈 · 해결</h4>
+<table class="col-table">
+  <tr><th>이슈</th><th>원인</th><th>해결</th></tr>
+  <tr>
+    <td>Gradle Sync 실패<br>"non-ASCII characters"</td>
+    <td>경로에 한글 폴더명(<code>01.암묵지_모바일개발</code>) 포함 — 안드로이드 빌드/NDK가 한글 경로에서 실패</td>
+    <td>영문 경로 <code>C:\Projects\keenEye\TacitQualityMobile</code>로 소스 재배치</td>
+  </tr>
+  <tr>
+    <td>기기 <code>unauthorized</code></td>
+    <td>폰에서 USB 디버깅 승인 전</td>
+    <td>폰에서 "이 컴퓨터 항상 허용" → 허용</td>
+  </tr>
+</table>
+
+<div class="ok-box">
+  <strong>결과:</strong> 코드 수정 후 ▶ 한 번으로 S26에서 즉시 확인 가능한 개발 루프 확보.
+  현재 앱은 샘플 데이터로 화면 6종만 도는 상태 (중계 서비스·상태 기계는 미구현 스텁).
+</div>
+
+<h4>구성</h4>
+<table class="col-table">
+  <tr><th>항목</th><th>값</th></tr>
+  <tr><td>AGP / Kotlin</td><td>8.7.3 / 2.0.21</td></tr>
+  <tr><td>compileSdk / minSdk / targetSdk</td><td>35 / 30 / 34</td></tr>
+  <tr><td>UI</td><td>Jetpack Compose (Material3)</td></tr>
+  <tr><td>실기기</td><td>Galaxy S26 Ultra 1TB (SM-S948N)</td></tr>
+</table>
+</section>
+  <section id="git-init">
+<div class="section-head">
+  <h3>버전관리(Git) 로컬 저장소 구축</h3>
+  <span class="date-badge">2026-09-18</span>
+  <span class="status confirmed">완료</span>
+</div>
+
+<p>본격 개발 전, 변경 이력·되돌리기 확보를 위해 로컬 Git 저장소를 초기화.
+대외비 자료이므로 <strong>로컬 전용</strong>으로 관리하며, 공개 원격(GitHub 등)에는 절대 올리지 않는다.</p>
+
+<h4>진행 내역</h4>
+<ul class="checklist">
+  <li class="done"><code>git init -b main</code> — 로컬 저장소 생성</li>
+  <li class="done">최초 커밋 <code>69747cf</code> — 소스 35개</li>
+  <li class="done">빌드 산출물(<code>/build</code>)·서명키(<code>keystore.properties</code>, <code>*.jks</code>) 제외 확인</li>
+</ul>
+
+<div class="warn-box">
+  <strong>백업 주의:</strong> 현재 로컬 전용이라 PC 디스크 장애 시 유실 위험.
+  팀 공유·백업이 필요해지면 <strong>회사 승인된 사내 원격</strong>(사내 GitLab / GitHub Enterprise 등)에만 연결한다.
+  공개 저장소·개인 클라우드는 금지(대외비).
+</div>
+</section>
+  <section id="next-plan">
+<div class="section-head">
+  <h3>다음 계획 — 상태 기계 우선</h3>
+  <span class="date-badge">2026-09-18</span>
+  <span class="status plan">계획</span>
+</div>
+
+<p>개발 환경·버전관리가 준비됐다. 다음은 장비 없이 만들 수 있고 리스크가 가장 큰
+<strong>상태 기계(C3)부터</strong> 착수한다. 개발가이드도 "순서를 지키면 장비 없이 70%가 끝난다"고 명시.</p>
+
+<h4>우선순위</h4>
+<ol>
+  <li><strong>테스트 의존성 추가</strong> — 현재 <code>build.gradle</code>에 JUnit 없음. 상태 기계 단위 시험(V-M05)용으로 추가.</li>
+  <li><strong>상태 기계(C3) 구현</strong> — R01~R20 전이 규칙. 순수 함수(입력 이벤트 + 현재 상태 → 출력)로 분리해 장비 없이 시험 가능하게.</li>
+  <li><strong>단위 시험(V-M05)</strong> — 순서 뒤바뀜(R06)·중복(R07)·지연 회수(R05)·선투입(R08)·타임아웃(R12) 5케이스. "불합격이 합격으로 덮이는 사례 0건" 검증.</li>
+  <li><strong>가짜 Edge/HMD 도구</strong> — 쪽지(JSON)를 손으로 주입하는 PC 도구. HMD·모바일 팀이 서로 안 기다리게.</li>
+</ol>
+
+<h4>장비·타 팀 의존 (나중 통합 단계)</h4>
+<table class="col-table">
+  <tr><th>ID</th><th>안건</th><th>비고</th></tr>
+  <tr><td>V-M01</td><td>Wi-Fi Direct + 사내 Wi-Fi <strong>동시 연결</strong> 실측</td><td>실패 시 앱 구조 변경. 최우선 실기기 확인. S26 최신칩이라 지원 가능성 높음</td></tr>
+  <tr><td>V-M02/03</td><td>발열·배터리 (주머니 2시간)</td><td>S26 플래그십이라 리스크 낮음</td></tr>
+  <tr><td>—</td><td>HMD(RealWear)·Edge 서버 확보</td><td>실제 중계·통합 검증에 필수. 없으면 가짜 도구로만 검증</td></tr>
+</table>
+
+<div class="note-box">
+  현재 미구현 스텁: <code>RelayService.pump()</code>(HMD·Edge 소켓), <code>DualQueue.hmdPending</code>(BLE 상태 수신),
+  M-03 대표 프레임 로드, 교대 마감 화면, 인증(세션·역할 기반 접근).
+</div>
+</section>
+
+  <section id="state-machine">
+<div class="section-head">
+  <h3>상태 기계(C3) 구현 — R01~R20 + 단위 시험 V-M05</h3>
+  <span class="date-badge">2026-09-19</span>
+  <span class="status confirmed">완료</span>
+</div>
+
+<p>장비 없이 만들 수 있고 리스크가 가장 큰 <strong>상태 기계(C3)</strong>를 착수·완료했다.
+설계서 §2 전이 규칙표 R01~R20 을 <strong>순수 Kotlin</strong>(안드로이드 무의존)으로 옮겨,
+노트북에서 전부 시험 가능한 순수 함수 <code>reduce(Event) → (AppState, List&lt;Effect&gt;)</code> 로 구현했다.
+개발가이드의 원칙 그대로 "가장 먼저, 가장 정성껏".</p>
+
+<h4>진행 내역</h4>
+<ul class="checklist">
+  <li class="done"><strong>테스트 의존성 추가</strong> — <code>libs.versions.toml</code> 에 JUnit4 <code>4.13.2</code>,
+      <code>app/build.gradle.kts</code> 에 <code>testImplementation(libs.junit)</code></li>
+  <li class="done"><strong>core 패키지 신설</strong>(<code>kr.co.snail.tacitq.mobile.core</code>) — 6개 파일,
+      <code>import android.</code> 0줄</li>
+  <li class="done"><code>State.kt</code> — Mode(7) · PartPhase(7) · Part · Profile · AppState. 판정 어휘는 코드 정의서 <code>model.Verdict</code> 재사용(단일 정의)</li>
+  <li class="done"><code>Event.kt</code> · <code>Effect.kt</code> — 입력(세션·Edge·HMD·현장·설비) / 출력(ShowScreen·Vibrate·Persist·Enqueue·Timer·NotifyLead), 쪽지 <code>ShowCommand</code>(§3 계약), 저장 <code>InspectionRecord</code></li>
+  <li class="done"><code>StateMachine.kt</code> — R01~R20 전 규칙 구현(주석에 규칙 번호). 판정 분기 R01~R07 은 안전 핵심</li>
+  <li class="done"><code>Screens.kt</code> · <code>Records.kt</code> — 화면 H-01~H-09 공장, 저장 레코드 공장(enum 코드만 사용), 결정적 <code>Sampler</code>(R02)</li>
+  <li class="done"><strong>단위 시험 5건 전부 통과</strong> — <code>gradlew testDebugUnitTest</code> · 실패 0 · 에러 0</li>
+</ul>
+
+<h4>안전 규칙 — "불합격이 합격으로 덮이는 사례 0건"</h4>
+<table class="col-table">
+  <tr><th>규칙</th><th>내용</th><th>없으면 생기는 사고</th></tr>
+  <tr><td><strong>R06</strong></td><td>순서 역전 무시 (seq ≤ lastSeq 폐기)</td><td>오래된 합격이 새 불합격을 덮어 불량품이 양품 트레이로</td></tr>
+  <tr><td><strong>R07</strong></td><td>중복 무시 (멱등 · 처리한 partId 재처리 안 함)</td><td>재전송된 결과가 상태를 두 번 흔듦</td></tr>
+  <tr><td><strong>R05</strong></td><td>지연 판정 + 선투입 → 회수 화면(H-08)</td><td>이미 트레이에 든 불량을 못 잡음</td></tr>
+  <tr><td><strong>R04</strong></td><td>일치율 &lt; 하한이면 REVIEW(신뢰도 높아도)</td><td>프레임 흔들린 오판을 그대로 통과</td></tr>
+  <tr><td><strong>R12</strong></td><td>확인 초과 → TIMEOUT(안전측 유지, 합격으로 안 바뀜)</td><td>미확인 불합격이 합격으로 둔갑</td></tr>
+</table>
+
+<h4>V-M05 단위 시험 결과</h4>
+<table class="col-table">
+  <tr><th>시험</th><th>검증 규칙</th><th>결과</th></tr>
+  <tr><td>오래된 판정은 무시된다</td><td>R06</td><td class="ok">통과</td></tr>
+  <tr><td>중복 판정은 한 번만 처리된다</td><td>R07</td><td class="ok">통과</td></tr>
+  <tr><td>지연된 불합격은 회수 화면을 띄운다</td><td>R05</td><td class="ok">통과</td></tr>
+  <tr><td>일치율이 낮으면 REVIEW 로 간다</td><td>R04</td><td class="ok">통과</td></tr>
+  <tr><td>확인 시간 초과는 안전측으로 남는다</td><td>R12</td><td class="ok">통과</td></tr>
+</table>
+
+<div class="note-box">
+  <strong>설계 준수 확인:</strong> ① core 에 <code>import android.</code> 없음 ·
+  ② <code>reduce()</code> 는 같은 입력 → 같은 출력(Sampler 결정적) ·
+  ③ 설계서 R01~R20 중 코드에 없는 규칙 없음(주석 번호 대조) ·
+  ④ 단위 시험 5건 CI 자동화 가능.
+</div>
+
+<div class="warn-box">
+  <strong>다음:</strong> 가짜 모바일 도구(SHOW 주입 PC 도구)로 HMD 화면 10종 렌더 확인 →
+  이후 C5 LocalStore(강제 종료 후 복구) → C4 HmdRenderer(가짜 HMD로 쪽지 seq·바이트 확인).
+  실장비(HMD·Edge)가 필요한 C1·C2 는 통합 단계에서.
+</div>
+</section>
+
+  <section id="local-store">
+<div class="section-head">
+  <h3>C5 LocalStore 구현 — 로컬 이력 + 전송 큐(Room) · V-M04</h3>
+  <span class="date-badge">2026-09-20</span>
+  <span class="status confirmed">완료</span>
+</div>
+
+<p>조립 순서 3번 <strong>C5 LocalStore</strong>를 착수·완료했다. 검사 이력과 전송 큐를 휴대폰에 남겨,
+서비스가 안드로이드에 의해 언제 종료되어도 재시작 후 이어가게 한다.
+핵심 규칙 하나가 V-M04 "유실 0건"을 만든다: <strong>전송 큐(outbox)는 어떤 이유로도 지우지 않는다.</strong></p>
+
+<h4>진행 내역</h4>
+<ul class="checklist">
+  <li class="done"><strong>의존성 추가</strong> — Room <code>2.6.1</code>(runtime·ktx) + KSP <code>2.0.21-1.0.28</code>(컴파일러),
+      시험용 Robolectric <code>4.14.1</code> · androidx.test.core · coroutines-test</li>
+  <li class="done"><strong>store 패키지 신설</strong>(<code>kr.co.snail.tacitq.mobile.store</code>) — 4개 파일</li>
+  <li class="done"><code>QmsEntities.kt</code> — <code>inspection</code>(이력) · <code>outbox</code>(전송 큐, id 오름차순=FIFO)</li>
+  <li class="done"><code>QmsDao.kt</code> — put·markSynced·pruneSynced(이력만) / push·nextBatch·ack·queueSize(큐)</li>
+  <li class="done"><code>QmsDatabase.kt</code> — Room DB 싱글턴(파일 <code>tacitq.db</code>)</li>
+  <li class="done"><code>LocalStore.kt</code> — 상태 기계 출력(Effect.Persist·Enqueue)을 즉시 영속화하는 파사드.
+      <code>record()</code>는 이력 저장 + 큐 적재를 한 번에("미동기화 이력은 큐와 짝")</li>
+  <li class="done"><strong>V-M04 단위 시험 3건 전부 통과</strong> — Robolectric 으로 실제 Room 을 JVM 에서 검증</li>
+</ul>
+
+<h4>V-M04 단위 시험 결과 (강제 종료 = <code>db.close()</code> 후 같은 파일 재오픈)</h4>
+<table class="col-table">
+  <tr><th>시험</th><th>검증</th><th>결과</th></tr>
+  <tr><td>강제 종료 후 미전송 큐 100건이 그대로 남는다</td><td>완료확인 ①② 유실 0건</td><td class="ok">통과</td></tr>
+  <tr><td>복구 후 큐가 들어온 순서대로 빠진다</td><td>완료확인 ③ FIFO</td><td class="ok">통과</td></tr>
+  <tr><td>용량 정리는 동기화된 이력만 지우고 큐는 유지</td><td>완료확인 ④</td><td class="ok">통과</td></tr>
+</table>
+
+<h4>용량 부족 시 정리 규칙 (설계서 §7)</h4>
+<table class="col-table">
+  <tr><th>대상</th><th>정리?</th><th>이유</th></tr>
+  <tr><td>동기화 끝난 이력</td><td class="ok">가능</td><td>서버에 이미 있다</td></tr>
+  <tr><td><strong>전송 큐(outbox)</strong></td><td>절대 불가</td><td>지우는 순간 그 검사는 세상에서 사라진다</td></tr>
+  <tr><td>미동기화 이력</td><td>불가</td><td>큐와 짝이다</td></tr>
+</table>
+
+<div class="note-box">
+  <strong>설계 준수:</strong> outbox 를 줄이는 유일한 경로는 Edge ACK 후 <code>ack(id)</code> 뿐 ·
+  <code>pruneSynced</code>는 <code>syncedAt IS NOT NULL</code> 이력만 삭제 · 큐는 SQL 어디서도 무조건 삭제하지 않는다.
+</div>
+
+<div class="warn-box">
+  <strong>남은 연결부:</strong> <code>inspectionId</code> 채번(현재 partId 사용) ·
+  상태 기계 Effect → LocalStore 호출 배선(서비스 디스패처) · Edge 송신 시 nextBatch→ack 루프(C2 통합).
+  <strong>다음:</strong> C4 HmdRenderer(ShowCommand → BLE 쪽지, seq·재전송) + 가짜 HMD 도구.
+</div>
+</section>
+
+  <section id="hmd-renderer">
+<div class="section-head">
+  <h3>C4 HmdRenderer 구현 — 결정을 BLE 쪽지로 · 순번·재전송</h3>
+  <span class="date-badge">2026-09-20</span>
+  <span class="status confirmed">완료</span>
+</div>
+
+<p>조립 순서 4번 <strong>C4 HmdRenderer</strong>를 착수·완료했다. 상태 기계가 내린 결정
+(<code>ShowCommand</code>)을 HMD가 알아듣는 0.2~0.4KB BLE "쪽지"로 바꿔 보낸다.
+그림(프레임)은 담지 않고 <code>frame_ref</code> 경로만 싣는다 — 영상은 굵은 선(Wi-Fi)으로 간다.</p>
+
+<h4>설계 판단 — 중복 제거</h4>
+<p>상태 기계(C3)가 이미 <code>core.ShowCommand</code>를 만들므로 C4에서 화면 공장을 다시 만들지 않는다.
+C4는 <strong>seq 부여 · 와이어 직렬화 · 480B 검증 · ACK 대기·재전송</strong>만 담당한다.
+가이드가 ACK 실패 시 <code>EdgeUnreachable</code>를 올리던 부분은 의미상 부적절(HMD 채널 문제)이라
+<code>onAckFailed</code> 콜백으로 분리해 Edge 문제와 섞지 않았다.</p>
+
+<h4>진행 내역</h4>
+<ul class="checklist">
+  <li class="done"><code>core.ShowCommand</code>에 <code>windowId</code> 정식 필드 추가 — 제스처 창 식별자(HMD가 GESTURE로 되돌려 문맥 게이팅)</li>
+  <li class="done"><strong>hmd 패키지 신설</strong>(<code>kr.co.snail.tacitq.mobile.hmd</code>) — 3개 파일</li>
+  <li class="done"><code>ShowWire.kt</code> — 전선 계약 DTO. <code>@SerialName</code>으로 HMD 합의 snake_case 고정
+      (<code>cmd·ttl_ms·gesture_window·window_id</code>) + <code>toWire(seq)</code> 매퍼</li>
+  <li class="done"><code>BleLink.kt</code> — BLE GATT 쓰기 포트(인터페이스). 장비 없이 가짜로 갈아끼워 시험</li>
+  <li class="done"><code>HmdRenderer.kt</code> — seq 단조 증가 · 480B 검증 · ACK 200ms 대기 → 1회만 재전송(같은 seq=HMD 멱등) → 실패 콜백</li>
+  <li class="done"><strong>단위 시험 4건 전부 통과</strong> — coroutines-test 가상 시간으로 ACK 지연을 즉시 흘려보냄</li>
+</ul>
+
+<h4>단위 시험 결과</h4>
+<table class="col-table">
+  <tr><th>시험</th><th>검증</th><th>결과</th></tr>
+  <tr><td>모든 SHOW는 480바이트 이하이고 seq는 단조 증가</td><td>완료확인 ①② (1패킷·역전 방지)</td><td class="ok">통과</td></tr>
+  <tr><td>ACK 정상이면 한 번만 보낸다</td><td>재전송 절제</td><td class="ok">통과</td></tr>
+  <tr><td>ACK 없으면 두 번 보내고 실패를 알린다</td><td>완료확인 ③ (200ms×2 후 실패)</td><td class="ok">통과</td></tr>
+  <tr><td>와이어 JSON은 계약 필드명을 쓴다</td><td>HMD 팀 계약 (snake_case)</td><td class="ok">통과</td></tr>
+</table>
+
+<div class="note-box">
+  <strong>왜 재전송을 딱 1회만:</strong> 계속 재전송하면 오래된 화면 지시가 뒤늦게 도착해 새 화면을 덮는다.
+  HMD 쪽 seq 검사가 막아주지만 애초에 안 만드는 편이 낫다.
+</div>
+
+<div class="warn-box">
+  <strong>누적 검증:</strong> C3(5) + C4(4) + C5(3) = <strong>단위 시험 12건 전부 통과</strong>(장비 없이 노트북).
+  <strong>다음:</strong> 가짜 HMD 도구(SHOW 손 주입 → HMD 화면 10종 병렬 개발) ·
+  서비스 디스패처(상태 기계 Effect → HmdRenderer·LocalStore 배선). 실장비 필요한 C1·C2는 통합 단계.
+</div>
+</section>
+
+  <section id="service-engine">
+<div class="section-head">
+  <h3>서비스 디스패처 — 이벤트를 한 줄로 세워 C3·C4·C5를 잇다</h3>
+  <span class="date-badge">2026-09-20</span>
+  <span class="status confirmed">완료</span>
+</div>
+
+<p>부품(C3·C4·C5)이 처음으로 <strong>한 줄로 연결</strong>됐다. 개발가이드 §2 "이벤트를 한 줄로 세운다".
+BLE 제스처·Edge 판정·트레이 센서·타이머는 서로 다른 스레드에서 초당 수 건씩 들어온다.
+락으로 막으면 교착, 안 막으면 경쟁 상태 — 해법은 락이 아니라 <strong>줄 세우기</strong>다.
+모든 입력을 <code>Channel&lt;Event&gt;</code> 하나로 모아 단일 스레드에서 하나씩 꺼내 상태 기계에 넣는다.</p>
+
+<h4>설계 판단 — 가이드보다 개선</h4>
+<p>가이드는 <code>Persist</code>/<code>Enqueue</code>를 <code>ioScope.launch</code>로 던진다. 그러면 outbox 삽입 순서가
+뒤섞여 C5의 "순서가 생명이다" 불변식이 깨진다. 그래서 <strong>느린 것(ShowScreen의 ACK 대기·StartTimer의 delay)만
+별도 스코프로 던지고, 영속화(Persist·Enqueue·NotifyLead)는 상태 루프 안에서 순차로 await</strong>하게 했다.
+outbox 순서 = 이벤트 처리 순서.</p>
+<p>또 <strong>순수 엔진 / 안드로이드 호스트를 분리</strong>했다 — 로직은 android 무의존 <code>InspectionEngine</code>에,
+포그라운드·잠금·알림·실물 주입은 <code>InspectionService</code>에. 덕분에 동시성·순서를 노트북에서 검증할 수 있다.</p>
+
+<h4>진행 내역</h4>
+<ul class="checklist">
+  <li class="done"><code>service/EffectSinks.kt</code> — 상태 기계 출력이 나가는 바깥 경계(인터페이스). 시험은 가짜로 갈아끼움</li>
+  <li class="done"><code>service/InspectionEngine.kt</code> — 심장. Channel + 단일 스레드 루프 + 이펙트 분배 + 타이머 왕복 (android 무의존)</li>
+  <li class="done"><code>service/InspectionService.kt</code> — LifecycleService 호스트. 포그라운드·WakeLock·WifiLock·알림 문구 갱신, 실물(LocalStore·HmdRenderer·진동) 주입</li>
+  <li class="done">AndroidManifest 에 <code>InspectionService</code> 등록(<code>foregroundServiceType=connectedDevice</code>)</li>
+  <li class="done"><strong>엔진 단위 시험 5건 전부 통과</strong> — 실제 멀티스레드로 검증</li>
+</ul>
+
+<h4>엔진 단위 시험 결과</h4>
+<table class="col-table">
+  <tr><th>시험</th><th>검증</th><th>결과</th></tr>
+  <tr><td>여러 스레드 8개에서 1000건을 밀어넣어도 유실 없이 모두 처리</td><td>완료확인 ② (경쟁 상태 없음)</td><td class="ok">통과</td></tr>
+  <tr><td>이벤트는 보낸 순서대로 처리된다</td><td>완료확인 ① (FIFO·단일 소비자)</td><td class="ok">통과</td></tr>
+  <tr><td>PASS 는 자동 통과로 저장되고 H-02 를 띄운다</td><td>C3→C5·C4 배선</td><td class="ok">통과</td></tr>
+  <tr><td>확인 시간 초과가 엔진을 거쳐 TIMEOUT 으로 남는다</td><td>타이머 왕복 R12</td><td class="ok">통과</td></tr>
+  <tr><td>트레이 투입이 먼저 오면 TIMEOUT 없이 확인된다</td><td>CancelTimer R08</td><td class="ok">통과</td></tr>
+</table>
+
+<div class="note-box">
+  <strong>누적 검증:</strong> C3(5) + C4(4) + <strong>엔진(5)</strong> + C5(3) = <strong>단위 시험 17건 전부 통과</strong>(장비 없이 노트북).
+  이제 부품이 아니라 <strong>하나의 흐름</strong>으로 돈다: 입력 → 줄 세우기 → 상태 기계 → (화면·저장·진동·타이머).
+</div>
+
+<div class="warn-box">
+  <strong>C1/C2 대기 지점:</strong> <code>InspectionService</code>의 BLE 는 자리표시자(<code>placeholderBle</code>, 로그만).
+  ConnectionManager(C1)·StreamRelay(C2)가 실물 BLE·Wi-Fi Direct·Edge 소켓을 제공하면 교체하고 이 서비스에서 start 한다.
+  AppState 스냅샷 복원(콜드 스타트 시 마지막 상태 이어받기)도 남은 과제.
+  <strong>다음:</strong> 가짜 HMD 도구(HMD팀 병렬 개발) 또는 C1 ConnectionManager(실장비 필요).
+</div>
+</section>
+
+  <section id="local-server">
+<div class="section-head">
+  <h3>로컬 개발 서버 — 6화면 데이터 API (Ktor + PostgreSQL)</h3>
+  <span class="date-badge">2026-09-20</span>
+  <span class="status confirmed">완료</span>
+</div>
+
+<p>모바일 화면 6종(M-01~M-06)이 <code>InMemory</code> 샘플에서 벗어나 <strong>실제 HTTP + DB</strong>로
+개발할 수 있도록, 별도 프로젝트 <code>TacitQMockServer</code>에 개발용 모의 백엔드를 세웠다.
+운영 서버(타 팀·05 엑셀 관계형 스키마)가 준비되면 대체되는 <strong>개발 언블록용</strong> 도구다.</p>
+
+<h4>설계 판단 — 앱 모델을 복사해 계약 일치</h4>
+<p>앱의 <code>model/Codes.kt</code>·<code>Entities.kt</code>·<code>data/SampleData.kt</code>가 전부
+<strong>순수 Kotlin</strong>(안드로이드 무의존)인 점을 활용해 서버로 그대로 복사했다.
+서버가 내려주는 JSON이 앱의 데이터 클래스와 <strong>100% 일치</strong>하므로, 나중에 모바일 Retrofit
+계약이 정확히 맞아떨어진다. 운영 관계형 스키마(05)는 타 팀 소유라, 여기서는 컬럼 400개 DDL 없이
+<strong>PostgreSQL JSONB 문서 저장</strong>으로 계약만 맞춘다.</p>
+
+<h4>진행 내역</h4>
+<ul class="checklist">
+  <li class="done"><strong>프로젝트 골격</strong> — Ktor(Kotlin) + PostgreSQL(Docker) · <code>docker-compose.yml</code></li>
+  <li class="done"><strong>앱 모델 3파일 복사</strong> — Codes·Entities·SampleData (순수 Kotlin이라 그대로 재사용)</li>
+  <li class="done"><code>Db.kt</code> — PostgreSQL(JSONB) <code>entity(collection,doc_id,data)</code> 시드·조회 (멱등 upsert)</li>
+  <li class="done"><code>Application.kt</code> — Ktor 라우팅. 컬렉션 11종 + <code>/api/users/me</code> + <code>/health</code></li>
+  <li class="done"><strong>Docker PostgreSQL 기동 → 서버 :8081 → 실데이터 검증 완료</strong></li>
+</ul>
+
+<h4>검증 결과 (라이브 서버 실제 응답)</h4>
+<table class="col-table">
+  <tr><th>엔드포인트</th><th>결과</th><th>화면</th></tr>
+  <tr><td><code>/api/inspections</code></td><td class="ok">5건</td><td>M-05 검사 이력</td></tr>
+  <tr><td><code>/api/trays</code></td><td class="ok">6건</td><td>M-03·M-04</td></tr>
+  <tr><td><code>/api/defect-items</code></td><td class="ok">74건 (23+31+12+8)</td><td>M-04 재고</td></tr>
+  <tr><td><code>/api/shift-checks</code></td><td class="ok">6항목</td><td>M-01 점검</td></tr>
+  <tr><td><code>/api/users/me</code></td><td class="ok">길○○ WORKER</td><td>공통</td></tr>
+  <tr><td><code>/api/nope</code></td><td class="ok">404 + available 목록</td><td>검증</td></tr>
+</table>
+
+<div class="note-box">
+  <strong>실행:</strong> <code>docker compose up -d</code> → <code>gradlew run</code> ·
+  서버 :8081 / DB :5432 · JSON은 앱 <code>Inspection</code> 등 모델과 필드 단위로 일치.
+</div>
+
+<div class="warn-box">
+  <strong>다음:</strong> ① 쓰기(POST) 엔드포인트(M-02 조치·M-03 등록·M-04 승인) ·
+  ② 모바일 <code>RemoteQualityRepository</code>(Retrofit) 배선 — <code>QualityRepository</code> 인터페이스만
+  갈아끼우면 UI는 그대로. 지금은 화면이 여전히 <code>InMemory</code>를 쓴다.
+</div>
+</section>
+
+  <section id="hmd-app-stage1">
+<div class="section-head">
+  <h3>HMD 앱 착수 — 1단계: 카메라 → 폰 영상 송출</h3>
+  <span class="date-badge">2026-10-01</span>
+  <span class="status confirmed">완료</span>
+</div>
+
+<p>설계서 <strong>① HMD 앱</strong>(촬영·송출)은 원래 "타 팀" 몫이었으나 <strong>담당자가 없어</strong>,
+모바일 팀이 함께 개발하기로 했다. 새 프로젝트 <code>TacitQualityHmd</code>(안드로이드/Kotlin·CameraX)를
+만들고, 가장 먼저 <strong>"HMD 카메라 영상이 폰으로 전송되는지"</strong>를 실제 코드로 구현·검증했다.</p>
+
+<h4>왜 우리가 만드나</h4>
+<p>HMD 앱이 없으면 영상을 찍어 보낼 주체가 없어 검사 루프가 돌지 않는다. 같은 안드로이드/Kotlin이고,
+쪽지 규격(§3)·화면 명세(H-01~09)가 이미 확정돼 있어 상대편(모바일 <code>HmdRenderer</code>·<code>ShowWire</code>)과
+짝으로 개발 가능하다. "버리는 데모"가 아니라 <strong>진짜 제품의 첫 조각</strong>이다.</p>
+
+<h4>진행 내역 (1단계)</h4>
+<ul class="checklist">
+  <li class="done">새 프로젝트 <code>TacitQualityHmd</code> 골격 (CameraX · minSdk 29)</li>
+  <li class="done"><code>MainActivity.kt</code> — CameraX 기동, 프레임 → JPEG, 서버 기동, 접속 주소 표시</li>
+  <li class="done"><code>MjpegServer.kt</code> — 외부 라이브러리 없는 <code>multipart/x-mixed-replace</code> MJPEG 서버(:8080)</li>
+  <li class="done"><code>YuvToJpeg.kt</code> — YUV_420_888 → NV21 → JPEG 변환</li>
+  <li class="done"><strong>실장비 검증 성공</strong> — HMD 카메라 영상이 폰 브라우저(<code>http://&lt;HMD-IP&gt;:8080</code>)에서 실시간 표시 (~14fps)</li>
+</ul>
+
+<h4>★ RealWear 520 카메라 함정 (해결)</h4>
+<p>구형(legacy) 카메라 HAL이라 CameraX가 까다로웠다. 카메라가 안 켜지던 원인과 해결:</p>
+<table class="col-table">
+  <tr><th>증상</th><th>원인</th><th>해결</th></tr>
+  <tr><td>ImageAnalysis 단독 → 카메라 안 열림</td><td>구형 HAL은 Preview 표면 필요</td><td>Preview 함께 바인딩</td></tr>
+  <tr><td>Preview 붙여도 프레임 0</td><td>SurfaceView 표면이 RealWear에서 생성 안 됨</td><td><code>TextureView(COMPATIBLE)</code> 모드</td></tr>
+  <tr><td>그래도 0 → 갑자기 켜짐</td><td>화면이 실제 렌더링돼야 카메라 시작</td><td>디스플레이 깨어나니 동작</td></tr>
+</table>
+<p>구글 이슈트래커 295633027(520 ImageAnalysis 문제)와 동일 증상. <code>Preview(TextureView) + ImageAnalysis</code> 조합으로 해결.</p>
+
+<div class="note-box">
+  <strong>검증 경로:</strong> HMD·폰을 <strong>폰 핫스팟</strong> 같은 망에 두고, 폰 브라우저로 HMD IP:8080 접속.
+  MJPEG라 앱 없이 브라우저로 바로 영상이 보인다.
+</div>
+
+<div class="warn-box">
+  <strong>다음:</strong> 2단계 — BLE로 판정 쪽지(SHOW) 수신 → HMD 화면 표시(모바일 규격과 짝) ·
+  3단계 — 제스처·heartbeat·재연결 · 영상 H.265 저지연 전환.
+  별도 저장소 <code>TacitQualityHmd</code>(git + gdrive 백업).
+</div>
+</section>
+
+  <section id="hmd-app-stage2">
+<div class="section-head">
+  <h3>HMD 앱 2단계 — BLE로 SHOW 쪽지 수신 → HUD 화면 표시</h3>
+  <span class="date-badge">2026-10-02</span>
+  <span class="status confirmed">완료 · 실장비 검증</span>
+</div>
+
+<p>1단계(영상 송출)에 이어, 모바일이 BLE로 보내는 <strong>SHOW 쪽지</strong>를 HMD가 받아
+<strong>H-01~H-09 화면</strong>으로 그리고 <strong>ACK</strong>를 돌려주는 부분을 만든다.
+상대편은 모바일 <code>HmdRenderer</code>·<code>ShowWire</code>(C4, 단위시험 완료)이다.</p>
+
+<h4>설계 판단</h4>
+<table class="col-table">
+  <tr><th>항목</th><th>결정</th><th>근거</th></tr>
+  <tr><td>BLE 역할</td><td><strong>HMD = GATT 서버(광고)</strong>, 모바일 = 클라이언트</td><td>개발가이드 <code>ble.connect(HMD_MAC)</code></td></tr>
+  <tr><td>UUID</td><td>설계서에 없음 → <strong>우리가 정의</strong>, 서비스 1 + 특성 2(DOWN=write, UP=notify)</td><td>양쪽 앱이 같은 상수 공유</td></tr>
+  <tr><td>seq</td><td>마지막 그린 seq보다 작으면 무시, <strong>같으면 ACK만</strong>(재전송 멱등)</td><td>구조설계서 §3</td></tr>
+  <tr><td>ACK</td><td><code>{"type":"ACK","seq":N,"rendered_at":ms}</code> notify</td><td>§3 메시지 목록 (HMD→M은 <code>type</code> 키)</td></tr>
+  <tr><td>ttl_ms</td><td>&gt;0 이면 시간 후 H-01 대기 화면으로 복귀</td><td>H-02 합격 1.5초 소거</td></tr>
+  <tr><td>H-09</td><td>쪽지/PING <strong>3초 무소식</strong> 시 HMD가 스스로 표시</td><td>R16 · V-M04</td></tr>
+  <tr><td>화면 방식</td><td>공통 HUD 틀 1개(상단줄·큰 글씨·본문·키 안내·배경색) + 화면별 매핑</td><td>프로토타입 10화면 구조 동일, 기존 View 방식 유지</td></tr>
+</table>
+
+<h4>진행 내역</h4>
+<ul class="checklist">
+  <li class="done"><code>protocol/Wire.kt</code> — <code>ShowWire</code>(모바일과 동일 필드) · <code>AckWire</code> · <code>BleUuids</code> · 깨진 쪽지는 예외 없이 무시</li>
+  <li class="done"><code>hud/ShowGate.kt</code> — seq 검사(작으면 무시·같으면 ACK만) · <strong>새 연결 시 seq 초기화</strong>(재시작한 모바일은 1부터 셈) · 3초 무소식</li>
+  <li class="done"><code>hud/Screens.kt</code> — H-01~H-09(+H-1b·H-04 카운트다운) → 공통 HUD 틀, 프로토타입 색·문구</li>
+  <li class="done"><code>hud/HudController.kt</code> — 쪽지 → 화면 · ACK · ttl 소거 · H-09 자체 표시</li>
+  <li class="done"><code>link/BleServer.kt</code> — GATT 서버 + 광고(UUID), 긴 쓰기 조립, CCCD notify, 끊기면 재광고</li>
+  <li class="done">디버그 주입 — <code>am broadcast -a kr.co.snail.tacitq.hmd.SHOW --es b64 …</code></li>
+  <li class="done"><strong>단위 시험 8건 전부 통과</strong> · 디버그 APK 빌드 성공 (v0.2.0)</li>
+  <li class="done">실장비 검증 (2026-10-05) — RealWear 520 BLE 광고 지원 확인, 폰 C1 과 연결해 H-01~H-09 표시·ACK 4~11ms (C1 섹션)</li>
+</ul>
+
+<h4>BLE 주소 (HMD 정의 — 모바일 C1도 같은 값)</h4>
+<table class="col-table">
+  <tr><th>이름</th><th>UUID</th><th>용도</th></tr>
+  <tr><td>SERVICE</td><td><code>9e7a1000-3c5b-4f0e-8d21-5a7c0d4e6b01</code></td><td>광고</td></tr>
+  <tr><td>DOWN</td><td><code>9e7a1001-…</code></td><td>모바일→HMD SHOW·PING (write)</td></tr>
+  <tr><td>UP</td><td><code>9e7a1002-…</code></td><td>HMD→모바일 ACK (notify)</td></tr>
+</table>
+
+<div class="note-box">
+  <strong>H-09 오탐 방지:</strong> 모바일 PING(1초)이 아직 없어서, PING을 한 번이라도 받은 뒤에만 "PING 3초 끊김"을 감시한다.
+  BLE 연결 끊김은 바로 3초 감시. <strong>확인 필요:</strong> RealWear 520이 BLE 광고(주변기기 모드)를 지원하는지 — 미지원이면 상태줄에 "BLE 광고 미지원".
+</div>
+
+<div class="warn-box">
+  <strong>범위 밖:</strong> 모바일 쪽 실제 <code>BleLink</code> 구현(C1)은 다음 단계. 제스처(GESTURE)·HEARTBEAT·OVERLAY는 3단계.
+</div>
+</section>
+
+  <section id="edge-relay-e1">
+<div class="section-head">
+  <h3>C2 StreamRelay + 모의 엣지 — HMD 영상 → 폰 → 로컬 PC 엣지 (E1)</h3>
+  <span class="date-badge">2026-10-02</span>
+  <span class="status confirmed">완료 · 실장비 검증</span>
+</div>
+
+<p>HMD 영상을 폰이 받아 <strong>엣지 서버로 실시간 중계</strong>하고, 엣지 판정을 상태기계(C3)로 되돌리는 길을 만들었다.
+엣지는 개발자 PC에서 도는 <strong>모의 서버(Python)</strong>로 시험한다. 설계서: <code>doc/design/TacitQualityMobile_설계서.html</code>
+(미정 사항은 "가장 쉬운 방법"으로 확정).</p>
+
+<h4>결정</h4>
+<table class="col-table">
+  <tr><th style="width:24%">항목</th><th>결정</th></tr>
+  <tr><td>영상 형식</td><td>E1 = HMD <strong>MJPEG</strong>(JPEG 연속, 실시간) 그대로 중계 — 재압축 없음. E2에서 H.265 + WebRTC</td></tr>
+  <tr><td>폰 → 엣지</td><td><strong>WebSocket</strong> <code>ws://&lt;PC&gt;:8765/v1/stream</code> — FRAME 바이너리([길이][헤더 JSON][JPEG]) + HELLO</td></tr>
+  <tr><td>엣지 → 폰</td><td>HB(1초) · JUDGE · PATTERN (JSON) — 엣지 규격서 부재로 우리가 초안 확정</td></tr>
+  <tr><td>지연(R05)</td><td>시계 맞추기 없이 <strong>폰 시계만</strong>: 판정의 마지막 프레임 수신 시각 → 판정 도착</td></tr>
+  <tr><td>FGS 타입</td><td><code>connectedDevice</code> 유지 — <code>dataSync</code>는 Android 15에서 하루 6시간 제한이라 8시간 교대에 부적합</td></tr>
+</table>
+
+<h4>진행 내역</h4>
+<ul class="checklist">
+  <li class="done"><strong>HMD</strong> <code>MjpegServer</code> — 새 프레임마다 1회만 송신(기존: 66ms 고정 재송신 → 중복·누락), <code>X-Seq</code>·<code>X-Captured-At</code> 헤더</li>
+  <li class="done"><strong>모바일</strong> <code>relay/</code> — <code>MjpegReader</code> · <code>HmdVideoSource</code> · <code>Frame</code>/<code>FrameCodec</code> · <code>Transport</code>/<code>WebSocketTransport</code>(OkHttp) · <code>EdgeMessages</code> · <code>StreamRelay</code></li>
+  <li class="done"><code>StreamRelay</code> — 큐 900장/64MB · 90% Overflow 알림 · 가득 차면 버리되 순번 소비(엣지가 누락으로 셈) · HB 3초 무소식 → EdgeUnreachable · 5초 고정 재연결 → EdgeRecovered · 쌓인 프레임 순서대로</li>
+  <li class="done"><code>InspectionService</code> — 교대 시작/마감(<code>ShiftStarted</code>·<code>ShiftClosed</code>) + 중계 실행. M-01 "검사 시작"이 이 서비스를 켠다 + 개발용 연결 설정(HMD·엣지 주소)·중계 상태 한 줄</li>
+  <li class="done">빈 껍데기 <code>RelayService</code>·<code>DualQueue</code>(가장 오래된 것 몰래 버림 — 가이드 위반) 삭제. 평문 통신 허용(개발 단계)</li>
+  <li class="done"><strong>엣지</strong> 새 프로젝트 <code>TacitQEdgeServer</code> — aiohttp, 대시보드(실시간 영상·fps·누락·판정 버튼), 가짜 판정기, 가짜 폰 도구</li>
+  <li class="done"><strong>T1</strong> 엣지 pytest 10건 통과 · <strong>T2</strong> 모바일 단위시험 24건 통과(신규 7) · <strong>T3</strong> 가짜 폰 → 엣지: 13.5fps · 누락 0 · 판정 10건 회신</li>
+  <li class="done"><strong>T4</strong> 실장비 HMD→폰→PC 30fps·누락 0 · <strong>T5</strong> 판정→상태기계(R03)·진동 · <strong>T6</strong> 엣지 끊김 즉시 감지·8초 내 복구·누락 0 · <strong>T7</strong> 판정 지연 15~70ms (2026-10-05, C1 섹션 참고)</li>
+</ul>
+
+<div class="note-box">
+  <strong>시험 중 발견·수정:</strong> 같은 세션에서 폰 순번이 1부터 다시 시작하면(앱 재시작) 엣지 판정 구간이 꼬임 → 역행 감지 시 구간 초기화.
+</div>
+
+<div class="warn-box">
+  <strong>실장비 시험 준비:</strong> ① PC 방화벽 TCP 8765 인바운드 허용(사용자) ② 세 장비 같은 망 ③ M-01에 HMD·엣지 주소 입력 (현재 PC IP <code>192.168.1.23</code>).
+  <strong>다음:</strong> T4~T7 → C1 BleLink(판정이 HMD 화면까지).
+</div>
+</section>
+
+  <section id="c1-ble-link">
+<div class="section-head">
+  <h3>C1 BleLink — 폰 → HMD 화면 지시(BLE) · 실장비 종단 시험</h3>
+  <span class="date-badge">2026-10-05</span>
+  <span class="status confirmed">완료</span>
+</div>
+
+<p>엣지 판정 → 폰 상태기계 → <strong>BLE → HMD 화면</strong>까지 처음으로 끝까지 이어졌다.
+상태기계가 만든 SHOW 쪽지가 이제 실제 BLE GATT 로 HMD 에 가고, HMD 는 그려서 ACK 를 돌려준다.</p>
+
+<h4>구현</h4>
+<table class="col-table">
+  <tr><th style="width:24%">항목</th><th>내용</th></tr>
+  <tr><td><code>hmd/GattBleLink.kt</code></td><td>서비스 UUID <code>9e7a1000-…</code> 스캔 → 처음 보이는 HMD 연결 → MTU 512(실측 517) → UP notify → 준비. DOWN write(응답 있음, 한 번에 하나). ACK → <code>HmdRenderer.onAck</code>. 1초 PING. 끊기면 5초 재스캔. 연결 준비 15초 초과 시 재시도</td></tr>
+  <tr><td><code>InspectionService</code></td><td>자리표시자 BLE 제거 → <code>GattBleLink</code>. 연결되면 현재 화면 재전송. <strong>ACK 실패 시 BLE 재설정</strong>. 교대 마감은 대기 화면을 보낸 뒤 0.5초 후 끊기</td></tr>
+  <tr><td>M-01</td><td>검사 시작 시 블루투스 권한 요청, 상태줄에 "화면 HMD 연결됨"</td></tr>
+  <tr><td>진동</td><td>미디어 → <strong>경보(ALARM)</strong> 용도 — 미디어 진동 세기에 묶이지 않게</td></tr>
+  <tr><td>HMD</td><td><strong>화면 켜짐 유지</strong>(매니페스트 <code>keepScreenOn</code> 은 효과 없음 → Window 플래그) · <strong>OVERLAY 띠</strong>(서버 지연) · 구독 기록 없어도 ACK 송신 · 정상 마감 후 끊김은 H-09 대신 대기 화면</td></tr>
+  <tr><td>모의 엣지</td><td>대시보드 <strong>[▣ 확인(트레이 투입)]</strong> → <code>{"type":"TRAY"}</code> → 폰 <code>TrayDetected</code>(R08) — 트레이 센서 대역</td></tr>
+</table>
+
+<h4>실장비 시험 (2026-10-05, 키즈카페 — USB 경로: adb forward/reverse)</h4>
+<table class="col-table">
+  <tr><th style="width:6%">#</th><th style="width:26%">시험</th><th>결과</th></tr>
+  <tr><td>1</td><td>BLE 연결</td><td class="ok">스캔 0.2초 · 준비 1.3초 · H-01 조준 화면 ACK</td></tr>
+  <tr><td>2</td><td>불합격 → 확인</td><td class="ok">"✕ 불합격 · Major" + 진동 3회 → [확인] 시 조준 화면 복귀, 완료 수 0→1</td></tr>
+  <tr><td>3</td><td>합격</td><td class="ok">"✓ 합격" → 1.5초 후 대기 화면</td></tr>
+  <tr><td>4</td><td>REVIEW</td><td class="ok">"? 확인 요청" + 진동 2회</td></tr>
+  <tr><td>5</td><td>연속불량</td><td class="ok">"⚠ 연속 불량" + [정지 요청]/[계속]</td></tr>
+  <tr><td>6</td><td>폰 끊김</td><td class="ok">BLE 끊김 3.3초 후 HMD 스스로 H-09 "수동 판정" · 정상 마감 시엔 "교대 마감 · 연결 대기"</td></tr>
+  <tr><td>7</td><td>엣지 끊김·복구 (T6)</td><td class="ok">즉시 감지 → HMD "⚠ 서버 지연" 띠 → 재기동 8초 후 자동 재연결 · 쌓인 프레임 누락 0</td></tr>
+  <tr><td>-</td><td>지연</td><td class="ok">BLE 화면 지시 4~11ms(ACK 포함) · 엣지 판정 지연 15~70ms(모의)</td></tr>
+</table>
+
+<div class="note-box">
+  <strong>시험 중 발견·수정:</strong> ① HMD 화면 자동 꺼짐 → 카메라 정지(영상 끊김) ② HMD 앱만 재시작되면 ACK 가 막혀 폰이 OFFLINE 판단
+  ③ OVERLAY 가 "알 수 없는 화면"으로 판정 화면을 덮음 ④ 정상 마감인데 HMD 가 장애(H-09) 표시 — 모두 수정·재시험 통과.
+</div>
+
+<div class="warn-box">
+  <strong>참고:</strong> 이 망(키즈카페 Wi-Fi)은 기기 간 통신 차단(AP 격리) → USB 경로로 시험. 집·사무실은 주소만 바꾸면 무선.
+  화면 가운데 "마이크를 재활성화…"는 RealWear 시스템 안내(작업 버튼으로 해제). 어두운 곳에선 카메라 fps 30→10 으로 떨어짐(자동 노출).
+  <strong>다음:</strong> 제스처(끄덕/젓기) · HMD 주소 BLE 자동 전달(HELLO) · Wi-Fi Direct.
+</div>
+</section>
+
+  <section id="verdict-3cases">
+<div class="section-head">
+  <h3>판정 단순화 — 합격 · 불합격 · 통신불량(엣지/모바일) 3가지</h3>
+  <span class="date-badge">2026-10-07</span>
+  <span class="status confirmed">완료 · 실장비 재확인 대기</span>
+</div>
+
+<p><strong>원칙:</strong> 합격·불합격은 AI(엣지)가 판단하고, 폰은 <strong>받은 결과를 그대로</strong> HMD에 표시한다.
+폰이 자체 기준으로 판정을 바꾸는 규칙은 제거. AI 결과가 합격·불합격 외의 값(REVIEW 등)이면 <strong>불합격</strong>으로 표시(애매하면 불합격).</p>
+
+<h4>변경 계획</h4>
+<table class="col-table">
+  <tr><th style="width:30%">기존 규칙</th><th>변경</th></tr>
+  <tr><td>R04 일치율 미달·REVIEW → 확인 요청(H-04)</td><td>삭제 — REVIEW·기타 값은 불합격(H-03)</td></tr>
+  <tr><td>R02 합격 무작위 표본 확인</td><td>삭제 — 합격은 1.5초 후 자동 소거(R01)</td></tr>
+  <tr><td>R05 늦은 판정 → 회수 화면(H-08)</td><td>삭제 — 판정 결과 그대로 표시</td></tr>
+  <tr><td>R13 연속 불량 → 경고 화면(H-06)·진동</td><td>화면·진동 없음, 반장 알림 기록만</td></tr>
+  <tr><td>R06·R07 순서 역전·중복 차단</td><td>유지 (판정이 아닌 안전장치)</td></tr>
+  <tr><td>통신불량 · 엣지 / 모바일</td><td>유지 — 서버 지연 띠 / HMD 수동 판정(H-09)</td></tr>
+</table>
+
+<ul class="checklist">
+  <li class="done">모바일 <code>StateMachine.onJudge</code> 단순화 — 단위 시험 25건 통과(신규 3: AI 결과 그대로 · 애매→불합격 · 연속 불량 화면 없음)</li>
+  <li class="done">모의 엣지 대시보드: 합격 · 불합격 · 애매(→불합격) · 확인, 무작위 비율 75/20/5 — pytest 12건 통과</li>
+  <li class="done">PPT 2·6·8·9·10·11·14장 반영 (PowerPoint PNG 확인, 넘침·겹침 없음)</li>
+  <li>실장비 재확인 — 장비 연결 시 (폰 앱 재설치 필요, HMD 앱 변경 없음)</li>
+</ul>
+</section>
+
+  <section id="e2-hevc">
+<div class="section-head">
+  <h3>E2 — H.265 1080p 전환</h3>
+  <span class="date-badge">2026-10-07</span>
+  <span class="status confirmed">완료 · 기본값은 MJPEG 720p</span>
+</div>
+
+<p>HMD 영상을 MJPEG 640×480(→ 720p 시험 22fps 한계)에서 <strong>H.265 1920×1080 · 30fps · 8Mbps</strong>로 전환한다.
+설계서 §8. 전송 경로는 그대로, HMD 하드웨어 인코더 사용.</p>
+
+<h4>진행 내역</h4>
+<ul class="checklist">
+  <li class="done">엣지 — <code>edge/decoder.py</code>(PyAV, 전용 스레드·슬라이스 스레딩으로 지연 없음) → 대시보드 JPEG 초당 10장, 코덱 자동 구분, <code>stream.h265</code> 녹화 · pytest 15건(HEVC 3건, libx265 로 시험 영상 생성)</li>
+  <li class="done">모바일 — FRAME 헤더 <code>codec</code>·<code>key</code>, 파트 Content-Type·<code>X-Key</code> 해석 · 단위 시험 26건</li>
+  <li class="done">HMD — <code>video/Camera2Source</code>(미리보기 TextureView + 인코더 표면) · <code>video/HevcEncoder</code>(OMX.qcom HEVC, 키프레임 1초 + VPS/SPS/PPS 첨부) · 프레임 서버 수신자별 큐(느리면 다음 키프레임부터) · 실패 시 MJPEG 예비 모드 자동 전환</li>
+</ul>
+
+<h4>실장비 결과 (2026-10-07, 사무실 21snail5)</h4>
+<table class="col-table">
+  <tr><th style="width:30%">항목</th><th>결과</th></tr>
+  <tr><td>구형 카메라 HAL 2출력</td><td class="ok">허용됨 — 미리보기 + 인코더 동시 동작</td></tr>
+  <tr><td>엣지 수신</td><td class="ok">H.265 1920×1080 · 29.5~30fps · 약 8Mbps · 누락 0 · 디코딩 오류 0</td></tr>
+  <tr><td>키프레임</td><td class="ok">1초마다 (3초에 3장)</td></tr>
+  <tr><td>판정 경로</td><td class="ok">불합격 → HMD H-03 표시(10ms) · 판정 지연 34ms(모의 엣지)</td></tr>
+</table>
+
+<div class="note-box"><strong>비교:</strong> 720p JPEG 22fps · 16Mbps → <strong>1080p H.265 30fps · 8Mbps</strong> (해상도 2.25배, 대역폭 절반). 예비: <code>am start ... --es video mjpeg</code></div>
+
+<div class="warn-box"><strong>결정 (2026-10-07):</strong> 대시보드 기준 체감 화질 차이가 작고 지연이 느껴져 <strong>기본값은 MJPEG 1280×720 · JPEG 품질 80 · 약 22fps · 12~16Mbps</strong>로 확정.
+H.265 1080p 코드는 유지 — HMD <code>VIDEO_MODE</code>를 <code>"hevc"</code>로 바꾸면 재사용(실제 AI의 고해상도 필요 시).</div>
+</section>
+
+  <section id="hmd-screen-1018">
+<div class="section-head">
+  <h3>현장 피드백 반영 — 화면 전환 · 버튼 · 연동 순서</h3>
+  <span class="date-badge">2026-10-18</span>
+  <span class="status confirmed">완료 · 사무실 실제 AI 서버 확인 남음</span>
+</div>
+
+<p>카페(사내망 밖)에서 노트북 모의 AI 서버로 실장비 확인. 작업 문서: <code>doc/ppt/TacitQ_연결자동화_현황.pptx</code></p>
+
+<h4>변경</h4>
+<ul class="checklist">
+  <li class="done">AI 서버 자동 선택 — 연결 때마다 사무실 AI(192.168.1.11) → 노트북 모의 AI 순서로 접속 시도 (0.8초씩)</li>
+  <li class="done">HMD 화면 깨우기 — 앞으로 나올 때 꺼진 화면 켜기 (영상까지 약 20초 → 약 2초)</li>
+  <li class="done">불합격 화면 2초 뒤 카메라 (기존: 트레이 확인까지 유지 → AI 서버엔 신호 없어 카메라 가림)</li>
+  <li class="done">진행 안내 HINT — 종이를 비춰 주세요 · 더 가까이 · 수집 n/10 · 판정 중 (BLE, 바뀔 때만)</li>
+  <li class="done">HMD 버튼 2개(볼륨 업·다운 신호) → 판정 화면에서 바로 카메라 · 앱이 앞에 있을 때 볼륨 변경 안 함</li>
+  <li class="done">판정 화면 자동/수동 설정 (M-01) — 수동이면 버튼을 눌러야 카메라</li>
+  <li class="done">검사 시작 → HMD 영상 들어오면 영상 탭(M-07) 1회 자동 전환</li>
+  <li class="done">테스터 지적 "HMD 앱 먼저 조작하면 연동 안 됨" — 앱 화면 2개 생성(8080 포트·BLE 서버 중복)이 원인 → singleTask · 뒤로 가기 = 뒤로만</li>
+  <li class="done">단위 시험 모바일 34건 · HMD 통과</li>
+  <li>사무실 실제 AI 서버로 종단 확인 · 옛 설계 문구 정리 · POST /decision</li>
+</ul>
+</section>
+
+  <section id="auto-connect">
+<div class="section-head">
+  <h3>연결 자동화 — HMD 주소 · 앱 자동 실행</h3>
+  <span class="date-badge">2026-10-13</span>
+  <span class="status confirmed">완료 · 재부팅 실장비 확인 남음</span>
+</div>
+
+<p>목표: 작업자는 <strong>HMD 전원 켜기 + 폰 검사 시작</strong>만. IP 수정 · "품질검사" 음성 실행 · 노트북 연결 불필요.</p>
+
+<h4>변경</h4>
+<ul class="checklist">
+  <li class="done">HMD 주소 자동 전달 — HMD UP 특성 읽기 = HELLO <code>{"type":"HELLO","video_url":"http://IP:8080"}</code> → 폰이 BLE 연결 직후 읽어 사용 · 저장, 영상 끊기면 다시 읽음</li>
+  <li class="done">폰 검사 시작 시 저장된 최신 주소 사용 (화면 입력칸 옛 값 무시)</li>
+  <li class="done">HMD 부팅 시 앱 대기 실행(BootReceiver, 화면은 홈 · BLE 만) → 폰 PING/SHOW 수신 시 앱이 스스로 앞으로</li>
+  <li class="done">RealWear 카메라: 뒤→앞 전환 때 CameraX 재열기가 OPENING 에서 멈춤 → 뒤로 갈 때 unbindAll, 앞으로 올 때 0.4초 뒤 다시 바인딩</li>
+  <li>HMD 실제 재부팅 후 자동 대기 실행 확인</li>
+</ul>
+
+<h4>실장비 결과 (2026-10-13 사무실 · HMD = 폰 핫스팟)</h4>
+<table class="col-table">
+  <tr><th style="width:30%">항목</th><th>결과</th></tr>
+  <tr><td>틀린 HMD 주소로 시작</td><td class="ok">BLE 연결 4초 뒤 HELLO 로 자동 수정 → 영상 0.6초 뒤 연결</td></tr>
+  <tr><td>HMD 앱 뒤에서 대기 → 폰 신호</td><td class="ok">1초 안에 앞으로 · 0.7초 뒤 카메라 열림 · AI 서버 1920×1080 · 8~9fps</td></tr>
+</table>
+
+<div class="warn-box"><strong>설정 1회:</strong> HMD 앱 "다른 앱 위에 표시" 허용 필요(Android 11 뒤→앞 전환 제한). 새 HMD 마다 1회 —
+<code>adb shell appops set kr.co.snail.tacitq.hmd.debug SYSTEM_ALERT_WINDOW allow</code> · 재설치해도 유지.</div>
+</section>
+
+  <section id="ai-edge-webrtc">
+<div class="section-head">
+  <h3>실제 AI 서버 연동 (WebRTC) — 1차</h3>
+  <span class="date-badge">2026-10-10</span>
+  <span class="status confirmed">1차 완료 · 실장비 종단 통과</span>
+</div>
+
+<p>설계서 §9. HMD → 폰 → AI 판정 서버(<code>192.168.1.11:8080</code>, ST-02) → HMD 표시. PC 없이 사내 Wi-Fi(21snail5) 단일 망.</p>
+
+<h4>진행 내역</h4>
+<ul class="checklist">
+  <li class="done">모바일 <code>ai/</code> — AiEdgeLink(WebRTC · JPEG→I420 · VP8 · 재연결 · 송출 통계) · AiFlow/AiMessages(판정 매핑, 단위 시험 6건) · AiResultsApi</li>
+  <li class="done">M-01 엣지 종류 선택(AI 서버 / 모의 엣지) · AI 주소 · 스테이션 · M-07 영상 탭에 AI 서버 상태</li>
+  <li class="done">HMD MJPEG 기본 1920×1080 (<code>--es res 720</code> 옵션)</li>
+  <li class="done">단위 시험 모바일 32건 · 엣지 21건 통과</li>
+  <li>2차: HMD 진행 안내 · POST /decision · overlay 표시</li>
+</ul>
+
+<h4>실장비 결과 (2026-10-10 사무실)</h4>
+<table class="col-table">
+  <tr><th style="width:30%">항목</th><th>결과</th></tr>
+  <tr><td>연결</td><td class="ok">POST /offer 수락 → 연결 0.02초 · 데이터 채널 개설</td></tr>
+  <tr><td>720p</td><td>계속 <code>too_small</code> — 종이가 화면 가로 95% 필요 → 판정 불가</td></tr>
+  <tr><td>1080p</td><td class="ok">서버 수신 1920×1080 · 8~9fps · 해상도 저하 없음 → hold → captured → result</td></tr>
+  <tr><td>판정 5건</td><td class="ok">모두 HMD 불합격 표시 · captured → result 약 0.2초 · 연속 NG alert 수신</td></tr>
+  <tr><td>판정 내용</td><td>5건 모두 NG(0.16~0.21, 기준 0.124) — 결과 이미지상 가장자리 배경 · 접힌 자국 · 역광. 가모델 정확도 영역</td></tr>
+</table>
+
+<div class="warn-box"><strong>조치:</strong> WebRTC가 초기 저대역에서 해상도를 줄일 수 있어 연결 후 <code>MAINTAIN_RESOLUTION</code> · 2~6Mbps 재적용.
+작업 문서: <code>doc/ppt/TacitQ_AI서버연동_현황.pptx</code></div>
+</section>
+
+  <section id="mobile-live-view">
+<div class="section-head">
+  <h3>폰 앱 영상 모니터링 화면 (M-07)</h3>
+  <span class="date-badge">2026-10-08</span>
+  <span class="status dev">진행 중</span>
+</div>
+
+<p>검사 중 HMD에서 폰으로 들어오는 영상을 폰 화면에서 바로 확인. 엣지 대시보드 없이 현장에서 "영상이 제대로 가는지" 확인용.</p>
+
+<h4>계획 (가장 쉬운 방법)</h4>
+<ul class="checklist">
+  <li>하단 탭에 <strong>영상</strong> 추가 (검사 · 영상 · 이력 · 수거 · 관리) → 새 화면 M-07</li>
+  <li>HMD에 따로 붙지 않음 — 서비스가 이미 받는 프레임 중 <strong>마지막 1장</strong>만 공유(HMD·Wi-Fi 부하 증가 없음)</li>
+  <li>화면이 켜져 있을 때만 그림으로 변환(초당 최대 10장) · 화면 꺼지면 변환 안 함</li>
+  <li>표시: 영상 · 해상도 · 초당 장수 · HMD 영상/화면(BLE)/엣지 연결 · 보냄/버림 · 마지막 판정과 지연</li>
+  <li>검사 전: "검사 시작 후 표시" 안내 · H.265 수신 중: "H.265 미리보기 미지원" 안내(기본값 MJPEG이라 해당 없음)</li>
+</ul>
+
+<h4>진행 내역</h4>
+<ul class="checklist">
+  <li class="done"><code>InspectionService.liveFrame</code> — HMD 프레임 수신 시 마지막 1장 갱신, 마감 시 비움</li>
+  <li class="done"><code>ui/screen/M07LiveView.kt</code> + 하단 탭 "영상" · 화면 꺼지면 수집 중단(collectAsStateWithLifecycle)</li>
+  <li class="done">빌드 · 단위 시험 26건 통과</li>
+  <li>실장비 확인 (폰·HMD 연결 시)</li>
+</ul>
+</section>
+
+  <section id="ai-mock">
+<div class="section-head">
+  <h3>모의 AI 엣지 — WebRTC API 흉내</h3>
+  <span class="date-badge">2026-10-08</span>
+  <span class="status dev">진행 중 · 서버 완료, 폰 연동 다음</span>
+</div>
+
+<p>실제 AI 서버(<code>192.168.1.11:8080</code>)는 사내 Wi-Fi에서만 접속 가능. 사무실 밖에서도 폰 WebRTC 연동(설계서 §9)을 개발·시험하려고
+<strong>같은 API를 흉내 내는 모의 서버</strong>를 엣지 프로젝트에 추가. 근거: <code>A4_WEBRTC_API.md</code>.</p>
+
+<h4>계획</h4>
+<ol>
+  <li>모의 AI 엣지 (<code>TacitQEdgeServer/edge/ai_mock.py</code>) — 이번</li>
+  <li>폰 앱 WebRTC 연동 (§9 변경 범위: AiEdgeLink · AiMessages · AiResultsApi · HevcSurfaceDecoder · M-01 설정)</li>
+  <li>장비 연결 시 종단 시험: 모의 엣지(집) → 실제 AI 서버(사무실)</li>
+</ol>
+
+<h4>진행 내역</h4>
+<ul class="checklist">
+  <li class="done">aiortc 1.15.0 설치 (av 18.1 → 17.1 변경, 기존 HEVC 시험 15건 재통과 확인)</li>
+  <li class="done">API — <code>POST /offer</code>(422 입력 오류 · 403 미등록 스테이션 · ST-01~03) · <code>GET /results/{id}</code> · <code>/mask</code>(PNG) · <code>/overlay</code>(JPEG, 받은 영상 + 빨간 표시) · <code>POST /results/{id}/decision</code></li>
+  <li class="done">데이터 채널 흐름 — searching(no_paper) → hold 1~10 (0.2초) → captured → result(OK/NG/REVIEW) → 3초 뒤 반복 · 같은 NG/REVIEW 3연속 → alert</li>
+  <li class="done">해상도 근사 — 영상 긴 변 &lt; 1920이면 계속 <code>searching(too_small)</code> (종이 긴 변 ≥1216px ÷ 화면 폭 63% ≈ 1920) · <code>--min-long-side 0</code>으로 끄기</li>
+  <li class="done">대시보드 <code>http://localhost:8080/</code> — 받은 영상 · 다음 판정 지정(OK/NG/REVIEW) · 자동 순환 켜기/끄기 · 서버 장애(연결 끊기) · 보낸 메시지 기록</li>
+  <li class="done">pytest 6건 추가 (같은 PC 안 aiortc 클라이언트로 실제 WebRTC 연결) → 전체 21건 통과</li>
+  <li>폰 앱 WebRTC 연동</li>
+</ul>
+
+<div class="note-box"><strong>실행:</strong> <code>.venv\Scripts\python -m edge.ai_mock --port 8080</code> · 폰 설정의 AI 서버 주소를 <code>http://&lt;PC IP&gt;:8080</code>으로.
+기존 모의 엣지(WebSocket :8765)는 그대로 유지.</div>
+
+<div class="warn-box"><strong>주의:</strong> WebRTC는 <code>adb reverse</code>로 안 됨 — 폰과 PC가 같은 Wi-Fi(또는 같은 핫스팟)에 있어야 함. 키즈카페 같은 AP 격리 망에서는 시험 불가.</div>
+</section>
+
+</main>
+
+<script>
+  document.querySelectorAll('.nav-item').forEach(link => {
+    link.addEventListener('click', e => {
+      e.preventDefault();
+      const id = link.getAttribute('href').slice(1);
+      document.querySelectorAll('section').forEach(s => s.classList.remove('active'));
+      document.querySelectorAll('.nav-item').forEach(a => a.classList.remove('active'));
+      const target = document.getElementById(id);
+      if (target) target.classList.add('active');
+      link.classList.add('active');
+    });
+  });
+  const first = document.querySelector('.nav-item');
+  if (first) first.click();
+</script>
+</body>
+</html>

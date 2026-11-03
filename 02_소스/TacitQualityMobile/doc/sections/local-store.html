@@ -1,0 +1,49 @@
+<div class="section-head">
+  <h3>C5 LocalStore 구현 — 로컬 이력 + 전송 큐(Room) · V-M04</h3>
+  <span class="date-badge">2026-09-20</span>
+  <span class="status confirmed">완료</span>
+</div>
+
+<p>조립 순서 3번 <strong>C5 LocalStore</strong>를 착수·완료했다. 검사 이력과 전송 큐를 휴대폰에 남겨,
+서비스가 안드로이드에 의해 언제 종료되어도 재시작 후 이어가게 한다.
+핵심 규칙 하나가 V-M04 "유실 0건"을 만든다: <strong>전송 큐(outbox)는 어떤 이유로도 지우지 않는다.</strong></p>
+
+<h4>진행 내역</h4>
+<ul class="checklist">
+  <li class="done"><strong>의존성 추가</strong> — Room <code>2.6.1</code>(runtime·ktx) + KSP <code>2.0.21-1.0.28</code>(컴파일러),
+      시험용 Robolectric <code>4.14.1</code> · androidx.test.core · coroutines-test</li>
+  <li class="done"><strong>store 패키지 신설</strong>(<code>kr.co.snail.tacitq.mobile.store</code>) — 4개 파일</li>
+  <li class="done"><code>QmsEntities.kt</code> — <code>inspection</code>(이력) · <code>outbox</code>(전송 큐, id 오름차순=FIFO)</li>
+  <li class="done"><code>QmsDao.kt</code> — put·markSynced·pruneSynced(이력만) / push·nextBatch·ack·queueSize(큐)</li>
+  <li class="done"><code>QmsDatabase.kt</code> — Room DB 싱글턴(파일 <code>tacitq.db</code>)</li>
+  <li class="done"><code>LocalStore.kt</code> — 상태 기계 출력(Effect.Persist·Enqueue)을 즉시 영속화하는 파사드.
+      <code>record()</code>는 이력 저장 + 큐 적재를 한 번에("미동기화 이력은 큐와 짝")</li>
+  <li class="done"><strong>V-M04 단위 시험 3건 전부 통과</strong> — Robolectric 으로 실제 Room 을 JVM 에서 검증</li>
+</ul>
+
+<h4>V-M04 단위 시험 결과 (강제 종료 = <code>db.close()</code> 후 같은 파일 재오픈)</h4>
+<table class="col-table">
+  <tr><th>시험</th><th>검증</th><th>결과</th></tr>
+  <tr><td>강제 종료 후 미전송 큐 100건이 그대로 남는다</td><td>완료확인 ①② 유실 0건</td><td class="ok">통과</td></tr>
+  <tr><td>복구 후 큐가 들어온 순서대로 빠진다</td><td>완료확인 ③ FIFO</td><td class="ok">통과</td></tr>
+  <tr><td>용량 정리는 동기화된 이력만 지우고 큐는 유지</td><td>완료확인 ④</td><td class="ok">통과</td></tr>
+</table>
+
+<h4>용량 부족 시 정리 규칙 (설계서 §7)</h4>
+<table class="col-table">
+  <tr><th>대상</th><th>정리?</th><th>이유</th></tr>
+  <tr><td>동기화 끝난 이력</td><td class="ok">가능</td><td>서버에 이미 있다</td></tr>
+  <tr><td><strong>전송 큐(outbox)</strong></td><td>절대 불가</td><td>지우는 순간 그 검사는 세상에서 사라진다</td></tr>
+  <tr><td>미동기화 이력</td><td>불가</td><td>큐와 짝이다</td></tr>
+</table>
+
+<div class="note-box">
+  <strong>설계 준수:</strong> outbox 를 줄이는 유일한 경로는 Edge ACK 후 <code>ack(id)</code> 뿐 ·
+  <code>pruneSynced</code>는 <code>syncedAt IS NOT NULL</code> 이력만 삭제 · 큐는 SQL 어디서도 무조건 삭제하지 않는다.
+</div>
+
+<div class="warn-box">
+  <strong>남은 연결부:</strong> <code>inspectionId</code> 채번(현재 partId 사용) ·
+  상태 기계 Effect → LocalStore 호출 배선(서비스 디스패처) · Edge 송신 시 nextBatch→ack 루프(C2 통합).
+  <strong>다음:</strong> C4 HmdRenderer(ShowCommand → BLE 쪽지, seq·재전송) + 가짜 HMD 도구.
+</div>

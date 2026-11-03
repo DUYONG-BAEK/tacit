@@ -1,0 +1,29 @@
+<div class="section-head">
+  <h3>E2 — H.265 1080p 전환</h3>
+  <span class="date-badge">2026-10-07</span>
+  <span class="status confirmed">완료 · 기본값은 MJPEG 720p</span>
+</div>
+
+<p>HMD 영상을 MJPEG 640×480(→ 720p 시험 22fps 한계)에서 <strong>H.265 1920×1080 · 30fps · 8Mbps</strong>로 전환한다.
+설계서 §8. 전송 경로는 그대로, HMD 하드웨어 인코더 사용.</p>
+
+<h4>진행 내역</h4>
+<ul class="checklist">
+  <li class="done">엣지 — <code>edge/decoder.py</code>(PyAV, 전용 스레드·슬라이스 스레딩으로 지연 없음) → 대시보드 JPEG 초당 10장, 코덱 자동 구분, <code>stream.h265</code> 녹화 · pytest 15건(HEVC 3건, libx265 로 시험 영상 생성)</li>
+  <li class="done">모바일 — FRAME 헤더 <code>codec</code>·<code>key</code>, 파트 Content-Type·<code>X-Key</code> 해석 · 단위 시험 26건</li>
+  <li class="done">HMD — <code>video/Camera2Source</code>(미리보기 TextureView + 인코더 표면) · <code>video/HevcEncoder</code>(OMX.qcom HEVC, 키프레임 1초 + VPS/SPS/PPS 첨부) · 프레임 서버 수신자별 큐(느리면 다음 키프레임부터) · 실패 시 MJPEG 예비 모드 자동 전환</li>
+</ul>
+
+<h4>실장비 결과 (2026-10-07, 사무실 21snail5)</h4>
+<table class="col-table">
+  <tr><th style="width:30%">항목</th><th>결과</th></tr>
+  <tr><td>구형 카메라 HAL 2출력</td><td class="ok">허용됨 — 미리보기 + 인코더 동시 동작</td></tr>
+  <tr><td>엣지 수신</td><td class="ok">H.265 1920×1080 · 29.5~30fps · 약 8Mbps · 누락 0 · 디코딩 오류 0</td></tr>
+  <tr><td>키프레임</td><td class="ok">1초마다 (3초에 3장)</td></tr>
+  <tr><td>판정 경로</td><td class="ok">불합격 → HMD H-03 표시(10ms) · 판정 지연 34ms(모의 엣지)</td></tr>
+</table>
+
+<div class="note-box"><strong>비교:</strong> 720p JPEG 22fps · 16Mbps → <strong>1080p H.265 30fps · 8Mbps</strong> (해상도 2.25배, 대역폭 절반). 예비: <code>am start ... --es video mjpeg</code></div>
+
+<div class="warn-box"><strong>결정 (2026-10-07):</strong> 대시보드 기준 체감 화질 차이가 작고 지연이 느껴져 <strong>기본값은 MJPEG 1280×720 · JPEG 품질 80 · 약 22fps · 12~16Mbps</strong>로 확정.
+H.265 1080p 코드는 유지 — HMD <code>VIDEO_MODE</code>를 <code>"hevc"</code>로 바꾸면 재사용(실제 AI의 고해상도 필요 시).</div>

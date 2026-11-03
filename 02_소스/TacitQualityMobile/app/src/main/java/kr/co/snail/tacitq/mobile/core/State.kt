@@ -1,0 +1,70 @@
+package kr.co.snail.tacitq.mobile.core
+
+import kr.co.snail.tacitq.mobile.model.Verdict
+
+/**
+ * C3 상태 기계의 상태 정의 — 구조설계서 §2 "두 층의 상태".
+ *
+ * 이 패키지(core)는 **안드로이드를 몰라야 한다.** android.* 를 한 줄이라도 참조하면
+ * 그 순간 노트북에서 시험할 수 없게 되고 V-M05(순서·중복·지연 시험)가 불가능해진다.
+ * 입력은 [Event], 출력은 (새 [AppState], [Effect] 목록) — 그 외에 아무것도 하지 않는다.
+ *
+ * Verdict 는 코드 정의서(model.Codes)의 단일 정의를 재사용한다. 판정 어휘가 두 벌이 되면
+ * 화면·저장·상태 기계가 조용히 어긋난다.
+ */
+
+/** 앱 전체 상태 — 구조설계서 §2 상위 층 */
+enum class Mode { INIT, READY, RUNNING, DEGRADED, OFFLINE, LINE_STOPPED, CLOSED }
+
+/** 검사 건별 상태 — 구조설계서 §2 하위 층 */
+enum class PartPhase { CAPTURING, PENDING, JUDGED, CONFIRMED, OBJECTED, TIMEOUT, RECOVERED }
+
+/** 검사 1건(부품 1개)의 상태 */
+data class Part(
+    val id: String,                       // A_0248
+    val phase: PartPhase,
+    val verdict: Verdict? = null,
+    val severity: String? = null,
+    val confidence: Double? = null,
+    val agreeRate: Double? = null,        // v0.7 — 프레임 간 일치율
+    val judgedAt: Long? = null,
+    val trayDetectedAt: Long? = null,     // 판정보다 먼저 올 수 있다 (R05·R08)
+    val sampled: Boolean = false,         // 랜덤 표본 당첨 (R02)
+)
+
+/**
+ * 품번 프로파일에서 내려오는 값 — 하드코딩 금지 (TB_PART_PROFILE).
+ * 타이머 값들은 구조설계서 §2 "타이머 목록"과 1:1 대응한다. 실측 후 재조정.
+ */
+data class Profile(
+    val viewCount: Int = 3,
+    val framesTarget: Int = 4,
+    val agreeReview: Double = 0.75,       // 이 값 미만이면 REVIEW (R04)
+    val sampleRatePct: Double = 3.0,      // 랜덤 표본 비율 (R02)
+    val lateMs: Long = 1_500,             // 결과 지연 경계 → 회수 (R05)
+    val confirmWaitMs: Long = 10_000,     // 확인 대기 (R12)
+    val commitGraceMs: Long = 1_000,      // 제스처 확정 유예 (R09)
+    /** 판정 화면 전환 — true: 자동(합격 1.5초·불합격 2초 뒤 카메라) / false: 수동(HMD 버튼을 눌러야 카메라). 버튼은 둘 다 됨 */
+    val autoDismiss: Boolean = true,
+)
+
+/** 앱 전체 상태. 이 객체 하나가 곧 진실이다. */
+data class AppState(
+    val mode: Mode = Mode.INIT,
+    val line: String = "",
+    val partNo: String = "",
+    val profile: Profile = Profile(),
+    val parts: Map<String, Part> = emptyMap(),
+    val lastSeq: Long = 0,                // R06 — 처리한 마지막 판정 순번
+    val handled: Set<String> = emptySet(),// R07 — 이미 처리한 건 (멱등)
+    val doneCount: Int = 0,
+    val openWindowId: String? = null,     // 지금 열어둔 제스처 창
+)
+
+/** HMD HELLO 메시지가 싣고 오는 단말 정보 */
+data class DeviceInfo(
+    val deviceId: String,
+    val fw: String = "",
+    val battery: Int = 100,
+    val storageFreeMb: Int = 0,
+)

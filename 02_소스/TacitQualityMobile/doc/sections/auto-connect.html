@@ -1,0 +1,26 @@
+<div class="section-head">
+  <h3>연결 자동화 — HMD 주소 · 앱 자동 실행</h3>
+  <span class="date-badge">2026-10-13</span>
+  <span class="status confirmed">완료 · 재부팅 실장비 확인 남음</span>
+</div>
+
+<p>목표: 작업자는 <strong>HMD 전원 켜기 + 폰 검사 시작</strong>만. IP 수정 · "품질검사" 음성 실행 · 노트북 연결 불필요.</p>
+
+<h4>변경</h4>
+<ul class="checklist">
+  <li class="done">HMD 주소 자동 전달 — HMD UP 특성 읽기 = HELLO <code>{"type":"HELLO","video_url":"http://IP:8080"}</code> → 폰이 BLE 연결 직후 읽어 사용 · 저장, 영상 끊기면 다시 읽음</li>
+  <li class="done">폰 검사 시작 시 저장된 최신 주소 사용 (화면 입력칸 옛 값 무시)</li>
+  <li class="done">HMD 부팅 시 앱 대기 실행(BootReceiver, 화면은 홈 · BLE 만) → 폰 PING/SHOW 수신 시 앱이 스스로 앞으로</li>
+  <li class="done">RealWear 카메라: 뒤→앞 전환 때 CameraX 재열기가 OPENING 에서 멈춤 → 뒤로 갈 때 unbindAll, 앞으로 올 때 0.4초 뒤 다시 바인딩</li>
+  <li>HMD 실제 재부팅 후 자동 대기 실행 확인</li>
+</ul>
+
+<h4>실장비 결과 (2026-10-13 사무실 · HMD = 폰 핫스팟)</h4>
+<table class="col-table">
+  <tr><th style="width:30%">항목</th><th>결과</th></tr>
+  <tr><td>틀린 HMD 주소로 시작</td><td class="ok">BLE 연결 4초 뒤 HELLO 로 자동 수정 → 영상 0.6초 뒤 연결</td></tr>
+  <tr><td>HMD 앱 뒤에서 대기 → 폰 신호</td><td class="ok">1초 안에 앞으로 · 0.7초 뒤 카메라 열림 · AI 서버 1920×1080 · 8~9fps</td></tr>
+</table>
+
+<div class="warn-box"><strong>설정 1회:</strong> HMD 앱 "다른 앱 위에 표시" 허용 필요(Android 11 뒤→앞 전환 제한). 새 HMD 마다 1회 —
+<code>adb shell appops set kr.co.snail.tacitq.hmd.debug SYSTEM_ALERT_WINDOW allow</code> · 재설치해도 유지.</div>

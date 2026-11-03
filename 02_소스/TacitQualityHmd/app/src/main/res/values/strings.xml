@@ -1,0 +1,4 @@
+<resources>
+    <!-- RealWear 음성 실행용 — 한글로만 된 짧은 이름이어야 인식된다("품질검사 HMD" 는 인식 실패, 2026-10-07) -->
+    <string name="app_name">품질검사</string>
+</resources>

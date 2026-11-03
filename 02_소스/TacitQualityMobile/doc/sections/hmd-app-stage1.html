@@ -1,0 +1,44 @@
+<div class="section-head">
+  <h3>HMD 앱 착수 — 1단계: 카메라 → 폰 영상 송출</h3>
+  <span class="date-badge">2026-10-01</span>
+  <span class="status confirmed">완료</span>
+</div>
+
+<p>설계서 <strong>① HMD 앱</strong>(촬영·송출)은 원래 "타 팀" 몫이었으나 <strong>담당자가 없어</strong>,
+모바일 팀이 함께 개발하기로 했다. 새 프로젝트 <code>TacitQualityHmd</code>(안드로이드/Kotlin·CameraX)를
+만들고, 가장 먼저 <strong>"HMD 카메라 영상이 폰으로 전송되는지"</strong>를 실제 코드로 구현·검증했다.</p>
+
+<h4>왜 우리가 만드나</h4>
+<p>HMD 앱이 없으면 영상을 찍어 보낼 주체가 없어 검사 루프가 돌지 않는다. 같은 안드로이드/Kotlin이고,
+쪽지 규격(§3)·화면 명세(H-01~09)가 이미 확정돼 있어 상대편(모바일 <code>HmdRenderer</code>·<code>ShowWire</code>)과
+짝으로 개발 가능하다. "버리는 데모"가 아니라 <strong>진짜 제품의 첫 조각</strong>이다.</p>
+
+<h4>진행 내역 (1단계)</h4>
+<ul class="checklist">
+  <li class="done">새 프로젝트 <code>TacitQualityHmd</code> 골격 (CameraX · minSdk 29)</li>
+  <li class="done"><code>MainActivity.kt</code> — CameraX 기동, 프레임 → JPEG, 서버 기동, 접속 주소 표시</li>
+  <li class="done"><code>MjpegServer.kt</code> — 외부 라이브러리 없는 <code>multipart/x-mixed-replace</code> MJPEG 서버(:8080)</li>
+  <li class="done"><code>YuvToJpeg.kt</code> — YUV_420_888 → NV21 → JPEG 변환</li>
+  <li class="done"><strong>실장비 검증 성공</strong> — HMD 카메라 영상이 폰 브라우저(<code>http://&lt;HMD-IP&gt;:8080</code>)에서 실시간 표시 (~14fps)</li>
+</ul>
+
+<h4>★ RealWear 520 카메라 함정 (해결)</h4>
+<p>구형(legacy) 카메라 HAL이라 CameraX가 까다로웠다. 카메라가 안 켜지던 원인과 해결:</p>
+<table class="col-table">
+  <tr><th>증상</th><th>원인</th><th>해결</th></tr>
+  <tr><td>ImageAnalysis 단독 → 카메라 안 열림</td><td>구형 HAL은 Preview 표면 필요</td><td>Preview 함께 바인딩</td></tr>
+  <tr><td>Preview 붙여도 프레임 0</td><td>SurfaceView 표면이 RealWear에서 생성 안 됨</td><td><code>TextureView(COMPATIBLE)</code> 모드</td></tr>
+  <tr><td>그래도 0 → 갑자기 켜짐</td><td>화면이 실제 렌더링돼야 카메라 시작</td><td>디스플레이 깨어나니 동작</td></tr>
+</table>
+<p>구글 이슈트래커 295633027(520 ImageAnalysis 문제)와 동일 증상. <code>Preview(TextureView) + ImageAnalysis</code> 조합으로 해결.</p>
+
+<div class="note-box">
+  <strong>검증 경로:</strong> HMD·폰을 <strong>폰 핫스팟</strong> 같은 망에 두고, 폰 브라우저로 HMD IP:8080 접속.
+  MJPEG라 앱 없이 브라우저로 바로 영상이 보인다.
+</div>
+
+<div class="warn-box">
+  <strong>다음:</strong> 2단계 — BLE로 판정 쪽지(SHOW) 수신 → HMD 화면 표시(모바일 규격과 짝) ·
+  3단계 — 제스처·heartbeat·재연결 · 영상 H.265 저지연 전환.
+  별도 저장소 <code>TacitQualityHmd</code>(git + gdrive 백업).
+</div>

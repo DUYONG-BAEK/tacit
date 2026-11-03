@@ -1,0 +1,6 @@
+<resources>
+    <style name="Theme.TacitQ" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">#FFF4F5F8</item>
+        <item name="android:statusBarColor">#FF5B4B8A</item>
+    </style>
+</resources>

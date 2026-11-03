@@ -1,0 +1,12 @@
+*.iml
+.gradle/
+.kotlin/
+/local.properties
+/.idea/
+.DS_Store
+/build
+/app/build
+# 서명 자산: 절대 커밋 금지
+keystore.properties
+*.jks
+/keys/
