@@ -16,6 +16,7 @@ import android.view.View
 import android.view.WindowManager
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.camera.core.AspectRatio
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
@@ -141,6 +142,7 @@ class MainActivity : AppCompatActivity() {
 
     /** 뒤에 갔다 온 적이 있으면 앞으로 나올 때 카메라를 새로 묶는다 */
     private var cameraNeedsRebind = false
+    @Volatile private var analysisSizeLogged = false
     private var lastBringAt = 0L
 
     override fun onStop() {
@@ -194,7 +196,9 @@ class MainActivity : AppCompatActivity() {
             val provider = future.get()
 
             // Preview: 구형 카메라 HAL 시작에 필요. TextureView 표면을 공급한다.
-            val preview = Preview.Builder().build().also {
+            // 16:9 — 기본값 4:3 이면 16:9 분석 영상과 화각이 달라 결함 원(0~1000 좌표)이 어긋난다. HMD 화면도 16:9(1280×720)
+            @Suppress("DEPRECATION")
+            val preview = Preview.Builder().setTargetAspectRatio(AspectRatio.RATIO_16_9).build().also {
                 it.setSurfaceProvider(binding.preview.surfaceProvider)
             }
 
@@ -220,6 +224,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun onFrame(image: androidx.camera.core.ImageProxy) {
         val capturedAt = System.currentTimeMillis()      // JPEG 변환 전 시각 = 촬영 시각에 가장 가깝다
+        if (!analysisSizeLogged) { analysisSizeLogged = true; Log.i(TAG, "분석 영상 ${image.width}×${image.height}") }
         try {
             server.updateFrame(YuvToJpeg.convert(image), capturedAt)
         } catch (e: Exception) {

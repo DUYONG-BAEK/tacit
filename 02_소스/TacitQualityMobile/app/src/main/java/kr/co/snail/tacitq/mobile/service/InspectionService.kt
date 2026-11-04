@@ -22,6 +22,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
@@ -45,6 +46,7 @@ import kr.co.snail.tacitq.mobile.core.Mode
 import kr.co.snail.tacitq.mobile.core.ShowCommand
 import kr.co.snail.tacitq.mobile.hmd.GattBleLink
 import kr.co.snail.tacitq.mobile.hmd.HintWire
+import kr.co.snail.tacitq.mobile.hmd.LiveWire
 import kr.co.snail.tacitq.mobile.hmd.HmdRenderer
 import kr.co.snail.tacitq.mobile.store.LocalStore
 import kr.co.snail.tacitq.mobile.store.QmsDatabase
@@ -75,6 +77,8 @@ class InspectionService : LifecycleService() {
     private lateinit var ble: GattBleLink
     private lateinit var engine: InspectionEngine
     private var relayJob: Job? = null
+    /** HMD 실시간 결함 쪽지(LIVE) — 메시지마다 코루틴을 띄우면 BLE 잠금 앞에 쌓이므로 최신 1개만 두는 통로 하나로 보낸다 */
+    private val liveOut = Channel<ByteArray>(Channel.CONFLATED)
     @Volatile private var hmdUrl = ""
     private var wakeLock: PowerManager.WakeLock? = null
     private var wifiLock: WifiManager.WifiLock? = null
@@ -145,6 +149,8 @@ class InspectionService : LifecycleService() {
                     // HMD 조준 화면 진행 안내 — 화면 지시(SHOW)와 달리 순번·ACK 없이 최신 것만 보낸다
                     effectScope.launch { runCatching { ble.write(HintWire.encode(text, tone)) } }
                 },
+                // 실시간 결함 쪽지 — 최신 1개만 남기고(앞 쓰기가 안 끝났으면 덮어씀) 응답 없는 쓰기로 보낸다(R8)
+                onLive = { m -> liveOut.trySend(LiveWire.encode(m, profile.liveMarks)) },
                 onAlarm = { vibrate(3) },                         // 제품 구간에서 결함이 처음 확정될 때 1회(R5)
             )
             offer = ai::offer; edgeRun = ai::run; edgeStatus = ai.status
@@ -168,6 +174,7 @@ class InspectionService : LifecycleService() {
                 }).run()
             }
             launch { ble.run() }
+            launch { for (b in liveOut) runCatching { ble.writeNoResponse(b) } }
             launch { ble.state.collect { hmdBle.value = it } }
             edgeStatus.collect { relayStatus.value = it }
         }

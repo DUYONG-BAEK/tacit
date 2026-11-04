@@ -1,5 +1,6 @@
 package kr.co.snail.tacitq.hmd
 
+import kr.co.snail.tacitq.hmd.hud.LiveHold
 import kr.co.snail.tacitq.hmd.hud.Screens
 import kr.co.snail.tacitq.hmd.hud.ShowGate
 import kr.co.snail.tacitq.hmd.hud.ShowGate.Verdict
@@ -89,9 +90,60 @@ class HudLogicTest {
         val review = Screens.from(show("H-04", "part_id" to "A_0250", "confidence" to "0.62", "agree_rate" to "0.5"))
         assertEquals(listOf("결함 후보 · 신뢰도 62.0%", "검출 일치율 50.0%"), review.lines)
 
-        assertEquals("검사 대기", Screens.from(show("H-01", "state" to "IDLE")).big)
+        val idle = Screens.from(show("H-01", "state" to "IDLE"))
+        assertEquals("검사 대기", idle.big)
+        assertEquals("대기 화면은 조준 화면(H-01)과 다른 ID", "IDLE", idle.screen)
+        val aim = Screens.from(show("H-01", "part_no" to "PRS-4410", "done_cnt" to "12", "frames_target" to "4"))
+        assertEquals("H-01", aim.screen)
+        assertEquals("● REC · PRS-4410", aim.topLeft)
+        assertTrue("처리 건수·프레임 문구 없음", aim.lines.isEmpty() && aim.keys.isEmpty())
         assertEquals(listOf("과검출 / 결함 아님", "미검출 / 더 있음"),
             Screens.from(show("H-05", "option_1" to "AI_FALSE_POSITIVE", "option_2" to "AI_FALSE_NEGATIVE")).options)
+    }
+
+    @Test fun `LIVE 쪽지를 해석한다`() {
+        assertEquals(Downlink.Live("NG", "칩찍힘", listOf(listOf(574, 905, 578, 911))),
+            Wire.parse("""{"cmd":"LIVE","d":"NG","l":"칩찍힘","b":[[574,905,578,911]]}""".encodeToByteArray()))
+        assertEquals(Downlink.Live("REVIEW", "이물찍힘", null),
+            Wire.parse("""{"cmd":"LIVE","d":"REVIEW","l":"이물찍힘"}""".encodeToByteArray()))   // 결함 원 끔
+        assertEquals(Downlink.Live(null), Wire.parse("""{"cmd":"LIVE","d":null}""".encodeToByteArray()))
+    }
+
+    @Test fun `LIVE 는 0점5초 유지하고 d null 이나 끊김이면 바로 지운다`() {
+        val h = LiveHold()
+        h.onLive(Downlink.Live("NG", "칩찍힘"), 1_000)
+        assertEquals("NG", h.current(1_499)?.d)
+        assertEquals(1L, h.remainingMs(1_499))
+        assertEquals(null, h.current(1_500))
+        h.onLive(Downlink.Live("NG"), 2_000); h.onLive(Downlink.Live(null), 2_100)
+        assertEquals(null, h.current(2_100))
+        h.onLive(Downlink.Live("REVIEW"), 3_000); h.clear()
+        assertEquals(null, h.current(3_000))
+    }
+
+    @Test fun `큰 글자는 조준 화면에서만 LIVE 가 HINT 보다 먼저`() {
+        val h = LiveHold()
+        val aim = Screens.from(show("H-01", "part_no" to "P"))
+        val hint = "검사 중" to Tone.OK
+        assertEquals(hint, h.big(aim, hint, 0))
+        h.onLive(Downlink.Live("NG", "칩찍힘"), 0)
+        assertEquals("✕ 불량 · 칩찍힘" to Tone.BAD, h.big(aim, hint, 100))
+        assertEquals("유지가 끝나면 HINT 로", hint, h.big(aim, hint, 500))
+        h.onLive(Downlink.Live("REVIEW", "이물찍힘"), 1_000)
+        assertEquals("? 애매 · 이물찍힘" to Tone.WARN, h.big(aim, hint, 1_100))
+        val idle = Screens.idle()
+        assertEquals("대기 화면은 LIVE·HINT 를 그리지 않는다", "검사 대기" to Tone.IDLE, h.big(idle, hint, 1_100))
+        val manual = Screens.manual(null)
+        assertEquals("수동 판정", h.big(manual, hint, 1_100).first)
+    }
+
+    @Test fun `결함 원 좌표 - 0~1000 을 화면 비율로 바꾸고 최소 반지름을 지킨다`() {
+        val (cx, cy, r) = LiveHold.circle(listOf(574, 905, 578, 911), 1280, 720, minRadius = 20f)
+        assertEquals(737.3f, cx, 0.5f)
+        assertEquals(653.8f, cy, 0.5f)
+        assertEquals("수 px 결함도 지름 40 이상", 20f, r, 0f)
+        val big = LiveHold.circle(listOf(0, 0, 100, 100), 1000, 1000, minRadius = 20f)
+        assertEquals(75f, big.third, 0f)
     }
 
     private fun show(screen: String, vararg f: Pair<String, String>) =

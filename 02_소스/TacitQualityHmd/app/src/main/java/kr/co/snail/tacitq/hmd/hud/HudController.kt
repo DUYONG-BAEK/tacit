@@ -29,6 +29,8 @@ class HudController(
     private var screenSeq = 0L                    // 지금 화면을 그린 쪽지의 seq (ttl 소거 판단용 — OVERLAY 는 제외)
     private var lastAim: HudSpec? = null          // 마지막 조준 화면 — 판정 화면 ttl 이 끝나면 여기로 돌아간다
     private var hint: Pair<String, Tone>? = null  // AI 서버 진행 안내(HINT) — 조준 화면 가운데에 표시
+    private val liveHold = LiveHold()             // 실시간 결함(LIVE) — 마지막 결함 뒤 0.5초 유지
+    private val liveExpire = Runnable { drawLive() }
 
     var lastInfo: String = "-"
         private set
@@ -45,6 +47,7 @@ class HudController(
             is Downlink.Show -> onShow(msg, now)
             is Downlink.Ping -> gate.onPing(now)
             is Downlink.Hint -> onHint(msg, now)
+            is Downlink.Live -> onLive(msg, now)
             is Downlink.Unknown -> Log.w(TAG, "모르는 쪽지: ${msg.reason} (${bytes.size}B)")
         }
     }
@@ -54,7 +57,11 @@ class HudController(
         if (current?.screen == "WAIT") render(Screens.waiting("BLE 연결됨 · 쪽지 대기"))
     }
 
-    fun onLinkDisconnected() = gate.onDisconnected(System.currentTimeMillis())
+    fun onLinkDisconnected() {
+        gate.onDisconnected(System.currentTimeMillis())
+        liveHold.clear()                                      // 폰이 끊기면 결함 표시는 바로 지운다(R1)
+        drawLive()
+    }
 
     fun onLinkState(label: String) {
         if (current?.screen == "WAIT") render(Screens.waiting(label))
@@ -102,6 +109,24 @@ class HudController(
         if (current?.screen == "H-01") current?.let(::render)
     }
 
+    /** 실시간 결함 — 초당 여러 번 오므로 화면 전체가 아니라 큰 글자와 결함 원만 다시 그린다 */
+    private fun onLive(m: Downlink.Live, now: Long) {
+        gate.onPing(now)                                      // 살아 있다는 신호로도 친다
+        liveHold.onLive(m, now)
+        drawLive()
+    }
+
+    /** 큰 글자(LIVE > HINT > 기본값)와 결함 원. 유지 시간이 남았으면 끝날 때 다시 그리도록 타이머를 건다. */
+    private fun drawLive() {
+        main.removeCallbacks(liveExpire)
+        val base = current ?: return
+        val now = System.currentTimeMillis()
+        val (big, tone) = liveHold.big(base, hint, now)
+        b.big.set(big, tone)
+        b.marks.show(if (base.screen == "H-01") liveHold.current(now) else null)
+        liveHold.remainingMs(now)?.let { main.postDelayed(liveExpire, it) }
+    }
+
     /** 예외 띠 — `{"type":"NET","text":"서버 지연 · 검사 계속","on":"true"}`. 판정 화면을 덮지 않는다. */
     private fun overlay(f: Map<String, String>) {
         val on = f["on"] != "false"
@@ -125,13 +150,12 @@ class HudController(
 
     private fun render(base: HudSpec) {
         if (base.screen == "H-01" && base.big.isEmpty()) lastAim = base     // 안내가 덧씌워지기 전 원본을 기억
-        val h = hint
-        val spec = if (base.screen == "H-01" && h != null) base.copy(big = h.first, bigTone = h.second) else base
         current = base
+        val spec = base
         b.hud.setBackgroundColor(spec.bg)
         b.topLeft.set(spec.topLeft, spec.topLeftTone)
         b.topRight.set(spec.topRight, spec.topRightTone)
-        b.big.set(spec.big, spec.bigTone)
+        drawLive()                                            // 큰 글자는 LIVE > HINT > 기본값 — 한 곳(LiveHold.big)에서 정한다
         b.lines.text = spec.lines.joinToString("\n")
         b.keys.text = spec.keys.joinToString("      ")
 

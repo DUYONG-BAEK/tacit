@@ -103,7 +103,15 @@ class GattBleLink(
         }
     }
 
-    override suspend fun write(bytes: ByteArray) {
+    override suspend fun write(bytes: ByteArray) = write(bytes, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)
+
+    /**
+     * 응답 없는 쓰기 — 실시간 결함 쪽지(LIVE)처럼 최신 것만 의미 있는 쪽지. HMD 의 쓰기 응답을 기다리지 않는다.
+     * 안드로이드는 응답 없는 쓰기도 [BluetoothGattCallback.onCharacteristicWrite] 가 와야 다음 쓰기를 받으므로 같은 잠금을 쓴다.
+     */
+    suspend fun writeNoResponse(bytes: ByteArray) = write(bytes, BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE)
+
+    private suspend fun write(bytes: ByteArray, writeType: Int) {
         val g = gatt
         val ch = down
         if (!ready || g == null || ch == null) throw IOException("BLE 미연결")
@@ -111,11 +119,11 @@ class GattBleLink(
             val done = CompletableDeferred<Boolean>()
             pendingWrite = done
             val started = if (Build.VERSION.SDK_INT >= 33) {
-                g.writeCharacteristic(ch, bytes, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT) == BluetoothStatusCodes.SUCCESS
+                g.writeCharacteristic(ch, bytes, writeType) == BluetoothStatusCodes.SUCCESS
             } else {
                 @Suppress("DEPRECATION")
                 ch.value = bytes
-                ch.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+                ch.writeType = writeType
                 @Suppress("DEPRECATION")
                 g.writeCharacteristic(ch)
             }

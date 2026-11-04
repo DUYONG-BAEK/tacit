@@ -18,6 +18,12 @@
         android:layout_height="match_parent"
         android:visibility="gone" />
 
+    <!-- 실시간 결함 원(LIVE) — 미리보기 위, HUD 아래. 미리보기와 같은 16:9 로 화면을 꽉 채운다는 전제로 좌표를 바꾼다 -->
+    <kr.co.snail.tacitq.hmd.hud.MarkerView
+        android:id="@+id/marks"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
     <LinearLayout
         android:id="@+id/hud"
         android:layout_width="match_parent"

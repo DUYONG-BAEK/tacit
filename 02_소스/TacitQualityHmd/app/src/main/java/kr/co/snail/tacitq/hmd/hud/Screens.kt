@@ -71,8 +71,9 @@ object Screens {
         big = "모바일 연결 대기", bigTone = Tone.IDLE,
     )
 
+    /** 대기 — BLE 쪽지는 H-01 + state=IDLE 로 오지만, 조준 화면과 겹치지 않게 화면 ID 를 따로 둔다(LIVE·HINT 를 그리지 않음) */
     fun idle() = HudSpec(
-        screen = "H-01", bg = CLEAR,
+        screen = "IDLE", bg = CLEAR,
         topLeft = "● 대기", topLeftTone = Tone.IDLE,
         big = "검사 대기", bigTone = Tone.IDLE,
         lines = listOf("다음 부품을 준비하세요"),
@@ -88,24 +89,15 @@ object Screens {
         keys = listOf("↕ 끄덕임 = 합격", "↔ 가로젓기 = 불합격"),
     )
 
-    private fun aim(f: Map<String, String>): HudSpec {
-        val count = listOfNotNull(f["done_cnt"], f["target_cnt"]).joinToString("/")
-        val view = f["view_seq"]?.let { seq ->
-            "$seq/${f["view_total"] ?: "?"} ${f["view_name"].orEmpty()}".trim()
-        }
-        return HudSpec(
-            screen = "H-01", bg = CLEAR,
-            topLeft = listOf("● REC", f["part_no"], count.ifEmpty { null }).filterNotNull().joinToString(" · "),
-            topLeftTone = Tone.BAD,
-            topRight = view ?: f["view_total"]?.let { "${it}면 검사" }.orEmpty(),
-            topRightTone = Tone.OK,
-            lines = listOfNotNull(
-                f["frames_target"]?.let { "프레임 확보 ${f["frames_got"] ?: 0} / $it" },
-                f["occupancy_pct"]?.let { "화각 점유율 $it%" },
-            ),
-            keys = listOf("↻ 다음 면으로 돌리세요"),
-        )
-    }
+    /**
+     * H-01 조준 — 카메라 위. 2026-11-03 프레임 단위 판정: 가운데 큰 글자는 HudController 가 LIVE > HINT 순으로 채운다.
+     * 처리 건수(폰 M-05에 있음)·면 수·프레임 확보·회전 안내는 없다.
+     */
+    private fun aim(f: Map<String, String>) = HudSpec(
+        screen = "H-01", bg = CLEAR,
+        topLeft = listOfNotNull("● REC", f["part_no"]?.ifBlank { null }).joinToString(" · "),
+        topLeftTone = Tone.BAD,
+    )
 
     private fun rotate(f: Map<String, String>) = HudSpec(
         screen = "H-1b", bg = BG_WARN,
