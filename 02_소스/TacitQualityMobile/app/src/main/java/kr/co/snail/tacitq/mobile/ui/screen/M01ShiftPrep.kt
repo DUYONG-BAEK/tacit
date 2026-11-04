@@ -48,7 +48,6 @@ fun ShiftPrepScreen(vm: AppViewModel) {
     var edgeUrl by remember { mutableStateOf(settings.edgeUrl) }
     var edgeKind by remember { mutableStateOf(settings.edgeKind) }
     var aiUrl by remember { mutableStateOf(settings.aiUrl) }
-    var mockAiUrl by remember { mutableStateOf(settings.mockAiUrl) }
     var autoDismiss by remember { mutableStateOf(settings.autoDismiss) }
     var stationId by remember { mutableStateOf(settings.stationId) }
     val hmdBle by InspectionService.hmdBle.collectAsStateWithLifecycle()
@@ -146,12 +145,7 @@ fun ShiftPrepScreen(vm: AppViewModel) {
     if (edgeKind == DevSettings.EDGE_AI) {
         OutlinedTextField(
             value = aiUrl, onValueChange = { aiUrl = it; settings.aiUrl = it },
-            label = { Text("AI 서버 주소 (사무실)") }, singleLine = true, enabled = !relay,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        OutlinedTextField(
-            value = mockAiUrl, onValueChange = { mockAiUrl = it; settings.mockAiUrl = it },
-            label = { Text("모의 AI 서버 주소 (노트북) — 사무실 서버 응답 없을 때 자동 사용") }, singleLine = true, enabled = !relay,
+            label = { Text("AI 서버 주소") }, singleLine = true, enabled = !relay,
             modifier = Modifier.fillMaxWidth(),
         )
         OutlinedTextField(

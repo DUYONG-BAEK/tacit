@@ -48,24 +48,23 @@ import kotlin.coroutines.suspendCoroutine
  * 설계서 §9 · A4_WEBRTC_API.md §5. 모의 엣지용 [StreamRelay] 자리를 그대로 대신한다(같은 offer · status).
  *
  *  - 영상: 마지막 JPEG 1장만 들고 있다가 [FRAME_MS] 마다 I420 으로 바꿔 넣는다(밀린 프레임은 버림, 초당 최대 10장).
- *  - 해상도: 대역폭이 모자라도 해상도를 낮추지 않게 MAINTAIN_RESOLUTION (서버는 종이 긴 변 ≥1216px 필요).
- *  - 장애: 생존 신호가 없으므로 연결 상태 disconnected·failed·closed 를 끊김으로 보고 [RECONNECT_MS] 마다 새 POST /offer.
- *    422·403 은 설정 오류 — 다시 시도하지 않고 화면에 띄운다.
+ *  - 해상도: 대역폭이 모자라도 해상도를 낮추지 않게 MAINTAIN_RESOLUTION (서버는 결함을 640px 타일로 보므로 해상도가 곧 검출력, API §5.5).
+ *  - 장애: 생존 신호가 없으므로 연결 상태 disconnected·failed·closed 를 끊김으로 보고 새 POST /offer.
+ *    재시도 간격·시도 마감은 [Reconnect](1→2→4→5초, 10초). 422·403 은 설정 오류 — 다시 시도하지 않고 화면에 띄운다.
  */
 class AiEdgeLink(
     context: Context,
-    /** 붙어 볼 서버 (이름, 주소) — 앞에서부터 응답하는 첫 서버를 쓴다. 예: 사무실 AI 서버 → 노트북 모의 AI 서버 */
-    private val servers: List<Pair<String, String>>,
+    /** AI 서버 주소 — 예: http://<서버>:8080 */
+    private val baseUrl: String,
     private val stationId: String,
     private val emit: (Event) -> Unit,
-    /** HMD 조준 화면 진행 안내(종이 없음 · 더 가까이 · 수집 n/10 · 판정 중) */
+    /** HMD 조준 화면 진행 안내(제품을 비춰 주세요 · 검사 중) */
     onHint: (text: String, tone: String) -> Unit = { _, _ -> },
 ) {
     private val appContext = context.applicationContext
-    @Volatile private var baseUrl = servers.first().second
-    @Volatile private var serverName = servers.first().first
-    @Volatile private var api = AiResultsApi(baseUrl)
+    private val api = AiResultsApi(baseUrl)
     private val flow = AiFlow(emit, onHint = onHint)
+    private val policy = Reconnect()
     // WebRTC 콜백(신호 스레드)에서 pc 를 닫으면 멈추므로, 연결 다루기는 모두 이 한 줄 스레드에서 한다
     private val linkThread = Executors.newSingleThreadExecutor { Thread(it, "AiEdgeLink") }.asCoroutineDispatcher()
 
@@ -80,10 +79,10 @@ class AiEdgeLink(
     private var pc: PeerConnection? = null
     private var channel: DataChannel? = null
     @Volatile private var connected = false
-    @Volatile private var connecting = false
     @Volatile private var unreachable = false
     @Volatile private var configError: String? = null
-    private var lastAttempt = Long.MIN_VALUE / 2
+    /** 지금 PeerConnection 의 세대 — [closePc] 마다 올린다. 닫힌 연결이 뒤늦게 보내는 상태 콜백을 거른다. */
+    private var gen = 0
     private var lastStats = 0L
     @Volatile private var sentInfo: String? = null
     private var argb: ByteBuffer? = null
@@ -129,53 +128,34 @@ class AiEdgeLink(
 
     private suspend fun tick() {
         val now = System.currentTimeMillis()
-        if (!connected && !connecting && configError == null && now - lastAttempt >= RECONNECT_MS) {
-            lastAttempt = now
-            connect()
+        if (policy.expired(now)) {
+            Log.w(TAG, "연결 시도 ${Reconnect.ATTEMPT_TIMEOUT_MS}ms 초과 — 닫고 다시")
+            closePc()
+            lost("연결 시간 초과")
         }
+        if (policy.due(now)) connect(now)
         if (connected && now - lastStats >= STATS_MS) { lastStats = now; logStats() }
         _status.value = StreamRelay.Status(
             edgeConnected = connected, received = received, sent = sent, queued = 0,
             dropped = (received - sent).coerceAtLeast(0), edgeFps = 0.0,
             lastJudge = flow.lastJudge, lastDelayMs = flow.lastDelayMs,
-            guide = configError ?: ("[$serverName] " + flow.guide + (sentInfo?.let { "\n$it" } ?: if (width > 0) " · ${width}×$height" else "")),
+            guide = configError ?: (flow.guide + (sentInfo?.let { "\n$it" } ?: if (width > 0) " · ${width}×$height" else "")),
         )
     }
 
     // ── 연결 ─────────────────────────────────────────────
 
-    /**
-     * 붙을 서버 고르기 — 목록 순서대로 TCP 접속을 짧게 시험해 첫 응답 서버. 매 연결 시도마다 다시 고르므로
-     * 사무실 Wi-Fi 에 들어가면 실제 AI 서버로, 밖이면 모의 AI 서버로 저절로 바뀐다.
-     */
-    private suspend fun pickServer(): Boolean = withContext(Dispatchers.IO) {
-        val hit = servers.firstOrNull { (_, url) -> url.isNotBlank() && reachable(url) } ?: return@withContext false
-        if (hit.second != baseUrl) Log.i(TAG, "서버 전환 $serverName → ${hit.first} (${hit.second})")
-        serverName = hit.first; baseUrl = hit.second; api = AiResultsApi(baseUrl)
-        true
-    }
-
-    private fun reachable(url: String): Boolean = runCatching {
-        val u = java.net.URI(url)
-        java.net.Socket().use { it.connect(java.net.InetSocketAddress(u.host, if (u.port > 0) u.port else 80), PROBE_MS) }
-        true
-    }.getOrDefault(false)
-
-    private suspend fun connect() {
-        connecting = true
+    private suspend fun connect(now: Long) {
+        policy.onAttempt(now)
         try {
             closePc()
-            if (!pickServer()) {
-                serverName = "서버 없음"
-                lost("AI 서버 응답 없음 — ${servers.joinToString { it.first }} 모두")
-                return
-            }
+            val myGen = gen
             val gathered = CompletableDeferred<Unit>()
             val p = factory.createPeerConnection(
                 PeerConnection.RTCConfiguration(emptyList()).apply {            // ICE 서버 없음 — 같은 망 전제
                     sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
                 },
-                observer(gathered),
+                observer(gathered, myGen),
             ) ?: error("PeerConnection 생성 실패")
             pc = p
             val sender = p.addTrack(factory.createVideoTrack("hmd", source), listOf("hmd"))
@@ -198,6 +178,7 @@ class AiEdgeLink(
                 403, 422 -> {
                     configError = "설정 오류 ${reply.code} — 스테이션·주소 확인 (${detail(reply.body)})"
                     Log.w(TAG, configError!!)
+                    policy.onConfigError()
                     closePc()
                     lost("설정 오류 ${reply.code}")
                 }
@@ -207,12 +188,10 @@ class AiEdgeLink(
             Log.w(TAG, "연결 실패: ${e.message}")
             closePc()
             lost("연결 실패 ${e.message}")
-        } finally {
-            connecting = false
         }
     }
 
-    /** 대역폭이 모자라도 해상도를 낮추지 않게 — 서버는 종이 긴 변 ≥1216px 가 필요하다. */
+    /** 대역폭이 모자라도 해상도를 낮추지 않게 — 해상도가 낮을수록 작은 결함을 놓친다(API §5.5). */
     private fun keepResolution(sender: RtpSender) {
         val p = sender.parameters
         p.degradationPreference = RtpParameters.DegradationPreference.MAINTAIN_RESOLUTION
@@ -233,18 +212,21 @@ class AiEdgeLink(
         }
     }
 
-    private fun observer(gathered: CompletableDeferred<Unit>) = object : PeerConnection.Observer {
+    /** [myGen]: 이 관찰자가 붙은 PeerConnection 의 세대. 이미 닫힌 연결(dispose 때 CLOSED 를 보낸다)의 콜백은 버린다. */
+    private fun observer(gathered: CompletableDeferred<Unit>, myGen: Int) = object : PeerConnection.Observer {
         override fun onIceGatheringChange(s: PeerConnection.IceGatheringState) {
             if (s == PeerConnection.IceGatheringState.COMPLETE) gathered.complete(Unit)
         }
         override fun onConnectionChange(s: PeerConnection.PeerConnectionState) {
-            Log.i(TAG, "연결 상태 $s")
+            Log.i(TAG, "연결 상태 $s (세대 $myGen)")
             kotlinx.coroutines.CoroutineScope(linkThread).launch {
+                if (myGen != gen) return@launch
                 when (s) {
                     PeerConnection.PeerConnectionState.CONNECTED -> onConnected()
+                    // 연결 전(시도 중)에 온 것도 실패로 센다 — Reconnect 가 다음 간격을 정한다
                     PeerConnection.PeerConnectionState.DISCONNECTED,
                     PeerConnection.PeerConnectionState.FAILED,
-                    PeerConnection.PeerConnectionState.CLOSED -> if (connected) { closePc(); lost("연결 $s") }
+                    PeerConnection.PeerConnectionState.CLOSED -> { closePc(); lost("연결 $s") }
                     else -> Unit
                 }
             }
@@ -273,35 +255,21 @@ class AiEdgeLink(
 
     private fun onConnected() {
         connected = true
+        policy.onConnected()
         flow.onConnected()
         if (unreachable) { unreachable = false; emit(Event.EdgeRecovered) }
-        val waiting = flow.pending
-        if (waiting.isNotEmpty()) kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch { poll(waiting) }
-    }
-
-    /** 끊긴 사이 판정 — captured 까지 간 종이를 1초 간격으로 조회(API §7). */
-    private suspend fun poll(ids: List<String>) {
-        val left = ids.toMutableList()
-        repeat(30) {
-            left.removeAll { id ->
-                runCatching { api.result(id) }.getOrNull()?.takeIf { it.code == 200 }?.let { r ->
-                    val v = AiMessages.parseResult(r.body)
-                    flow.onPolled(v)
-                    v.status != "pending"
-                } ?: false
-            }
-            if (left.isEmpty()) return
-            delay(1_000)
-        }
     }
 
     private fun lost(reason: String) {
         connected = false
+        policy.onFailure(System.currentTimeMillis())
         flow.onDisconnected()
         if (!unreachable) { unreachable = true; emit(Event.EdgeUnreachable(reason)) }
+        if (configError == null) Log.i(TAG, "끊김($reason) — 연속 실패 ${policy.failures}회, ${Reconnect.delayMs(policy.failures)}ms 뒤 재시도")
     }
 
     private fun closePc() {
+        gen++
         channel?.let { runCatching { it.unregisterObserver(); it.close(); it.dispose() } }
         channel = null
         pc?.let { runCatching { it.dispose() } }
@@ -372,11 +340,9 @@ class AiEdgeLink(
     companion object {
         private const val TAG = "TacitQ.AiEdge"
         const val TICK_MS = 500L
-        const val RECONNECT_MS = 5_000L
-        const val FRAME_MS = 100L                 // 초당 최대 10장 — 서버 hold 간격 0.2초
+        const val FRAME_MS = 100L                 // 초당 최대 10장 — 서버도 초당 10프레임까지만 쓴다(API §5.5)
         const val GATHER_MS = 5_000L
         const val MAX_BITRATE = 6_000_000
-        const val PROBE_MS = 800
         const val MIN_BITRATE = 2_000_000          // 처음부터 낮은 비트레이트로 시작해 해상도를 깎지 않게
         const val STATS_MS = 5_000L
     }

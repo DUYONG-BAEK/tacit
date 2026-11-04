@@ -25,11 +25,6 @@ class DevSettings(context: Context) {
         get() = prefs.getString(KEY_AI, DEFAULT_AI)!!
         set(v) = prefs.edit().putString(KEY_AI, v.trim()).apply()
 
-    /** 노트북 모의 AI 서버 — 사무실 AI 서버가 응답하지 않을 때(사내망 밖) 자동으로 쓴다 */
-    var mockAiUrl: String
-        get() = prefs.getString(KEY_MOCK_AI, "")!!
-        set(v) = prefs.edit().putString(KEY_MOCK_AI, v.trim()).apply()
-
     /** 판정 화면 전환 — true 자동(시간 뒤 카메라) / false 수동(HMD 버튼) */
     var autoDismiss: Boolean
         get() = prefs.getBoolean(KEY_AUTO_DISMISS, true)
@@ -45,7 +40,6 @@ class DevSettings(context: Context) {
         private const val KEY_KIND = "edge_kind"
         private const val KEY_AI = "ai_url"
         private const val KEY_STATION = "station_id"
-        private const val KEY_MOCK_AI = "mock_ai_url"
         private const val KEY_AUTO_DISMISS = "auto_dismiss"
         const val EDGE_MOCK = "mock"
         const val EDGE_AI = "ai"

@@ -139,14 +139,12 @@ class InspectionService : LifecycleService() {
         val edgeRun: suspend () -> Unit
         val edgeStatus: StateFlow<StreamRelay.Status>
         if (settings.edgeKind == DevSettings.EDGE_AI) {
-            // 사무실 AI 서버 먼저, 응답 없으면 노트북 모의 AI 서버 — 연결할 때마다 다시 골라 장소가 바뀌어도 자동 전환
-            val servers = listOf("사무실 AI" to settings.aiUrl, "모의 AI(PC)" to settings.mockAiUrl)
-            val ai = AiEdgeLink(this, servers, settings.stationId, toEngine, onHint = { text, tone ->
+            val ai = AiEdgeLink(this, settings.aiUrl, settings.stationId, toEngine, onHint = { text, tone ->
                 // HMD 조준 화면 진행 안내 — 화면 지시(SHOW)와 달리 순번·ACK 없이 최신 것만 보낸다
                 effectScope.launch { runCatching { ble.write(HintWire.encode(text, tone)) } }
             })
             offer = ai::offer; edgeRun = ai::run; edgeStatus = ai.status
-            Log.i(TAG, "교대 시작 $sessionId · HMD ${this.hmdUrl} → AI 서버 ${servers.joinToString { "${it.first} ${it.second.ifBlank { "-" }}" }} (${settings.stationId})")
+            Log.i(TAG, "교대 시작 $sessionId · HMD ${this.hmdUrl} → AI 서버 ${settings.aiUrl} (${settings.stationId})")
         } else {
             val relay = StreamRelay(transport = WebSocketTransport(), emit = toEngine)
             offer = relay::offer
