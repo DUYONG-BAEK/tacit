@@ -11,6 +11,7 @@ data class LiveMark(
     val detections: List<AiBox> = emptyList(),
     val frameW: Int = 0,
     val frameH: Int = 0,
+    val resultId: String? = null,           // 서버가 이 프레임을 저장했으면 그 ID(확대 보기용)
 ) {
     companion object { val CLEAR = LiveMark(null) }
 }
@@ -114,7 +115,7 @@ class AiFlow(
         if (m.decision != "OK") {                                    // 모르는 값도 안전측으로 결함 프레임
             s.defectFrames++
             m.resultId?.let { s.resultIds += it to m.score }
-            onLive(LiveMark(m.decision, m.defectLabel, m.detections, m.frameW, m.frameH))
+            onLive(LiveMark(m.decision, m.defectLabel, m.detections, m.frameW, m.frameH, m.resultId))
             liveAt = now
         }
         s.recent.addLast(m.decision)

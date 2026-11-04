@@ -31,6 +31,7 @@ import kr.co.snail.tacitq.mobile.core.Profile
 import kr.co.snail.tacitq.mobile.core.Screens
 import kotlinx.coroutines.flow.StateFlow
 import kr.co.snail.tacitq.mobile.ai.AiEdgeLink
+import kr.co.snail.tacitq.mobile.ai.LiveMark
 import kr.co.snail.tacitq.mobile.relay.DevSettings
 import kr.co.snail.tacitq.mobile.relay.Hello
 import kr.co.snail.tacitq.mobile.relay.HmdVideoSource
@@ -150,7 +151,11 @@ class InspectionService : LifecycleService() {
                     effectScope.launch { runCatching { ble.write(HintWire.encode(text, tone)) } }
                 },
                 // 실시간 결함 쪽지 — 최신 1개만 남기고(앞 쓰기가 안 끝났으면 덮어씀) 응답 없는 쓰기로 보낸다(R8)
-                onLive = { m -> liveOut.trySend(LiveWire.encode(m, profile.liveMarks)) },
+                onLive = { m ->
+                    liveOut.trySend(LiveWire.encode(m, profile.liveMarks))
+                    liveMark.value = LiveMarkAt(m, System.currentTimeMillis())    // M-07 결함 원
+                    m.resultId?.let { lastDefectId.value = it }                   // M-07 최근 결함 확대
+                },
                 onAlarm = { vibrate(3) },                         // 제품 구간에서 결함이 처음 확정될 때 1회(R5)
             )
             offer = ai::offer; edgeRun = ai::run; edgeStatus = ai.status
@@ -200,6 +205,8 @@ class InspectionService : LifecycleService() {
         hmdVideo.value = false
         hmdBle.value = "-"
         liveFrame.value = null
+        liveMark.value = null
+        lastDefectId.value = null
         val job = relayJob
         relayJob = null
         effectScope.launch {
@@ -328,6 +335,13 @@ class InspectionService : LifecycleService() {
         val liveFrame = MutableStateFlow<LiveFrame?>(null)
 
         class LiveFrame(val hmdSeq: Long, val data: ByteArray, val codec: String)
+
+        /** AI 서버 실시간 결함(NG·REVIEW 프레임·지움)과 받은 시각 — M-07 결함 원(마지막 결함 뒤 markHoldMs 유지) */
+        val liveMark = MutableStateFlow<LiveMarkAt?>(null)
+        /** 서버가 저장한 가장 최근 결함 프레임 — M-07 확대 작은 창 */
+        val lastDefectId = MutableStateFlow<String?>(null)
+
+        class LiveMarkAt(val mark: LiveMark, val at: Long)
 
         fun start(ctx: Context, line: String, partNo: String, hmdUrl: String, edgeUrl: String) {
             ctx.startForegroundService(
