@@ -85,6 +85,30 @@ class LocalStoreTest {
         ctx.deleteDatabase(name)
     }
 
+    /** v2 — 제품 구간 기록의 새 칸(원판정·결함 종류·기준값·result_id 목록·프레임 수)이 그대로 읽힌다. */
+    @Test fun `제품 구간 기록의 새 칸이 저장 후 그대로 읽힌다`() = runTest {
+        val name = "v2_segment.db"
+        ctx.deleteDatabase(name)
+        val (db, store) = open(name)
+        store.record(rec("ST-02-1000", "FAIL", "NONE", 1_000L).copy(
+            aiScore = 0.72, aiDecision = "REVIEW", defectLabel = "이물찍힘", threshold = 0.25,
+            resultIds = listOf("c311ab4b00e5-000041", "c311ab4b00e5-000030"), frames = 12, defectFrames = 3,
+        ))
+        store.record(rec("ST-02-2000", "PASS", "NONE", 2_000L).copy(aiDecision = "OK", frames = 8))
+
+        val rows = db.dao().allInspections().associateBy { it.inspectionId }
+        val ng = rows.getValue("ST-02-1000")
+        assertEquals("REVIEW", ng.aiDecision)
+        assertEquals("이물찍힘", ng.defectLabel)
+        assertEquals(0.25, ng.threshold!!, 1e-9)
+        assertEquals("""["c311ab4b00e5-000041","c311ab4b00e5-000030"]""", ng.resultIds)
+        assertEquals(12 to 3, ng.framesReceived to ng.framesSelected)
+        assertNull("결함 프레임이 없으면 비운다", rows.getValue("ST-02-2000").resultIds)
+
+        db.close()
+        ctx.deleteDatabase(name)
+    }
+
     private fun rec(id: String, verdict: String, action: String, at: Long) = InspectionRecord(
         partId = id, aiVerdict = verdict, workerAction = action,
         inputMethod = "NONE", at = at,

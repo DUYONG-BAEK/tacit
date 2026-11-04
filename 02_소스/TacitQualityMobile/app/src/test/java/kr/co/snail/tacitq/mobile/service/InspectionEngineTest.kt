@@ -92,42 +92,23 @@ class InspectionEngineTest {
         } finally { h.close() }
     }
 
-    /** 배선 — PASS 는 자동 통과(AUTO_PASS)로 저장되고 H-02 를 띄운다(C3→C5·C4). */
-    @Test fun `PASS 는 자동 통과로 저장되고 화면을 띄운다`() {
+    /** 배선 — AI 서버 제품 구간 1건이 엔진을 거쳐 저장된다(C3→C5). 판정 화면·진동은 없다(2026-11-03). */
+    @Test fun `제품 구간 1건이 엔진을 거쳐 저장된다`() {
         val h = running()
         try {
-            h.engine.send(Event.ShiftStarted("A", "PRS-4410", Profile(sampleRatePct = 0.0)))
-            h.engine.send(judge(1, "A_0001", Verdict.PASS))
-            waitUntil { h.sinks.persists.isNotEmpty() && h.sinks.shows.any { it.screen == "H-02" } }
-            assertEquals(WorkerAct.AUTO_PASS.code, h.sinks.persists.last().workerAction)
-        } finally { h.close() }
-    }
-
-    /** 타이머 왕복 — 확인 없이 시간이 지나면 엔진이 TimerFired 를 되먹여 TIMEOUT 을 남긴다(R12). */
-    @Test fun `확인 시간 초과가 엔진을 거쳐 TIMEOUT 으로 남는다`() {
-        val h = running()
-        try {
-            // 확인 대기를 50ms 로 줄여 타이머가 시험 중에 만료되게 한다.
-            h.engine.send(Event.ShiftStarted("A", "PRS-4410", Profile(confirmWaitMs = 50)))
-            h.engine.send(judge(1, "A_0002", Verdict.FAIL))
-            waitUntil { h.sinks.persists.any { it.workerAction == WorkerAct.TIMEOUT.code } }
-            assertTrue("FAIL 은 진동 3회", h.sinks.vibrates.contains(3))
-            assertTrue("불합격 화면", h.sinks.shows.any { it.screen == "H-03" })
-        } finally { h.close() }
-    }
-
-    /** 타이머 취소 — 트레이 투입이 먼저 오면 확인으로 확정되고 TIMEOUT 은 남지 않는다(R08 + CancelTimer). */
-    @Test fun `트레이 투입이 먼저 오면 TIMEOUT 없이 확인된다`() {
-        val h = running()
-        try {
-            h.engine.send(Event.ShiftStarted("A", "PRS-4410", Profile(confirmWaitMs = 5_000)))
-            h.engine.send(judge(1, "A_0003", Verdict.FAIL))
-            waitUntil { h.sinks.shows.any { it.screen == "H-03" } }
-            h.engine.send(Event.TrayDetected("A_0003", "DEFECT", at = 2_000))
-            waitUntil { h.sinks.persists.any { it.workerAction == WorkerAct.CONFIRMED.code } }
-            Thread.sleep(150)   // 타이머(5초)가 살아있다면 그 사이 TIMEOUT 이 끼어들 기회를 준다
-            assertFalse("취소된 타이머는 TIMEOUT 을 남기지 않는다",
-                h.sinks.persists.any { it.workerAction == WorkerAct.TIMEOUT.code })
+            h.engine.send(Event.ShiftStarted("A", "PRS-4410", Profile()))
+            h.engine.send(judge(1, "ST-02-1000", Verdict.FAIL).copy(aiDecision = "NG", defectLabel = "칩찍힘",
+                resultIds = listOf("r-2", "r-1"), frames = 12, defectFrames = 3))
+            waitUntil { h.sinks.persists.isNotEmpty() }
+            val r = h.sinks.persists.single()
+            assertEquals(WorkerAct.NONE.code, r.workerAction)
+            assertEquals(Verdict.FAIL.code, r.aiVerdict)
+            assertEquals("NG", r.aiDecision)
+            assertEquals(listOf("r-2", "r-1"), r.resultIds)
+            assertEquals(12 to 3, r.frames to r.defectFrames)
+            Thread.sleep(50)
+            assertTrue("진동 없음", h.sinks.vibrates.isEmpty())
+            assertTrue("판정 화면 없음", h.sinks.shows.none { it.screen == "H-02" || it.screen == "H-03" })
         } finally { h.close() }
     }
 }

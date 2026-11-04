@@ -110,31 +110,17 @@ class StateMachine(private var state: AppState = AppState()) {
         if (e.partId in s.handled) return s.copy(lastSeq = e.seq) to emptyList()
 
         // 판정은 AI(엣지)가 한다 — 폰은 결과를 그대로 보여 준다(2026-10-07 결정).
-        // 합격이 아닌 값(REVIEW·알 수 없는 값)은 안전측으로 불합격. 일치율·지연·표본으로 판정을 바꾸지 않는다.
+        // 합격이 아닌 값(REVIEW·알 수 없는 값)은 안전측으로 불합격. 원판정(REVIEW 등)은 기록에 따로 남는다.
         val verdict = if (e.verdict == Verdict.PASS) Verdict.PASS else Verdict.FAIL
         val prev = s.parts[e.partId]
         val base = (prev ?: Part(e.partId, PartPhase.CAPTURING)).copy(
-            phase = PartPhase.JUDGED, verdict = verdict, severity = e.severity,
+            phase = PartPhase.CONFIRMED, verdict = verdict, severity = e.severity,
             confidence = e.confidence, agreeRate = e.agreeRate, judgedAt = e.arrivedAt,
         )
-        val next = s.copy(lastSeq = e.seq, handled = s.handled + e.partId)
-
-        // R03 — 불합격. 화면은 FAIL_TTL_MS 보여 준 뒤 조준 화면(카메라)으로 돌아간다 — AI 서버에는 트레이 확인 신호가
-        // 없어 화면을 계속 덮으면 다음 종이를 비출 수 없다(2026-10-18 결정). 진동 3회 · 확인 대기 기록은 그대로.
-        if (verdict == Verdict.FAIL) {
-            return next.withPart(base) to listOf(
-                Effect.ShowScreen(Screens.fail(e, ttl = if (s.profile.autoDismiss) FAIL_TTL_MS else 0)),
-                Effect.Vibrate(3),
-                Effect.Persist(Records.failPending(base)),     // 이력에 바로 — 확인·시간 초과 시 같은 건을 덮어쓴다
-                Effect.StartTimer("confirm:${e.partId}", s.profile.confirmWaitMs, e.partId),
-            )
-        }
-
-        // R01 — 합격. 1.5초 후 자동 소거. 작업자 조작 0회.
-        return next.withPart(base.copy(phase = PartPhase.CONFIRMED)).bump() to listOf(
-            Effect.ShowScreen(Screens.pass(e, ttl = if (s.profile.autoDismiss) PASS_TTL_MS else 0)),
-            Effect.Persist(Records.autoPass(base)),
-        )
+        // 2026-11-03 규격 — 판정은 제품 구간 1건으로 온다. 실시간 표시(HMD LIVE)·진동은 구간 중에 AiFlow 가 이미 했다.
+        // 판정 화면(H-02·H-03)·확인 타이머는 없다(사람의 최종 판정 절차가 없어짐). 기록만 남긴다.
+        return s.copy(lastSeq = e.seq, handled = s.handled + e.partId).withPart(base).bump() to
+            listOf(Effect.Persist(Records.episode(e, verdict)))
     }
 
     /** 제스처 — R09(끄덕/확정)·R10(젓기/이의). 문맥 게이팅으로 오인식을 막는다. */
@@ -188,13 +174,6 @@ class StateMachine(private var state: AppState = AppState()) {
     // ── 작은 도우미 — 상태를 불변으로 바꾼다 ──────────────
     private fun AppState.withPart(p: Part) = copy(parts = parts + (p.id to p))
     private fun AppState.bump() = copy(doneCount = doneCount + 1)
-
-    companion object {
-        /** 불합격 화면 표시 시간 — 그 뒤 조준 화면(카메라) */
-        const val FAIL_TTL_MS = 2_000L
-        /** 합격 화면 표시 시간(자동 모드) */
-        const val PASS_TTL_MS = 1_500L
-    }
 
     /** R11 — 이의 사유 선택 직전에 이의로 들어간 건을 찾는다(제스처 창 obj-<id>). */
     private fun AppState.lastObjectionPartId(): String =

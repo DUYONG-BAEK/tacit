@@ -2,6 +2,7 @@ package kr.co.snail.tacitq.mobile.core
 
 import kr.co.snail.tacitq.mobile.model.ConfirmTrigger
 import kr.co.snail.tacitq.mobile.model.InputMethod
+import kr.co.snail.tacitq.mobile.model.Verdict
 import kr.co.snail.tacitq.mobile.model.WorkerAct
 
 /**
@@ -10,25 +11,20 @@ import kr.co.snail.tacitq.mobile.model.WorkerAct
  */
 object Records {
 
-    /** R01 — 합격 무확인 자동 통과 */
-    fun autoPass(p: Part) = InspectionRecord(
-        partId = p.id,
-        aiVerdict = p.verdict?.code,
-        workerAction = WorkerAct.AUTO_PASS.code,
+    /** 제품 구간 1건(AI 서버 프레임 단위 판정) — 확인 절차 없이 바로 확정. 원판정·결함 프레임은 합격/불합격과 따로 남긴다. */
+    fun episode(e: Event.JudgeResult, verdict: Verdict) = InspectionRecord(
+        partId = e.partId,
+        aiVerdict = verdict.code,
+        workerAction = WorkerAct.NONE.code,
         inputMethod = InputMethod.NONE.code,
-        at = p.judgedAt ?: 0,
-        aiScore = p.confidence,
-    )
-
-    /** R03 — 불합격 판정 직후. 이력에 바로 보이게 먼저 남긴다(같은 partId 로 확인·초과 기록이 덮어쓴다). */
-    fun failPending(p: Part) = InspectionRecord(
-        partId = p.id,
-        aiVerdict = p.verdict?.code,
-        workerAction = WorkerAct.PENDING.code,
-        confirmTrigger = ConfirmTrigger.FAIL_VERDICT.code,
-        inputMethod = InputMethod.NONE.code,
-        at = p.judgedAt ?: 0,
-        aiScore = p.confidence,
+        at = e.arrivedAt,
+        aiScore = e.confidence,
+        aiDecision = e.aiDecision,
+        defectLabel = e.defectLabel,
+        threshold = e.threshold,
+        resultIds = e.resultIds,
+        frames = e.frames,
+        defectFrames = e.defectFrames,
     )
 
     /** R08 — 트레이 투입 = 확인 */

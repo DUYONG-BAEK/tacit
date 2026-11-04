@@ -48,7 +48,7 @@ fun ShiftPrepScreen(vm: AppViewModel) {
     var edgeUrl by remember { mutableStateOf(settings.edgeUrl) }
     var edgeKind by remember { mutableStateOf(settings.edgeKind) }
     var aiUrl by remember { mutableStateOf(settings.aiUrl) }
-    var autoDismiss by remember { mutableStateOf(settings.autoDismiss) }
+    var liveMarks by remember { mutableStateOf(settings.liveMarks) }
     var stationId by remember { mutableStateOf(settings.stationId) }
     val hmdBle by InspectionService.hmdBle.collectAsStateWithLifecycle()
     val blePermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { r ->
@@ -98,7 +98,7 @@ fun ShiftPrepScreen(vm: AppViewModel) {
         }
     }
 
-    Field("모델 · 임계값", "${vm.repo.profile().profileVersion} · 앙상블 목표 ${profile.framesTarget}장")
+    Field("모델 · 임계값", vm.repo.profile().profileVersion)
     Field("HMD", "${hmd.deviceId} · 배터리 ${hmd.batteryPct}% · ${"%.1f".format(hmd.bitrateMbps)} Mbps")
 
     NoteBox(
@@ -115,17 +115,17 @@ fun ShiftPrepScreen(vm: AppViewModel) {
         label = { Text("HMD 영상 주소") }, singleLine = true, enabled = !relay,
         modifier = Modifier.fillMaxWidth(),
     )
-    // 판정 화면 전환 — 자동(합격 1.5초·불합격 2초 뒤 카메라) / 수동(HMD 버튼). 버튼은 두 모드 모두 바로 카메라
+    // HMD 결함 원 — 켜면 판정 글자 + 결함 위치 원, 끄면 판정 글자만(표시 지연이 커서 원이 어긋나 보일 때)
     Row(Modifier.padding(top = 8.dp)) {
-        Text("판정 화면", fontSize = 13.sp, color = T.Ink, modifier = Modifier.padding(end = 14.dp))
-        listOf(true to "자동 전환", false to "수동 (HMD 버튼)").forEach { (v, label) ->
-            val on = autoDismiss == v
+        Text("HMD 결함 원", fontSize = 13.sp, color = T.Ink, modifier = Modifier.padding(end = 14.dp))
+        listOf(true to "켜기", false to "끄기 (판정 글자만)").forEach { (v, label) ->
+            val on = liveMarks == v
             Text(
                 (if (on) "● " else "○ ") + label,
                 fontSize = 13.sp, color = if (on) T.Purple else T.Muted,
                 modifier = Modifier
                     .padding(end = 18.dp)
-                    .clickable(enabled = !relay) { autoDismiss = v; settings.autoDismiss = v },
+                    .clickable(enabled = !relay) { liveMarks = v; settings.liveMarks = v },
             )
         }
     }
@@ -166,7 +166,8 @@ fun ShiftPrepScreen(vm: AppViewModel) {
             if (s == null) "중계 준비 중…" else
                 "HMD 영상 ${if (hmdOn) "수신" else "끊김"} · 화면 $hmdBle · 엣지 ${if (s.edgeConnected) "연결" else "끊김"} · " +
                     "보냄 ${s.sent} · 큐 ${s.queued} · 버림 ${s.dropped}" +
-                    (s.lastJudge?.let { " · 판정 $it (${s.lastDelayMs}ms)" } ?: "") +
+                    (s.lastSegment?.let { " · 마지막 구간 ${if (it.pass) "합격" else "불합격"}(${it.aiDecision}) · 결함 프레임 ${it.defectFrames}/${it.frames}장" }
+                        ?: s.lastJudge?.let { " · 판정 $it (${s.lastDelayMs}ms)" } ?: "") +
                     (s.guide?.let { "\n서버: $it" } ?: ""),
             fontSize = 11.5.sp, color = if (s?.edgeConnected == true) T.Teal else T.Red,
             modifier = Modifier.padding(top = 6.dp),

@@ -52,5 +52,11 @@ data class InspectionRecord(
     val lateRecovery: Boolean = false,
     val objectionReason: String? = null,  // model.ObjectionReason.code
     val at: Long = 0,
-    val aiScore: Double? = null,          // AI 서버 이상 점수(score) — 이력 표시용
+    val aiScore: Double? = null,          // AI 서버 결함 점수(구간 최고 score) — 이력 표시용
+    val aiDecision: String? = null,       // AI 원판정 OK · NG · REVIEW (aiVerdict 는 합격/불합격)
+    val defectLabel: String? = null,
+    val threshold: Double? = null,        // 그때의 서버 기준값 — 모델이 바뀌어도 기록을 다시 쓰지 않는다
+    val resultIds: List<String> = emptyList(),
+    val frames: Int = 0,
+    val defectFrames: Int = 0,
 )

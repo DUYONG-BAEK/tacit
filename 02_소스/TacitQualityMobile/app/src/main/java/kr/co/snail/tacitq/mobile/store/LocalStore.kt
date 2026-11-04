@@ -60,8 +60,8 @@ class LocalStore(private val dao: QmsDao) {
         capturedAt = at,
         captureMode = CaptureMode.VIDEO_STREAM.code,
         streamSessionId = "",
-        framesReceived = 0,
-        framesSelected = 0,
+        framesReceived = frames,
+        framesSelected = defectFrames,
         aiVerdict = aiVerdict,
         aiConfidence = aiScore,
         agreeRate = null,
@@ -71,6 +71,10 @@ class LocalStore(private val dao: QmsDao) {
         lateRecovery = lateRecovery,
         trayId = null,
         syncedAt = null,
+        aiDecision = aiDecision,
+        defectLabel = defectLabel,
+        threshold = threshold,
+        resultIds = if (resultIds.isEmpty()) null else json.encodeToString(resultIds),
     )
 
     companion object {

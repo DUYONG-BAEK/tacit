@@ -93,12 +93,14 @@ fun LiveViewScreen(@Suppress("UNUSED_PARAMETER") vm: AppViewModel) {
             Field("보냄 · 버림", s?.let { "${it.sent} · ${it.dropped}" } ?: "-", modifier = Modifier.weight(1f))
         }
         s?.guide?.let { Field("AI 서버 상태", it, accent = if (it.startsWith("설정 오류") || it.startsWith("종이가 작음")) T.Red else T.Teal) }
-        val judge = s?.lastJudge                                  // "부품ID 판정"
-        val pass = judge?.endsWith("PASS") == true
+        val seg = s?.lastSegment                                  // AI 서버 — 마지막 제품 구간
+        val judge = s?.lastJudge                                  // 모의 엣지 — "부품ID 판정"
+        val pass = seg?.pass ?: (judge?.endsWith("PASS") == true)
         Field(
             "마지막 판정",
-            judge?.let { "${it.substringBefore(' ')} · ${if (pass) "합격" else "불합격"} · ${s.lastDelayMs}ms" } ?: "아직 없음",
-            accent = when { judge == null -> null; pass -> T.Green; else -> T.Red },
+            seg?.let { "${if (it.pass) "합격" else "불합격"} (${it.aiDecision}${it.defectLabel?.let { l -> " $l" } ?: ""}) · 결함 프레임 ${it.defectFrames}/${it.frames}장" }
+                ?: judge?.let { "${it.substringBefore(' ')} · ${if (pass) "합격" else "불합격"} · ${s.lastDelayMs}ms" } ?: "아직 없음",
+            accent = when { seg == null && judge == null -> null; pass -> T.Green; else -> T.Red },
         )
     } else {
         Spacer(Modifier.height(10.dp))

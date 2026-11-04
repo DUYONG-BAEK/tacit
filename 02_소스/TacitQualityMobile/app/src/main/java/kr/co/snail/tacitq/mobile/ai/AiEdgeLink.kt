@@ -19,6 +19,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kr.co.snail.tacitq.mobile.core.Event
+import kr.co.snail.tacitq.mobile.core.Profile
 import kr.co.snail.tacitq.mobile.relay.StreamRelay
 import org.webrtc.DataChannel
 import org.webrtc.IceCandidate
@@ -58,12 +59,17 @@ class AiEdgeLink(
     private val baseUrl: String,
     private val stationId: String,
     private val emit: (Event) -> Unit,
+    profile: Profile = Profile(),
     /** HMD 조준 화면 진행 안내(제품을 비춰 주세요 · 검사 중) */
     onHint: (text: String, tone: String) -> Unit = { _, _ -> },
+    /** 실시간 결함 표시(HMD LIVE · M-07) — NG·REVIEW 프레임과 지우는 순간 */
+    onLive: (LiveMark) -> Unit = {},
+    /** 제품 구간에서 결함이 처음 확정되는 순간(진동) */
+    onAlarm: () -> Unit = {},
 ) {
     private val appContext = context.applicationContext
     private val api = AiResultsApi(baseUrl)
-    private val flow = AiFlow(emit, onHint = onHint)
+    private val flow = AiFlow(emit, stationId, profile, onHint = onHint, onLive = onLive, onAlarm = onAlarm)
     private val policy = Reconnect()
     // WebRTC 콜백(신호 스레드)에서 pc 를 닫으면 멈추므로, 연결 다루기는 모두 이 한 줄 스레드에서 한다
     private val linkThread = Executors.newSingleThreadExecutor { Thread(it, "AiEdgeLink") }.asCoroutineDispatcher()
@@ -134,11 +140,12 @@ class AiEdgeLink(
             lost("연결 시간 초과")
         }
         if (policy.due(now)) connect(now)
+        flow.onTick()
         if (connected && now - lastStats >= STATS_MS) { lastStats = now; logStats() }
         _status.value = StreamRelay.Status(
             edgeConnected = connected, received = received, sent = sent, queued = 0,
             dropped = (received - sent).coerceAtLeast(0), edgeFps = 0.0,
-            lastJudge = flow.lastJudge, lastDelayMs = flow.lastDelayMs,
+            lastSegment = flow.lastSegment,
             guide = configError ?: (flow.guide + (sentInfo?.let { "\n$it" } ?: if (width > 0) " · ${width}×$height" else "")),
         )
     }

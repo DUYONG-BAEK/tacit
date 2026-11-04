@@ -130,7 +130,8 @@ class InspectionService : LifecycleService() {
         // 저장된 값 우선 — 지난 교대에 BLE HELLO 로 받은 주소가 들어 있다(화면 입력칸은 옛 값일 수 있음).
         // 그래도 틀리면 BLE 가 붙는 즉시 HELLO 로 다시 맞춘다.
         this.hmdUrl = DevSettings(this).hmdUrl.ifBlank { hmdUrl }
-        engine.send(Event.ShiftStarted(line, partNo, Profile(autoDismiss = DevSettings(this).autoDismiss)))
+        val profile = Profile(liveMarks = DevSettings(this).liveMarks)
+        engine.send(Event.ShiftStarted(line, partNo, profile))
         val sessionId = "S-" + SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date()) + "-$line"
         val toEngine: (Event) -> Unit = { e -> Log.i(TAG, "엣지 → 엔진: $e"); engine.send(e) }
         val settings = DevSettings(this)
@@ -139,10 +140,13 @@ class InspectionService : LifecycleService() {
         val edgeRun: suspend () -> Unit
         val edgeStatus: StateFlow<StreamRelay.Status>
         if (settings.edgeKind == DevSettings.EDGE_AI) {
-            val ai = AiEdgeLink(this, settings.aiUrl, settings.stationId, toEngine, onHint = { text, tone ->
-                // HMD 조준 화면 진행 안내 — 화면 지시(SHOW)와 달리 순번·ACK 없이 최신 것만 보낸다
-                effectScope.launch { runCatching { ble.write(HintWire.encode(text, tone)) } }
-            })
+            val ai = AiEdgeLink(this, settings.aiUrl, settings.stationId, toEngine, profile,
+                onHint = { text, tone ->
+                    // HMD 조준 화면 진행 안내 — 화면 지시(SHOW)와 달리 순번·ACK 없이 최신 것만 보낸다
+                    effectScope.launch { runCatching { ble.write(HintWire.encode(text, tone)) } }
+                },
+                onAlarm = { vibrate(3) },                         // 제품 구간에서 결함이 처음 확정될 때 1회(R5)
+            )
             offer = ai::offer; edgeRun = ai::run; edgeStatus = ai.status
             Log.i(TAG, "교대 시작 $sessionId · HMD ${this.hmdUrl} → AI 서버 ${settings.aiUrl} (${settings.stationId})")
         } else {

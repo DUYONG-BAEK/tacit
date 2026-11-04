@@ -44,8 +44,12 @@ data class Profile(
     val lateMs: Long = 1_500,             // 결과 지연 경계 → 회수 (R05)
     val confirmWaitMs: Long = 10_000,     // 확인 대기 (R12)
     val commitGraceMs: Long = 1_000,      // 제스처 확정 유예 (R09)
-    /** 판정 화면 전환 — true: 자동(합격 1.5초·불합격 2초 뒤 카메라) / false: 수동(HMD 버튼을 눌러야 카메라). 버튼은 둘 다 됨 */
-    val autoDismiss: Boolean = true,
+    // ── AI 서버 프레임 단위 판정(2026-11-03 규격) — 출발값, 현장 시험으로 조정 ──
+    val confirmWindow: Int = 5,           // 결함 확정: 최근 confirmWindow 장 중
+    val confirmHits: Int = 2,             //   confirmHits 장 이상이 NG·REVIEW 면 확정
+    val segmentEndMs: Long = 1_000,       // 마지막 inspect 뒤 이만큼 inspect 가 없으면 제품 구간 끝
+    val markHoldMs: Long = 500,           // 결함 표시 유지 — HMD LiveHold 와 같은 값
+    val liveMarks: Boolean = true,        // HMD 에 결함 원(상자)을 보낸다 — 끄면 판정 글자만
 )
 
 /** 앱 전체 상태. 이 객체 하나가 곧 진실이다. */

@@ -26,6 +26,13 @@ sealed interface Event {
         val bbox: List<Double>?,
         val capturedEndAt: Long,
         val arrivedAt: Long,
+        // ── AI 서버 제품 구간 요약(2026-11-03 규격) — 모의 엣지는 기본값 ──
+        val aiDecision: String? = null,           // 원판정 OK · NG · REVIEW (합격/불합격과 따로)
+        val defectLabel: String? = null,
+        val threshold: Double? = null,
+        val resultIds: List<String> = emptyList(), // 구간 안 저장된 결함 프레임, 점수 높은 순(첫 번째가 대표)
+        val frames: Int = 0,                       // 받은 inspect 수
+        val defectFrames: Int = 0,                 // 그중 NG·REVIEW
     ) : Event
 
     data class PatternAlert(val level: String, val defectType: String,              // R13

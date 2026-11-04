@@ -25,10 +25,10 @@ class DevSettings(context: Context) {
         get() = prefs.getString(KEY_AI, DEFAULT_AI)!!
         set(v) = prefs.edit().putString(KEY_AI, v.trim()).apply()
 
-    /** 판정 화면 전환 — true 자동(시간 뒤 카메라) / false 수동(HMD 버튼) */
-    var autoDismiss: Boolean
-        get() = prefs.getBoolean(KEY_AUTO_DISMISS, true)
-        set(v) = prefs.edit().putBoolean(KEY_AUTO_DISMISS, v).apply()
+    /** HMD 결함 원 — true 판정 글자 + 결함 위치 원 / false 판정 글자만(표시 지연이 클 때) */
+    var liveMarks: Boolean
+        get() = prefs.getBoolean(KEY_LIVE_MARKS, true)
+        set(v) = prefs.edit().putBoolean(KEY_LIVE_MARKS, v).apply()
 
     var stationId: String
         get() = prefs.getString(KEY_STATION, DEFAULT_STATION)!!
@@ -40,7 +40,7 @@ class DevSettings(context: Context) {
         private const val KEY_KIND = "edge_kind"
         private const val KEY_AI = "ai_url"
         private const val KEY_STATION = "station_id"
-        private const val KEY_AUTO_DISMISS = "auto_dismiss"
+        private const val KEY_LIVE_MARKS = "live_marks"
         const val EDGE_MOCK = "mock"
         const val EDGE_AI = "ai"
         const val DEFAULT_HMD = "http://172.20.10.3:8080"

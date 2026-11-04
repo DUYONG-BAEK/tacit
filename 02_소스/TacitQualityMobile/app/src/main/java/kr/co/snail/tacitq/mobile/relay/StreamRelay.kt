@@ -42,7 +42,8 @@ class StreamRelay(
         val edgeFps: Double = 0.0,
         val lastJudge: String? = null,
         val lastDelayMs: Long? = null,
-        val guide: String? = null,                       // AI 서버 진행 상태(종이 없음 · 수집 n/10 …) — 모의 엣지는 없음
+        val guide: String? = null,                       // AI 서버 진행 상태(제품 없음 · 검사 중 …) — 모의 엣지는 없음
+        val lastSegment: kr.co.snail.tacitq.mobile.ai.SegmentSummary? = null,   // AI 서버 마지막 제품 구간 — 모의 엣지는 없음
     )
 
     private val _status = MutableStateFlow(Status())

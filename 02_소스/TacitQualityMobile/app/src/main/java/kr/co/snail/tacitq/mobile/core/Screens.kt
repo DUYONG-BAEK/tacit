@@ -7,17 +7,16 @@ package kr.co.snail.tacitq.mobile.core
  */
 object Screens {
 
-    /** H-01 조준 가이드 — 검사 대기 기본 화면 */
+    /**
+     * H-01 조준 가이드 — 검사 대기 기본 화면. 2026-11-03: 처리 건수·면 수·프레임 목표는 HMD 에 보내지 않는다
+     * (처리 건수는 폰 M-05). 인자는 호출처를 그대로 두려고 남겼다.
+     */
+    @Suppress("UNUSED_PARAMETER")
     fun guide(partNo: String, doneCnt: Int, profile: Profile) = ShowCommand(
         screen = "H-01",
         ttlMs = 0,
         gestureWindow = "NONE",
-        fields = mapOf(
-            "part_no" to partNo,
-            "done_cnt" to doneCnt.toString(),
-            "view_total" to profile.viewCount.toString(),
-            "frames_target" to profile.framesTarget.toString(),
-        ),
+        fields = mapOf("part_no" to partNo),
     )
 
     /** 대기 배너 — INIT·READY·CLOSED */

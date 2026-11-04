@@ -30,6 +30,11 @@ data class InspectionEntity(
     val lateRecovery: Boolean = false,
     val trayId: String?,
     val syncedAt: Long? = null,       // null 이면 아직 서버에 못 보냈다 — 큐와 짝이다
+    // ── AI 서버 제품 구간(2026-11-03 규격) — 합격/불합격(aiVerdict)과 따로 ──
+    val aiDecision: String? = null,   // 원판정 OK · NG · REVIEW
+    val defectLabel: String? = null,
+    val threshold: Double? = null,    // 그때의 서버 기준값
+    val resultIds: String? = null,    // 저장된 결함 프레임 result_id 의 JSON 배열, 점수 높은 순(첫 번째가 대표)
 )
 
 /**

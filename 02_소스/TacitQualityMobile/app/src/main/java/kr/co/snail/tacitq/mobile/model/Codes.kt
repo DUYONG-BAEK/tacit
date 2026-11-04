@@ -29,7 +29,8 @@ enum class WorkerAct(override val code: String, override val label: String) : Co
     AUTO_PASS("AUTO_PASS", "무확인 자동 통과"), CONFIRMED("CONFIRMED", "확인 완료"),
     OBJECTED("OBJECTED", "이의 제기"), REVIEW_DECIDED("REVIEW_DECIDED", "REVIEW 판정"),
     TIMEOUT("TIMEOUT", "확인 시간 초과"),
-    PENDING("PENDING", "확인 대기")      // 불합격 판정 직후 — 이력에 바로 보이게 먼저 남기고, 확인·초과 시 덮어쓴다
+    PENDING("PENDING", "확인 대기"),     // 불합격 판정 직후 — 이력에 바로 보이게 먼저 남기고, 확인·초과 시 덮어쓴다
+    NONE("NONE", "확인 절차 없음")      // AI 서버 프레임 단위 판정(2026-11-03) — 사람 확인 절차가 없다
 }
 
 enum class InputMethod(override val code: String, override val label: String) : CodeItem {
