@@ -16,8 +16,7 @@ class AiFlowTest {
     private val lives = mutableListOf<LiveMark>()
     private var alarms = 0
     private val flow = AiFlow(
-        // 구간·확정 규칙만 보려고 앱 보수 기준은 끈다(서버 판정 그대로) — 보수 기준은 InspectFilterTest·아래 시험
-        emit = { events += it }, stationId = "ST-02", profile = Profile(pdMinConf = 0.0, qiFactor = 1.0), clock = { now },
+        emit = { events += it }, stationId = "ST-02", profile = Profile(), clock = { now },
         onHint = { t, _ -> hints += t }, onLive = { lives += it }, onAlarm = { alarms++ },
     )
     private val judges get() = events.filterIsInstance<Event.JudgeResult>()
@@ -26,29 +25,12 @@ class AiFlowTest {
     private fun inspect(decision: String, label: String? = null, score: Double = 0.0, resultId: String? = null) {
         val det = if (decision == "OK") "[]" else """[{"label":"$label","conf":$score,"box":[100,200,110,210]}]"""
         flow.onMessage(AiMessages.parse("""{"state":"inspect","seq":${++seq},"frame_size":[1920,1080],"decision":"$decision",
-            "defect_label":${label?.let { "\"$it\"" } ?: "null"},"score":$score,"threshold":0.25,"products":[$PRODUCT],
+            "defect_label":${label?.let { "\"$it\"" } ?: "null"},"score":$score,"threshold":0.25,"products":[],
             "detections":$det,"result_id":${resultId?.let { "\"$it\"" } ?: "null"},"overlay_url":null}"""))
     }
-    private val PRODUCT = """{"label":"상면","conf":0.91,"box":[0,0,1920,1080]}"""
     private fun searching() = flow.onMessage(AiMessages.parse("""{"state":"searching","reason":"no_product"}"""))
     private fun step(ms: Long = 100) { now += ms }
     private fun tick(ms: Long) { now += ms; flow.onTick() }
-
-    @Test fun `앱 보수 기준 - 신뢰도 낮은 제품은 제품 없음, 기준값 1점3배면 서버 REVIEW 는 결함 아님`() {
-        val f = AiFlow(emit = { events += it }, profile = Profile(), clock = { now }, onLive = { lives += it })
-        f.onMessage(AiMessages.parse("""{"state":"inspect","seq":1,"frame_size":[1920,1080],"decision":"OK","score":0,
-            "threshold":0.25,"products":[{"label":"엣지","conf":0.3,"box":[0,0,1920,1080]}],"detections":[]}"""))
-        assertEquals("제품 없음 (앱 기준 PD 0.5 미만)", f.guide)
-        f.onMessage(AiMessages.parse("""{"state":"inspect","seq":2,"frame_size":[1920,1080],"decision":"REVIEW",
-            "defect_label":"이물찍힘","score":0.26,"threshold":0.25,"products":[$PRODUCT],
-            "detections":[{"label":"이물찍힘","conf":0.26,"box":[100,200,110,210]}],"result_id":"r-9"}"""))
-        assertEquals("검사 중 · OK", f.guide)
-        assertTrue("앱 기준 결함 아님 — HMD 에 보내지 않음", lives.isEmpty())
-        now += 1_000; f.onTick()
-        assertEquals("OK", judges.single().aiDecision)
-        assertEquals(1, judges.single().frames)
-        assertEquals(emptyList<String>(), judges.single().resultIds)
-    }
 
     @Test fun `결함 확정 규칙 - 5장 중 2장 이상 NG가 있으면 NG`() {
         assertNull(AiFlow.confirm(listOf("OK", "NG", "OK", "OK", "OK"), 2))

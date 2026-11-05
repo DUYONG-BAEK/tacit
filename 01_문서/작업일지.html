@@ -828,7 +828,7 @@ H.265 1080p 코드는 유지 — HMD <code>VIDEO_MODE</code>를 <code>"hevc"</co
   <tr><td>3 HMD 실시간</td><td>BLE <code>LIVE</code> 쪽지(응답 없는 쓰기, 최신 1개) · HMD 판정 글자·결함 원 0.5초 유지 · 대기 화면 <code>IDLE</code> 분리 · 조준 화면 처리 건수·면 수 문구 삭제</td></tr>
   <tr><td>4 확대 보기</td><td>M-07 결함 원·최근 결함 확대 · M-05 원판정 배지(합격 / 불합격 NG / 불합격 REVIEW)·결함 이미지 다시 보기 · 핀치 확대·이동</td></tr>
   <tr><td>통신 로그</td><td>상단 바 "로그" 창(모바일 ↔ AI 서버 / 모바일 ↔ HMD) · 복사·지우기 · HMD 카메라 상태를 BLE HELLO 로 받아 기록</td></tr>
-  <tr><td>11-05 현장 피드백</td><td>① M-07 에 HMD 와 같은 글자·결함 원(HudMirror) ② HMD 화각 4:3·FIT_CENTER·줌 최소 — 16:9 크롭으로 기본 카메라 앱보다 약 1.33배 확대돼 보이던 문제 ③ 앱 보수 기준(PD 0.5 · QI 기준값 ×1.3) — 오탐이 시험을 방해</td></tr>
+  <tr><td>11-05 현장 피드백</td><td>① M-07 에 HMD 와 같은 글자·결함 원(HudMirror) ② HMD 화각 4:3·FIT_CENTER·줌 최소 — 16:9 크롭으로 기본 카메라 앱보다 약 1.33배 확대돼 보이던 문제 ③ (앱 쪽 보수 기준 필터를 넣었다가 되돌림 — PD·QI 임곗값은 서버가 정하고 앱 몫이 아님)</td></tr>
 </table>
 
 <h4>실장비 확인 (2026-11-05, 개발 서버)</h4>
@@ -836,12 +836,12 @@ H.265 1080p 코드는 유지 — HMD <code>VIDEO_MODE</code>를 <code>"hevc"</co
   <li class="done">폰 → AI 서버: offer 수락 → CONNECTED 0.2초, 데이터 채널 OPEN</li>
   <li class="done">HMD 영상 0장 문제 — 통신 로그로 "영상 서버 연결 OK · 프레임 0장 · HMD 카메라 켜는 중" 확인 → 원인은 <strong>HMD 앱 카메라 권한</strong>. 허용 후 정상</li>
   <li class="done">기능 대체로 의도대로 동작(사용자 확인)</li>
-  <li>4:3 화각이 기본 카메라 앱과 같은지 · M-07 따라 그리기 일치 · 보수 기준 체감</li>
+  <li>4:3 화각이 기본 카메라 앱과 같은지 · M-07 따라 그리기 일치</li>
 </ul>
 
 <h4>메모</h4>
 <ul>
-  <li>이 개발 환경(클라우드)은 Android SDK 를 받을 수 없어, 안드로이드와 무관한 코드만 JVM 으로 컴파일·시험(75건)했다. 앱 빌드는 Android Studio 에서 확인.</li>
+  <li>이 개발 환경(클라우드)은 Android SDK 를 받을 수 없어, 안드로이드와 무관한 코드만 JVM 으로 컴파일·시험(70건)했다. 앱 빌드는 Android Studio 에서 확인.</li>
   <li>HMD 에 디버그(<code>kr.co.snail.tacitq.hmd.debug</code>)·릴리스 앱이 같이 깔리면 둘 다 BLE 광고·카메라를 쓰려 한다 — 하나만 남긴다.</li>
   <li>CRLF 줄바꿈 파일(서비스·HMD MainActivity 등)은 줄바꿈을 유지해 고쳤다.</li>
 </ul>

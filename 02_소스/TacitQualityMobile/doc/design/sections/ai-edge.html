@@ -14,7 +14,7 @@
 <h4>경로</h4>
 <pre style="background:#f8fafc;border:1px solid var(--line);border-radius:10px;padding:12px;font-size:12px">HMD 카메라 4:3 1920×1440 ─MJPEG(HTTP)─▶ 폰: JPEG 풀기 → WebRTC 영상 트랙(VP8) ─▶ AI 서버 :8080 (POST /offer, 스테이션 ST-02)
                                                 ◀── 데이터 채널(JSON): searching · inspect(프레임 판정·제품 상자·결함 상자·result_id)
-폰 AiFlow ─┬─ 앱 보수 기준으로 다시 판정(InspectFilter) ─▶ 결함 프레임 ─BLE LIVE(응답 없는 쓰기)─▶ HMD 판정 글자 · 결함 원
+폰 AiFlow ─┬─ 결함 프레임 ─BLE LIVE(응답 없는 쓰기)─▶ HMD 판정 글자 · 결함 원
            ├─ 결함 확정(최근 5장 중 2장) ─▶ 진동 3회(제품당 1회)
            ├─ 제품 구간 끝(1초 무소식·끊김) ─▶ 상태기계 ─▶ 이력 1건(원판정·결함 종류·결함 프레임 result_id)
            └─ M-07: HMD 와 같은 화면(글자·결함 원) · 최근 결함 확대 / M-05: 결함 프레임 다시 보기(GET /results/{id}/overlay)</pre>
@@ -22,9 +22,6 @@
 <h4>규칙</h4>
 <table class="col-table">
   <tr><th style="width:22%">항목</th><th>규칙</th></tr>
-  <tr><td>앱 보수 기준</td><td>PD·QI 임곗값은 서버가 정한다. 가모델 오탐이 시험을 방해해 <strong>앱이 받은 판정을 더 엄격하게 다시 판정</strong>한다(<code>ai/InspectFilter</code>):
-    제품 상자 신뢰도 <strong>0.5 미만은 버리고</strong>(남는 제품이 없으면 제품 없음), 결함 기준값 = <strong>서버 threshold × 1.3</strong>으로 서버와 같은 규칙(&gt;×1.1 NG · &lt;×0.9 결함 아님 · 그 사이 REVIEW)을 다시 적용.
-    남은 제품 상자 안의 결함만. 값은 <code>Profile.pdMinConf · qiFactor</code>, M-01 에 표시. 1.0·0.0 이면 서버 판정 그대로</td></tr>
   <tr><td>실시간 표시</td><td>NG 빨강 · REVIEW 노랑 · OK 표시 없음. 마지막 결함 뒤 0.5초 유지 후 표시하는 쪽(HMD·M-07)이 스스로 지운다. searching·끊김이면 즉시</td></tr>
   <tr><td>제품 구간</td><td>첫 <code>inspect</code>에서 시작, 마지막 <code>inspect</code> 뒤 <strong>1초</strong> 무소식이거나 연결이 끊기면 끝. searching 한 장은 구간을 끝내지 않는다</td></tr>
   <tr><td>결함 확정</td><td>구간 안 최근 5장 중 2장 이상 NG·REVIEW → 확정(NG 가 있으면 NG, 없으면 REVIEW, 나중에 NG 로 올림). 확정 순간 진동 3회, 구간당 1회</td></tr>
@@ -42,7 +39,7 @@
 <h4>코드 위치</h4>
 <table class="col-table">
   <tr><th style="width:18%">위치</th><th>파일</th></tr>
-  <tr><td>모바일 ai/</td><td><code>AiMessages</code>(규격 해석) · <code>InspectFilter</code>(앱 보수 기준) · <code>AiFlow</code>(구간·확정·LIVE·진동) · <code>Reconnect</code>(재연결 정책) · <code>AiEdgeLink</code>(WebRTC) · <code>AiResultsApi</code> · <code>DefectCrop</code>·<code>DefectLoader</code>(확대 보기)</td></tr>
+  <tr><td>모바일 ai/</td><td><code>AiMessages</code>(규격 해석) · <code>AiFlow</code>(구간·확정·LIVE·진동) · <code>Reconnect</code>(재연결 정책) · <code>AiEdgeLink</code>(WebRTC) · <code>AiResultsApi</code> · <code>DefectCrop</code>·<code>DefectLoader</code>(확대 보기)</td></tr>
   <tr><td>모바일 hmd/</td><td><code>ShowWire</code>(SHOW·HINT·LIVE 쪽지) · <code>GattBleLink</code>(BLE, 응답 없는 쓰기, HELLO) · <code>HudMirror</code>(M-07 따라 그리기)</td></tr>
   <tr><td>모바일 화면</td><td><code>M07LiveView</code> · <code>M05InspectionHistory</code> · <code>DefectViewer</code> · <code>CommLogView</code>(통신 로그) · <code>M01ShiftPrep</code></td></tr>
   <tr><td>HMD</td><td><code>protocol/Wire</code>(LIVE 해석·HELLO) · <code>hud/LiveHold</code>(0.5초 유지·큰 글자·원 좌표) · <code>hud/MarkerView</code> · <code>hud/HudController</code> · <code>MainActivity</code>(카메라 4:3·카메라 상태)</td></tr>
@@ -50,11 +47,11 @@
 
 <h4>시험</h4>
 <ul class="checklist">
-  <li class="done">단위(JVM): 규격 예시 해석 · 재연결 간격·마감 · 구간·확정·진동 · LIVE 480B·상자 합치기 · 확대 영역 · 재요청 · 앱 보수 기준 · HMD 유지·우선순위·4:3 좌표 · 따라 그리기 — 75건 통과</li>
+  <li class="done">단위(JVM): 규격 예시 해석 · 재연결 간격·마감 · 구간·확정·진동 · LIVE 480B·상자 합치기 · 확대 영역 · 재요청 · HMD 유지·우선순위·4:3 좌표 · 따라 그리기 — 70건 통과</li>
   <li class="done">실장비: 개발 서버 연결(offer → CONNECTED 0.2초) · HMD 영상 수신(HMD 카메라 권한 허용 후)</li>
   <li>실장비: 제품 1개 = 이력 1건 · 진동 1회 · HMD 결함 원 위치 · M-07 화면 일치 · 4:3 화각이 기본 카메라 앱과 같은지</li>
   <li>5단계 해상도 비교 · 6단계 지연 실측(계획서) — 앱 기능 수정 뒤 진행 여부 결정</li>
 </ul>
 
 <div class="warn-box"><strong>주의:</strong> 판정 모델은 가모델이다(결함 위치·종류가 자주 틀림). 지금 목표는 <strong>연동과 시나리오 흐름 확인</strong>이며,
-그래서 앱 보수 기준으로 오탐을 줄여 둔다. 서버 임곗값 자체를 바꾸려면 서버 관리자에게 요청한다.</div>
+PD·QI 임곗값은 서버가 정한다 — 앱은 서버 판정을 그대로 쓰고, 임곗값을 바꾸려면 서버 관리자에게 요청한다.</div>

@@ -12,15 +12,15 @@ Kotlin · Jetpack Compose · Room · WebRTC. 설계·작업 기록은 `doc/`(설
 ```
 HMD ─MJPEG─▶ HmdVideoSource ─▶ AiEdgeLink ─WebRTC─▶ AI 서버(:8080, ST-02)
                                      ◀─ 데이터 채널: searching · inspect(프레임 판정·제품·결함 상자·result_id)
-AiFlow ─ InspectFilter(앱 보수 기준) ─┬─ 결함 프레임 → BLE LIVE → HMD 판정 글자·결함 원 (0.5초 유지)
-                                     ├─ 결함 확정(최근 5장 중 2장) → 진동 3회(제품당 1회)
-                                     ├─ 제품 구간 끝(1초 무소식·끊김) → 상태기계 → 이력 1건
-                                     └─ M-07: HMD 와 같은 화면 · 최근 결함 확대 / M-05: 결함 프레임 다시 보기
+AiFlow ─┬─ 결함 프레임 → BLE LIVE → HMD 판정 글자·결함 원 (0.5초 유지)
+        ├─ 결함 확정(최근 5장 중 2장) → 진동 3회(제품당 1회)
+        ├─ 제품 구간 끝(1초 무소식·끊김) → 상태기계 → 이력 1건
+        └─ M-07: HMD 와 같은 화면 · 최근 결함 확대 / M-05: 결함 프레임 다시 보기
 ```
 
 | 규칙 | 값 (위치) |
 |---|---|
-| 앱 보수 기준 | 제품 신뢰도 0.5 미만 버림 · 결함 기준값 = 서버 threshold × 1.3 (`core/State.kt` `Profile.pdMinConf·qiFactor`) |
+| 판정 임곗값 | PD·QI 임곗값은 서버가 정한다. 앱은 서버 판정(`decision`)을 그대로 쓰고 `threshold` 를 하드코딩하지 않는다 |
 | 결함 확정 · 구간 끝 · 표시 유지 | 5장 중 2장 · 1초 · 0.5초 (`Profile.confirmWindow·confirmHits·segmentEndMs·markHoldMs`) |
 | 재연결 | 1 → 2 → 4 → 5초, 시도 마감 10초 (`ai/Reconnect.kt`) |
 | 판정 | OK 합격 · NG·REVIEW 불합격(원판정은 이력에 따로) |
@@ -31,7 +31,6 @@ AiFlow ─ InspectFilter(앱 보수 기준) ─┬─ 결함 프레임 → BLE L
 app/src/main/java/kr/co/snail/tacitq/mobile/
 ├── ai/                          AI 서버 연동
 │   ├── AiMessages.kt            규격 메시지 해석 (searching · inspect · GET /results)
-│   ├── InspectFilter.kt         앱 보수 기준 — PD 신뢰도 하한 · QI 기준값 배율로 다시 판정
 │   ├── AiFlow.kt                제품 구간 · 결함 확정 · LIVE · 진동 · 구간 판정 (순수)
 │   ├── Reconnect.kt             재연결 정책 (순수)
 │   ├── AiEdgeLink.kt            WebRTC 연결 · 영상 넣기 · 통신 로그
@@ -58,7 +57,7 @@ app/src/main/java/kr/co/snail/tacitq/mobile/
 
 | 화면 | 내용 |
 |---|---|
-| M-01 검사 | AI 서버 주소 · 스테이션 · HMD 결함 원 켜기/끄기 · 검사 시작/마감 · 앱 보수 기준 표시 |
+| M-01 검사 | AI 서버 주소 · 스테이션 · HMD 결함 원 켜기/끄기 · 검사 시작/마감 |
 | M-07 영상 | HMD 영상 + HMD 와 같은 글자·결함 원 · 최근 결함 프레임 확대 · 연결 상태 · 마지막 구간 판정 |
 | M-05 이력 | 제품 구간 1건씩 · 합격 / 불합격(NG) / 불합격(REVIEW) · 결함 종류 · 결함 이미지 다시 보기 |
 | 로그(상단 바) | 통신 로그 — 연결 과정 · 5초 요약 · HMD 카메라 상태, 복사·지우기 |
