@@ -94,7 +94,7 @@ class MainActivity : AppCompatActivity() {
 
         // 폰 쪽지(1초 PING·SHOW)가 오는 동안 = 검사 중 → 뒤에 있으면 앞으로(연결 순서와 상관없이 1초 안에)
         ble = BleServer(this, onDown = { bringToFront(); hud.onDown(it) }, onState = ::onBleState,
-                        hello = { Wire.hello(deviceIp()?.let { "http://$it:$PORT" }) })
+                        hello = { Wire.hello(deviceIp()?.let { "http://$it:$PORT" }, cameraState()) })
         hud = HudController(binding, sendUp = ble::notify)
         startBle()
         if (BuildConfig.DEBUG) registerDebugInjector()
@@ -143,7 +143,25 @@ class MainActivity : AppCompatActivity() {
     private var cameraNeedsRebind = false
     @Volatile private var analysisSizeLogged = false
     /** 카메라 바인딩 실패 사유 — 상태줄 맨 앞에 띄운다(영상이 안 나가는 원인) */
-    private var cameraError: String? = null
+    @Volatile private var cameraError: String? = null
+    @Volatile private var foreground = false             // 카메라는 앱이 화면 맨 앞에 있을 때만 돈다
+    @Volatile private var lastFrameAt = 0L
+    @Volatile private var analysisSize = ""
+
+    /**
+     * 카메라 상태 한 줄 — HMD 상태줄과 BLE HELLO(폰 통신 로그)에 띄운다. 폰이 영상 서버에 붙어도 프레임이 안 오면
+     * 원인이 여기 나온다. BLE 스레드에서도 부른다.
+     */
+    private fun cameraState(): String {
+        cameraError?.let { return "시작 실패 — $it" }
+        if (videoMode == "hevc") return "H.265 모드"
+        if (!foreground) return "꺼짐 — HMD 앱이 화면 뒤에 있음(앱이 앞에 있어야 카메라가 켜짐)" +
+            if (!android.provider.Settings.canDrawOverlays(this)) " · '다른 앱 위에 표시' 권한 없음(폰이 앞으로 불러오지 못함)" else ""
+        val at = lastFrameAt
+        if (at == 0L) return "켜는 중 — 프레임 아직 없음"
+        val age = System.currentTimeMillis() - at
+        return if (age > 2_000) "멈춤 — 마지막 프레임 ${age / 1000}초 전" else "정상 $analysisSize"
+    }
     private var lastBringAt = 0L
 
     override fun onStop() {
@@ -156,8 +174,14 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    override fun onPause() {
+        super.onPause()
+        foreground = false
+    }
+
     override fun onResume() {
         super.onResume()
+        foreground = true
         if (cameraNeedsRebind &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
         ) {
@@ -232,7 +256,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun onFrame(image: androidx.camera.core.ImageProxy) {
         val capturedAt = System.currentTimeMillis()      // JPEG 변환 전 시각 = 촬영 시각에 가장 가깝다
-        if (!analysisSizeLogged) { analysisSizeLogged = true; Log.i(TAG, "분석 영상 ${image.width}×${image.height}") }
+        if (!analysisSizeLogged) { analysisSizeLogged = true; analysisSize = "${image.width}×${image.height}"; Log.i(TAG, "분석 영상 $analysisSize") }
+        lastFrameAt = capturedAt
         try {
             server.updateFrame(YuvToJpeg.convert(image), capturedAt)
         } catch (e: Exception) {
@@ -317,7 +342,8 @@ class MainActivity : AppCompatActivity() {
     /** 하단 상태줄: 영상 주소 · 뷰어 수 · BLE 상태 · 마지막 쪽지. 1초마다 갱신. */
     private fun refreshStatus() {
         val ip = deviceIp() ?: "IP 없음(Wi-Fi 확인)"
-        binding.statusText.text = (cameraError?.let { "⚠ 카메라 시작 실패: $it · " } ?: "") +
+        val cam = cameraState()
+        binding.statusText.text = (if (cam.startsWith("정상")) "" else "⚠ 카메라 $cam · ") +
             "영상 ${if (videoMode == "hevc") "H.265 1080p" else "MJPEG ${mjpegSize.height}p"} http://$ip:$PORT (뷰어 ${server.viewerCount}) · $bleLabel · ${hud.lastInfo}"
         ui.postDelayed(::refreshStatus, 1000)
     }

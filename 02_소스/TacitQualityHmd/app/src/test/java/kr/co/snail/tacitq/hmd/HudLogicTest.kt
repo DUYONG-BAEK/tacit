@@ -36,6 +36,12 @@ class HudLogicTest {
         assertEquals(Downlink.Ping(3), Wire.parse("""{"cmd":"PING","seq":3}""".encodeToByteArray()))
     }
 
+    @Test fun `HELLO 는 영상 주소와 카메라 상태를 싣는다`() {
+        assertEquals("""{"type":"HELLO","video_url":"http://192.168.1.2:8080","camera":"꺼짐 — HMD 앱이 화면 뒤에 있음"}""",
+            Wire.hello("http://192.168.1.2:8080", "꺼짐 — HMD 앱이 화면 뒤에 있음").decodeToString())
+        assertEquals("""{"type":"HELLO","video_url":null}""", Wire.hello(null).decodeToString())
+    }
+
     @Test fun `ACK 는 계약 필드명 type seq rendered_at`() {
         assertEquals("""{"type":"ACK","seq":7,"rendered_at":1000}""", Wire.ack(7, 1000).decodeToString())
     }

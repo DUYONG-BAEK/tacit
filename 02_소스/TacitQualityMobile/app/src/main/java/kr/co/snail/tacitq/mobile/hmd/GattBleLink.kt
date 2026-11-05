@@ -71,6 +71,8 @@ class GattBleLink(
     private var pingSeq = 0L
     @Volatile private var connectStartedAt = 0L
     private var pingFailing = false                    // 통신 로그 — PING 실패는 바뀔 때만 남긴다
+    private var lastHelloUrl: String? = null           // 통신 로그 — HELLO 는 영상이 끊길 때마다 다시 읽으므로 바뀔 때만
+    private var lastHelloCamera: String? = null
 
     private val _state = MutableStateFlow("BLE 준비")
     val state: StateFlow<String> = _state
@@ -162,8 +164,16 @@ class GattBleLink(
             val o = json.parseToJsonElement(bytes.decodeToString()).jsonObject
             val url = o["video_url"]?.jsonPrimitive?.takeIf { it.isString }?.content
             if (o["type"]?.jsonPrimitive?.content == "HELLO" && !url.isNullOrBlank()) {
-                CommLog.i(HMD, TAG, "HMD 영상 주소 $url")
+                if (url != lastHelloUrl) CommLog.i(HMD, TAG, "HMD 영상 주소 $url")
+                lastHelloUrl = url
                 onVideoUrl(url)
+            }
+            // HMD 카메라 상태 — 영상 서버에 붙어도 프레임이 안 올 때 원인(앱이 화면 뒤 · 카메라 시작 실패 등). 바뀔 때만 남긴다
+            o["camera"]?.jsonPrimitive?.takeIf { it.isString }?.content?.let { cam ->
+                if (cam != lastHelloCamera) {
+                    if (cam.startsWith("정상")) CommLog.i(HMD, TAG, "HMD 카메라 $cam") else CommLog.w(HMD, TAG, "HMD 카메라 $cam")
+                }
+                lastHelloCamera = cam
             }
         }.onFailure { CommLog.i(HMD, TAG, "HELLO 없음 — 수동 HMD 주소 사용") }
     }

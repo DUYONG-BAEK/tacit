@@ -90,8 +90,12 @@ object Wire {
     private fun JsonObject.str(k: String): String? = (this[k] as? JsonPrimitive)?.takeIf { it.isString }?.content
 
     /** UP 특성 읽기 응답 — 모바일이 연결 직후 읽어 HMD 영상 주소를 자동으로 맞춘다(IP 수동 입력 제거). */
-    fun hello(videoUrl: String?): ByteArray =
-        """{"type":"HELLO","video_url":${videoUrl?.let { "\"$it\"" } ?: "null"}}""".encodeToByteArray()
+    /** [camera]: 카메라 상태 한 줄(정상 · 꺼짐 — 사유 · 시작 실패 — 사유) — 폰 통신 로그에 그대로 남는다 */
+    fun hello(videoUrl: String?, camera: String? = null): ByteArray = kotlinx.serialization.json.buildJsonObject {
+        put("type", JsonPrimitive("HELLO"))
+        put("video_url", JsonPrimitive(videoUrl))
+        if (camera != null) put("camera", JsonPrimitive(camera))
+    }.toString().encodeToByteArray()
 
     fun ack(seq: Long, renderedAt: Long): ByteArray =
         json.encodeToString(AckWire.serializer(), AckWire(seq = seq, renderedAt = renderedAt)).encodeToByteArray()
