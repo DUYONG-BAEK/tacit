@@ -144,12 +144,20 @@ class HudLogicTest {
     }
 
     @Test fun `결함 원 좌표 - 0~1000 을 화면 비율로 바꾸고 최소 반지름을 지킨다`() {
-        val (cx, cy, r) = LiveHold.circle(listOf(574, 905, 578, 911), 1280, 720, minRadius = 20f)
+        val (cx, cy, r) = LiveHold.circle(listOf(574, 905, 578, 911), 1280, 720, minRadius = 20f, contentAspect = 16f / 9f)
         assertEquals(737.3f, cx, 0.5f)
         assertEquals(653.8f, cy, 0.5f)
         assertEquals("수 px 결함도 지름 40 이상", 20f, r, 0f)
-        val big = LiveHold.circle(listOf(0, 0, 100, 100), 1000, 1000, minRadius = 20f)
+        val big = LiveHold.circle(listOf(0, 0, 100, 100), 1000, 1000, minRadius = 20f, contentAspect = 1f)
         assertEquals(75f, big.third, 0f)
+    }
+
+    @Test fun `4대3 영상은 16대9 화면 가운데에 좌우 띠를 두고 맞춘다`() {
+        // 1280×720 화면에 4:3 → 960×720, 왼쪽 띠 160
+        val (cx, cy, _) = LiveHold.circle(listOf(0, 0, 0, 0), 1280, 720, minRadius = 20f, contentAspect = 4f / 3f)
+        assertEquals(160f, cx, 0.01f); assertEquals(0f, cy, 0.01f)
+        val (cx2, cy2, _) = LiveHold.circle(listOf(1000, 1000, 1000, 1000), 1280, 720, minRadius = 20f, contentAspect = 4f / 3f)
+        assertEquals(1120f, cx2, 0.01f); assertEquals(720f, cy2, 0.01f)
     }
 
     private fun show(screen: String, vararg f: Pair<String, String>) =

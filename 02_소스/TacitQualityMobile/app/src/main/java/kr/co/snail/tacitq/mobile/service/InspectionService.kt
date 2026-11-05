@@ -153,6 +153,7 @@ class InspectionService : LifecycleService() {
         if (settings.edgeKind == DevSettings.EDGE_AI) {
             val ai = AiEdgeLink(this, settings.aiUrl, settings.stationId, toEngine, profile,
                 onHint = { text, tone ->
+                    hudHint.value = text to tone                  // M-07 HMD 화면 따라 그리기
                     // HMD 조준 화면 진행 안내 — 화면 지시(SHOW)와 달리 순번·ACK 없이 최신 것만 보낸다
                     effectScope.launch { runCatching { ble.write(HintWire.encode(text, tone)) } }
                 },
@@ -214,6 +215,8 @@ class InspectionService : LifecycleService() {
         liveFrame.value = null
         liveMark.value = null
         lastDefectId.value = null
+        hudHint.value = null
+        hudOverlay.value = null
         val job = relayJob
         relayJob = null
         effectScope.launch {
@@ -226,6 +229,9 @@ class InspectionService : LifecycleService() {
     /** 상태 기계 출력을 실물 부품에 연결. 순서가 중요한 것(persist·enqueue)은 엔진이 순차로 부른다. */
     private val sinks = object : EffectSinks {
         override suspend fun show(cmd: ShowCommand) {
+            // M-07 HMD 화면 따라 그리기 — HMD 에 보낸 화면·예외 띠를 기억한다
+            if (cmd.screen == "OVERLAY") hudOverlay.value = cmd.fields["text"]?.takeIf { cmd.fields["on"] != "false" }
+            else hudScreen.value = cmd
             // BLE 가 아직 안 붙었으면 쓰기가 예외를 던진다 — 앱을 죽이지 않고 남긴다(붙으면 resendCurrentScreen)
             try { hmd.show(cmd) } catch (e: Exception) { CommLog.w(CommLog.Ch.HMD, TAG, "화면 지시 ${cmd.screen} 못 보냄: ${e.message}") }
         }
@@ -349,6 +355,11 @@ class InspectionService : LifecycleService() {
         val lastDefectId = MutableStateFlow<String?>(null)
 
         class LiveMarkAt(val mark: LiveMark, val at: Long)
+
+        /** M-07 HMD 화면 따라 그리기 — 마지막으로 보낸 화면(OVERLAY 제외) · 진행 안내(text, tone) · 켜진 예외 띠 */
+        val hudScreen = MutableStateFlow<ShowCommand?>(null)
+        val hudHint = MutableStateFlow<Pair<String, String>?>(null)
+        val hudOverlay = MutableStateFlow<String?>(null)
 
         fun start(ctx: Context, line: String, partNo: String, hmdUrl: String, edgeUrl: String) {
             ctx.startForegroundService(

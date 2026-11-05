@@ -16,6 +16,10 @@ class MarkerView @JvmOverloads constructor(context: Context, attrs: AttributeSet
     }
     private var live: Downlink.Live? = null
 
+    /** 영상 비율(가로/세로) — 분석 영상 첫 프레임에서 받는다. 미리보기와 같은 FIT_CENTER 맞춤에 쓴다 */
+    var contentAspect = 4f / 3f
+        set(v) { if (v != field) { field = v; invalidate() } }
+
     /** 그릴 결함(null = 지움) — 바뀔 때만 다시 그린다 */
     fun show(m: Downlink.Live?) {
         if (m == live) return
@@ -28,7 +32,7 @@ class MarkerView @JvmOverloads constructor(context: Context, attrs: AttributeSet
         paint.color = if (m.d == "NG") Tone.BAD.argb else Tone.WARN.argb
         m.b?.forEach { box ->
             if (box.size < 4) return@forEach
-            val (cx, cy, r) = LiveHold.circle(box, width, height, minRadius = 20 * density)
+            val (cx, cy, r) = LiveHold.circle(box, width, height, minRadius = 20 * density, contentAspect = contentAspect)
             canvas.drawCircle(cx, cy, r, paint)
         }
     }

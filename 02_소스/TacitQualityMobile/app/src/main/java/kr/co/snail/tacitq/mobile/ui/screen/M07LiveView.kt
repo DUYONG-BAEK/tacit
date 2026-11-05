@@ -14,12 +14,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -31,6 +34,7 @@ import kotlinx.coroutines.withContext
 import kr.co.snail.tacitq.mobile.ai.DefectCrop
 import kr.co.snail.tacitq.mobile.ai.LiveMark
 import kr.co.snail.tacitq.mobile.core.Profile
+import kr.co.snail.tacitq.mobile.hmd.HudMirror
 import kr.co.snail.tacitq.mobile.hmd.LiveWire
 import kr.co.snail.tacitq.mobile.relay.DevSettings
 import kr.co.snail.tacitq.mobile.service.InspectionService
@@ -41,7 +45,8 @@ import kr.co.snail.tacitq.mobile.ui.theme.T
 import kr.co.snail.tacitq.mobile.vm.AppViewModel
 
 /**
- * M-07 영상 모니터링 — 검사 중 HMD 에서 폰으로 들어오는 영상을 그대로 본다.
+ * M-07 영상 모니터링 — 검사 중 HMD 에서 폰으로 들어오는 영상을 그대로 본다. 그 위에 HMD 가 그리는 글자·결함 원을
+ * 똑같이 그려(HudMirror) HMD 를 쓴 작업자가 보는 화면을 폰에서 그대로 본다.
  *
  * HMD 에 따로 붙지 않고 서비스가 이미 받는 프레임 중 마지막 1장([InspectionService.liveFrame])만 쓴다.
  * 화면이 보일 때만, 초당 최대 10장만 그림으로 바꾼다 — 주머니 속(화면 꺼짐)에서는 비용 없음.
@@ -55,6 +60,9 @@ fun LiveViewScreen(@Suppress("UNUSED_PARAMETER") vm: AppViewModel) {
     val status by InspectionService.relayStatus.collectAsStateWithLifecycle()
     val liveMark by InspectionService.liveMark.collectAsStateWithLifecycle()
     val lastDefectId by InspectionService.lastDefectId.collectAsStateWithLifecycle()
+    val hudScreen by InspectionService.hudScreen.collectAsStateWithLifecycle()
+    val hudHint by InspectionService.hudHint.collectAsStateWithLifecycle()
+    val hudOverlay by InspectionService.hudOverlay.collectAsStateWithLifecycle()
     val ctx = LocalContext.current
     val settings = remember { DevSettings(ctx) }
     val sampled = remember { InspectionService.liveFrame.sample(100) }
@@ -98,10 +106,15 @@ fun LiveViewScreen(@Suppress("UNUSED_PARAMETER") vm: AppViewModel) {
             f == null -> Hint(if (hmdOn) "영상 기다리는 중…" else "HMD 영상 연결 대기 — 5초마다 다시 연결")
             f.codec != "jpeg" -> Hint("H.265 영상은 폰 미리보기 미지원\n(엣지로는 정상 전송 중)")
             b != null -> {
+                // HMD 와 같은 화면 — 영상(자르지 않고 가운데) + HMD 가 그리는 글자·결함 원
                 Image(b.asImageBitmap(), contentDescription = "HMD 영상", contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize())
-                mark?.let { LiveMarks(it, circles = settings.liveMarks) }
+                HmdScreen(HudMirror.view(hudScreen, hudHint, mark, hudOverlay), mark, circles = settings.liveMarks)
             }
         }
+        if (running && hmdBle != "HMD 연결됨") Text(
+            "HMD 화면(BLE) 연결 안 됨 — 실제 HMD 화면과 다를 수 있음", color = Color.White, fontSize = 11.sp,
+            modifier = Modifier.align(Alignment.BottomCenter).padding(6.dp).background(Color(0xAA000000)).padding(horizontal = 6.dp, vertical = 2.dp),
+        )
     }
 
     // 최근 결함 확대 — 서버가 저장한 결함 프레임(result_id)이 오면 바뀐다. 누르면 전체 화면(API §4.2)
@@ -142,31 +155,55 @@ fun LiveViewScreen(@Suppress("UNUSED_PARAMETER") vm: AppViewModel) {
     }
 }
 
-/** 영상 위 실시간 결함 — 판정 글자와(켜져 있으면) 결함 원. 좌표는 서버가 받은 프레임(frame_size) 기준 → 화면 맞춤(Fit) */
+/**
+ * HMD 화면 따라 그리기 — HMD(RealWear 1280×720 = 853×480dp)가 카메라 위에 그리는 글자·결함 원을 같은 자리·크기 비율·색으로.
+ * 글자는 [HudMirror](HMD Screens·LiveHold 와 같은 규칙), 배치는 HMD `activity_main.xml` 과 같다(여백 28·18dp, 위 줄 20sp,
+ * 가운데 큰 글자 44sp, 본문 22sp, 예외 띠 위 56dp). 영상은 HMD 와 같이 자르지 않고 가운데 맞춘다.
+ */
 @Composable
-private fun BoxScope.LiveMarks(m: LiveMark, circles: Boolean) {
-    val ng = m.decision == "NG"
-    val color = if (ng) Color.Red else Color(0xFFFFC107)
-    if (circles && m.frameW > 0 && m.frameH > 0) {
-        val minR = with(LocalDensity.current) { 14.dp.toPx() }
-        val stroke = with(LocalDensity.current) { 2.5.dp.toPx() }
-        val boxes = remember(m) { LiveWire.merge(m.detections) }
-        Canvas(Modifier.fillMaxSize()) {
-            val f = DefectCrop.fit(m.frameW, m.frameH, size.width, size.height)
-            boxes.forEach { box ->
-                val b = box.box
-                val r = maxOf(minR, (maxOf(b[2] - b[0], b[3] - b[1]) * f.scale * 0.75).toFloat())
-                drawCircle(color, r, Offset(f.x((b[0] + b[2]) / 2), f.y((b[1] + b[3]) / 2)), style = Stroke(stroke))
+private fun HmdScreen(v: HudMirror.View, mark: LiveMark?, circles: Boolean) {
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val k = maxWidth / HMD_W                                    // HMD 화면 → 이 상자 배율
+        val density = LocalDensity.current
+        fun sp(hmdSp: Float) = with(density) { (hmdSp * k).dp.toSp() }
+        val shadow = Shadow(Color(0xCC000000), Offset(0f, 1f), 4f)
+        // 결함 원 — HMD MarkerView 와 같은 맞춤·크기(최소 지름 40dp, 선 4dp)
+        if (v.marks && circles && mark?.decision != null && mark.frameW > 0 && mark.frameH > 0) {
+            val boxes = remember(mark) { LiveWire.merge(mark.detections) }
+            val minR = with(density) { (20 * k).dp.toPx() }
+            val stroke = with(density) { (4 * k).dp.toPx() }
+            val color = Color(if (mark.decision == "NG") HudMirror.Tone.BAD.argb else HudMirror.Tone.WARN.argb)
+            Canvas(Modifier.fillMaxSize()) {
+                val f = DefectCrop.fit(mark.frameW, mark.frameH, size.width, size.height)
+                boxes.forEach { box ->
+                    val b = box.box
+                    val r = maxOf(minR, (maxOf(b[2] - b[0], b[3] - b[1]) * f.scale * 0.75).toFloat())
+                    drawCircle(color, r, Offset(f.x((b[0] + b[2]) / 2), f.y((b[1] + b[3]) / 2)), style = Stroke(stroke))
+                }
             }
         }
+        Column(Modifier.fillMaxSize().padding(horizontal = 28.dp * k, vertical = 18.dp * k)) {
+            Text(v.topLeft, color = Color(v.topLeftTone.argb), fontSize = sp(20f), fontWeight = FontWeight.Bold, maxLines = 1,
+                 style = TextStyle(shadow = shadow))
+            Column(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.Center,
+                   horizontalAlignment = Alignment.CenterHorizontally) {
+                if (v.big.isNotEmpty()) Text(v.big, color = Color(v.bigTone.argb), fontSize = sp(44f), fontWeight = FontWeight.Bold,
+                                             textAlign = TextAlign.Center, style = TextStyle(shadow = shadow))
+                if (v.lines.isNotEmpty()) Text(v.lines.joinToString("\n"), color = Color(HudMirror.Tone.STOP.argb), fontSize = sp(22f),
+                                               textAlign = TextAlign.Center, style = TextStyle(shadow = shadow),
+                                               modifier = Modifier.padding(top = 10.dp * k))
+            }
+        }
+        v.overlay?.let {
+            Text(it, color = Color(0xFF101620), fontSize = sp(20f), fontWeight = FontWeight.Bold,
+                 modifier = Modifier.align(Alignment.TopCenter).padding(top = 56.dp * k).background(Color(0xE6F0A95C))
+                     .padding(horizontal = 16.dp * k, vertical = 6.dp * k))
+        }
     }
-    Text(
-        (if (ng) "✕ 불량" else "? 애매") + (m.label?.let { " · $it" } ?: ""),
-        color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold,
-        modifier = Modifier.align(Alignment.TopStart).padding(8.dp).background(color.copy(alpha = 0.8f), RoundedCornerShape(4.dp))
-            .padding(horizontal = 6.dp, vertical = 2.dp),
-    )
 }
+
+/** HMD 화면 폭(RealWear 520: 1280px = 853dp) — 따라 그리기 배율 기준 */
+private val HMD_W = 853.dp
 
 /** 결함 표시 유지 — 모바일 Profile.markHoldMs · HMD LiveHold 와 같은 값 */
 private val MARK_HOLD_MS = Profile().markHoldMs

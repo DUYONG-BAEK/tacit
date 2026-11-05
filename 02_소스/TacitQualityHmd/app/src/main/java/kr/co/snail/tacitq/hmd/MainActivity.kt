@@ -46,8 +46,12 @@ class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
     /** "hevc"(기본, 설계서 §8 E2) | "mjpeg"(예비) — adb: am start ... --es video mjpeg */
     private val videoMode by lazy { intent.getStringExtra(EXTRA_VIDEO) ?: BuildConfig.VIDEO_MODE }
-    /** MJPEG 해상도 — 기본 1080p(실제 AI 서버용). adb: am start ... --es res 720 */
-    private val mjpegSize by lazy { if (intent.getStringExtra(EXTRA_RES) == "720") Size(1280, 720) else Size(1920, 1080) }
+    /**
+     * MJPEG 해상도 — 4:3(센서 비율). 2026-11-05: 16:9(1920×1080)는 4:3 센서의 위아래를 잘라 기본 카메라 앱보다
+     * 약 1.33배 확대돼 보였다. 4:3 이면 센서 화각 전체를 쓴다. 실제 크기는 카메라가 고른다(상태줄·로그에 표시).
+     * adb: am start ... --es res 720 → 960×720
+     */
+    private val mjpegSize by lazy { if (intent.getStringExtra(EXTRA_RES) == "720") Size(960, 720) else Size(1920, 1440) }
     private lateinit var server: MjpegServer
     private var encoder: HevcEncoder? = null
     private var camera2: Camera2Source? = null
@@ -81,6 +85,9 @@ class MainActivity : AppCompatActivity() {
         // 구형(legacy) 카메라 HAL 은 Preview 표면이 있어야 시작된다. RealWear 에서 SurfaceView 표면이
         // 생성되지 않으므로 TextureView(COMPATIBLE) 로 표면을 확실히 공급한다.
         binding.preview.implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+        // 4:3 미리보기를 자르지 않고 16:9 화면 가운데에(좌우 검은 띠) — 기본 카메라 앱과 같은 화각.
+        // FILL_CENTER(기본값)는 위아래를 잘라 확대돼 보인다. 결함 원은 MarkerView 가 같은 맞춤으로 그린다.
+        binding.preview.scaleType = PreviewView.ScaleType.FIT_CENTER
 
         server = if (videoMode == "hevc") MjpegServer(PORT, "video/hevc") else MjpegServer(PORT)
         server.start()
@@ -249,8 +256,7 @@ class MainActivity : AppCompatActivity() {
             val provider = future.get()
 
             // Preview: 구형 카메라 HAL 시작에 필요. TextureView 표면을 공급한다.
-            // 비율은 기본값 그대로 — 4:3 미리보기가 16:9 화면을 채우면(FILL_CENTER) 가운데 16:9 띠만 보여
-            // 16:9 분석 영상(1080p)과 화각이 같다. 결함 원(0~1000 좌표)은 그대로 맞는다.
+            // 비율은 기본값(4:3) 그대로 — 분석 영상도 4:3 이라 둘 다 센서 화각 전체다.
             val preview = Preview.Builder().build().also {
                 it.setSurfaceProvider(binding.preview.surfaceProvider)
             }
@@ -258,6 +264,7 @@ class MainActivity : AppCompatActivity() {
             // ImageAnalysis: 프레임 → JPEG → MJPEG 송출
             val analysis = ImageAnalysis.Builder()
                 // 2026-10-07: 640×480 → 720p. 2026-10-10: 1080p. 2026-11-03 규격: 결함을 640px 타일로 보므로 1080p 이상 권장(API §5.5)
+                // 2026-11-05: 4:3 1920×1440 — 화각을 기본 카메라 앱과 맞추고 가로 화소는 1080p 와 같게
                 .setTargetResolution(mjpegSize)
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .build()
@@ -278,6 +285,9 @@ class MainActivity : AppCompatActivity() {
             Log.i(TAG, "카메라 바인딩 완료 (Preview+Analysis, $selector)")
             cameraError = null
             cameraBound = true
+            // 확대 없이 가장 넓게 — 기본 카메라 앱과 같은 배율
+            camera.cameraControl.setLinearZoom(0f)
+            camera.cameraInfo.zoomState.value?.let { Log.i(TAG, "줌 ${it.zoomRatio}배 (최소 ${it.minZoomRatio} · 최대 ${it.maxZoomRatio})") }
             // 열기 상태·오류(다른 앱이 사용 중 등) — 바인딩은 됐는데 프레임이 안 올 때 원인
             camera.cameraInfo.cameraState.removeObservers(this)
             camera.cameraInfo.cameraState.observe(this) { st ->
@@ -289,7 +299,11 @@ class MainActivity : AppCompatActivity() {
 
     private fun onFrame(image: androidx.camera.core.ImageProxy) {
         val capturedAt = System.currentTimeMillis()      // JPEG 변환 전 시각 = 촬영 시각에 가장 가깝다
-        if (!analysisSizeLogged) { analysisSizeLogged = true; analysisSize = "${image.width}×${image.height}"; Log.i(TAG, "분석 영상 $analysisSize") }
+        if (!analysisSizeLogged) {
+            analysisSizeLogged = true; analysisSize = "${image.width}×${image.height}"; Log.i(TAG, "분석 영상 $analysisSize")
+            val aspect = image.width.toFloat() / image.height
+            ui.post { binding.marks.contentAspect = aspect }      // 결함 원 — 미리보기와 같은 비율로 맞춤
+        }
         lastFrameAt = capturedAt
         try {
             server.updateFrame(YuvToJpeg.convert(image), capturedAt)
@@ -377,7 +391,7 @@ class MainActivity : AppCompatActivity() {
         val ip = deviceIp() ?: "IP 없음(Wi-Fi 확인)"
         val cam = cameraState()
         binding.statusText.text = (if (cam.startsWith("정상")) "" else "⚠ 카메라 $cam · ") +
-            "영상 ${if (videoMode == "hevc") "H.265 1080p" else "MJPEG ${mjpegSize.height}p"} http://$ip:$PORT (뷰어 ${server.viewerCount}) · $bleLabel · ${hud.lastInfo}"
+            "영상 ${if (videoMode == "hevc") "H.265 1080p" else "MJPEG ${analysisSize.ifEmpty { "${mjpegSize.width}×${mjpegSize.height}" }}"} http://$ip:$PORT (뷰어 ${server.viewerCount}) · $bleLabel · ${hud.lastInfo}"
         ui.postDelayed(::refreshStatus, 1000)
     }
 

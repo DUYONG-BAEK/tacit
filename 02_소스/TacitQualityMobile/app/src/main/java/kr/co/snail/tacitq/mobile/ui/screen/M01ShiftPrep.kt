@@ -17,6 +17,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kr.co.snail.tacitq.mobile.core.Profile
 import kr.co.snail.tacitq.mobile.model.*
 import kr.co.snail.tacitq.mobile.relay.DevSettings
 import kr.co.snail.tacitq.mobile.service.InspectionService
@@ -98,7 +99,7 @@ fun ShiftPrepScreen(vm: AppViewModel) {
         }
     }
 
-    Field("모델 · 임계값", vm.repo.profile().profileVersion)
+    Field("모델 · 임계값", Profile().let { "${vm.repo.profile().profileVersion} · 앱 보수 기준 PD ≥ ${it.pdMinConf} · QI 서버 기준값 ×${it.qiFactor}" })
     Field("HMD", "${hmd.deviceId} · 배터리 ${hmd.batteryPct}% · ${"%.1f".format(hmd.bitrateMbps)} Mbps")
 
     NoteBox(

@@ -36,6 +36,7 @@ data class SegmentSummary(
  *  - 결함 확정(R3): 구간 안 최근 [Profile.confirmWindow] 장 중 [Profile.confirmHits] 장 이상이 NG·REVIEW 면 확정 —
  *    그 안에 NG 가 있으면 NG, 없으면 REVIEW. 나중에 NG 로 다시 확정되면 올린다. 처음 확정될 때 [onAlarm](R5, 구간당 1회).
  *  - 구간 판정(R4·R6): 확정이 없으면 OK(합격), 있으면 확정 판정(불합격). 구간 끝에 [Event.JudgeResult] 1건.
+ *  - 모든 inspect 는 먼저 [InspectFilter](앱 보수 기준 — PD 신뢰도 하한, QI 기준값 배율)로 다시 판정한 뒤 쓴다.
  *
  * [onMessage] 는 WebRTC 콜백 스레드, 나머지는 연결 스레드에서 오므로 모두 동기화한다.
  */
@@ -98,9 +99,15 @@ class AiFlow(
                 clearLive(clock())
             }
             is AiMsg.Inspect -> {
-                guide = "검사 중 · ${m.decision}" + (m.defectLabel?.let { " $it %.2f".format(m.score) } ?: "")
+                val f = InspectFilter.apply(m, profile.pdMinConf, profile.qiFactor)
+                if (f == null) {                                         // 앱 기준으로는 제품 없음 — searching 과 같게
+                    guide = "제품 없음 (앱 기준 PD ${profile.pdMinConf} 미만)"; hint("제품을 비춰 주세요", "IDLE")
+                    clearLive(clock())
+                    return
+                }
+                guide = "검사 중 · ${f.decision}" + (f.defectLabel?.let { " $it %.2f".format(f.score) } ?: "")
                 hint("검사 중", "OK")
-                inspect(m, clock())
+                inspect(f, clock())
             }
             is AiMsg.Unknown -> Unit
         }

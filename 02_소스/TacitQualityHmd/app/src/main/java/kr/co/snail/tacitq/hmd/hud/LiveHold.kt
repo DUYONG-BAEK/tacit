@@ -43,12 +43,15 @@ class LiveHold(private val holdMs: Long = 500) {
         }
 
         /**
-         * 결함 상자(영상 기준 0~1000) → 화면 위 원(중심 x, 중심 y, 반지름). 미리보기가 화면을 같은 비율(16:9)로
-         * 꽉 채운다는 전제. 결함은 수 px 라 상자 그대로는 안 보이므로 반지름은 최소 [minRadius](지름 40dp 이상).
+         * 결함 상자(영상 기준 0~1000) → 화면 위 원(중심 x, 중심 y, 반지름). 미리보기는 영상([contentAspect] = 가로/세로)을
+         * 자르지 않고 화면 가운데에 맞춘다(FIT_CENTER — 남는 쪽은 검은 띠). 원도 같은 맞춤으로 그린다.
+         * 결함은 수 px 라 상자 그대로는 안 보이므로 반지름은 최소 [minRadius](지름 40dp 이상).
          */
-        fun circle(b: List<Int>, viewW: Int, viewH: Int, minRadius: Float): Triple<Float, Float, Float> {
-            val x1 = b[0] * viewW / 1000f; val y1 = b[1] * viewH / 1000f
-            val x2 = b[2] * viewW / 1000f; val y2 = b[3] * viewH / 1000f
+        fun circle(b: List<Int>, viewW: Int, viewH: Int, minRadius: Float, contentAspect: Float): Triple<Float, Float, Float> {
+            val w = minOf(viewW.toFloat(), viewH * contentAspect); val h = w / contentAspect
+            val left = (viewW - w) / 2; val top = (viewH - h) / 2
+            val x1 = left + b[0] * w / 1000f; val y1 = top + b[1] * h / 1000f
+            val x2 = left + b[2] * w / 1000f; val y2 = top + b[3] * h / 1000f
             val r = maxOf(minRadius, maxOf(x2 - x1, y2 - y1) * 0.75f)
             return Triple((x1 + x2) / 2, (y1 + y2) / 2, r)
         }

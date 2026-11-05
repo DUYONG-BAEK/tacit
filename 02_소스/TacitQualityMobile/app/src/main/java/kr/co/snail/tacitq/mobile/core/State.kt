@@ -50,6 +50,9 @@ data class Profile(
     val segmentEndMs: Long = 1_000,       // 마지막 inspect 뒤 이만큼 inspect 가 없으면 제품 구간 끝
     val markHoldMs: Long = 500,           // 결함 표시 유지 — HMD LiveHold 와 같은 값
     val liveMarks: Boolean = true,        // HMD 에 결함 원(상자)을 보낸다 — 끄면 판정 글자만
+    // 앱 쪽 보수 기준(InspectFilter) — 가모델 오탐이 시험을 방해해 서버 결과를 더 엄격하게 본다. 1.0·0.0 이면 서버 그대로
+    val pdMinConf: Double = 0.5,          // 제품 상자 신뢰도 하한 — 미만은 제품 없음으로
+    val qiFactor: Double = 1.3,           // 결함 기준값 = 서버 threshold × qiFactor
 )
 
 /** 앱 전체 상태. 이 객체 하나가 곧 진실이다. */
