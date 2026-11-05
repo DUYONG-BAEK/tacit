@@ -16,7 +16,6 @@ import android.view.View
 import android.view.WindowManager
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
-import androidx.camera.core.AspectRatio
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
@@ -143,6 +142,8 @@ class MainActivity : AppCompatActivity() {
     /** 뒤에 갔다 온 적이 있으면 앞으로 나올 때 카메라를 새로 묶는다 */
     private var cameraNeedsRebind = false
     @Volatile private var analysisSizeLogged = false
+    /** 카메라 바인딩 실패 사유 — 상태줄 맨 앞에 띄운다(영상이 안 나가는 원인) */
+    private var cameraError: String? = null
     private var lastBringAt = 0L
 
     override fun onStop() {
@@ -196,15 +197,15 @@ class MainActivity : AppCompatActivity() {
             val provider = future.get()
 
             // Preview: 구형 카메라 HAL 시작에 필요. TextureView 표면을 공급한다.
-            // 16:9 — 기본값 4:3 이면 16:9 분석 영상과 화각이 달라 결함 원(0~1000 좌표)이 어긋난다. HMD 화면도 16:9(1280×720)
-            @Suppress("DEPRECATION")
-            val preview = Preview.Builder().setTargetAspectRatio(AspectRatio.RATIO_16_9).build().also {
+            // 비율은 기본값 그대로 — 4:3 미리보기가 16:9 화면을 채우면(FILL_CENTER) 가운데 16:9 띠만 보여
+            // 16:9 분석 영상(1080p)과 화각이 같다. 결함 원(0~1000 좌표)은 그대로 맞는다.
+            val preview = Preview.Builder().build().also {
                 it.setSurfaceProvider(binding.preview.surfaceProvider)
             }
 
             // ImageAnalysis: 프레임 → JPEG → MJPEG 송출
             val analysis = ImageAnalysis.Builder()
-                // 2026-10-07: 640×480 → 720p. 2026-10-10: 실제 AI 서버는 종이 긴 변 ≥1216px → 1080p 필요(설계서 §9)
+                // 2026-10-07: 640×480 → 720p. 2026-10-10: 1080p. 2026-11-03 규격: 결함을 640px 타일로 보므로 1080p 이상 권장(API §5.5)
                 .setTargetResolution(mjpegSize)
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .build()
@@ -214,11 +215,18 @@ class MainActivity : AppCompatActivity() {
                 provider.unbindAll()
                 provider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, preview, analysis)
                 "BACK"
-            }.getOrElse {
+            }.recoverCatching { back ->
+                Log.w(TAG, "후면 카메라 바인딩 실패: ${back.message}")
                 provider.bindToLifecycle(this, CameraSelector.DEFAULT_FRONT_CAMERA, preview, analysis)
                 "FRONT"
+            }.getOrElse { e ->
+                // 영상이 안 나가는 원인을 HMD 화면에서 바로 보이게 — 앱을 죽이지 않는다
+                Log.e(TAG, "카메라 바인딩 실패 — 영상 송출 불가", e)
+                cameraError = e.message ?: e.javaClass.simpleName
+                return@addListener
             }
             Log.i(TAG, "카메라 바인딩 완료 (Preview+Analysis, $selector)")
+            cameraError = null
         }, ContextCompat.getMainExecutor(this))
     }
 
@@ -309,7 +317,7 @@ class MainActivity : AppCompatActivity() {
     /** 하단 상태줄: 영상 주소 · 뷰어 수 · BLE 상태 · 마지막 쪽지. 1초마다 갱신. */
     private fun refreshStatus() {
         val ip = deviceIp() ?: "IP 없음(Wi-Fi 확인)"
-        binding.statusText.text =
+        binding.statusText.text = (cameraError?.let { "⚠ 카메라 시작 실패: $it · " } ?: "") +
             "영상 ${if (videoMode == "hevc") "H.265 1080p" else "MJPEG ${mjpegSize.height}p"} http://$ip:$PORT (뷰어 ${server.viewerCount}) · $bleLabel · ${hud.lastInfo}"
         ui.postDelayed(::refreshStatus, 1000)
     }

@@ -20,6 +20,8 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kr.co.snail.tacitq.mobile.core.Event
 import kr.co.snail.tacitq.mobile.core.Profile
+import kr.co.snail.tacitq.mobile.log.CommLog
+import kr.co.snail.tacitq.mobile.log.CommLog.Ch.AI
 import kr.co.snail.tacitq.mobile.relay.StreamRelay
 import org.webrtc.DataChannel
 import org.webrtc.IceCandidate
@@ -40,13 +42,14 @@ import org.webrtc.YuvHelper
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
 
 /**
  * 실제 AI 엣지 연결 — HMD JPEG 를 WebRTC 영상 트랙으로 AI 서버에 보내고, 데이터 채널 메시지를 [AiFlow] 로 넘긴다.
- * 설계서 §9 · A4_WEBRTC_API.md §5. 모의 엣지용 [StreamRelay] 자리를 그대로 대신한다(같은 offer · status).
+ * 설계서 §9 · 「제품 불량 판정 — 모바일 앱 연동 API」 2026-11-03 규격 §5. 모의 엣지용 [StreamRelay] 자리를 그대로 대신한다(같은 offer · status).
  *
  *  - 영상: 마지막 JPEG 1장만 들고 있다가 [FRAME_MS] 마다 I420 으로 바꿔 넣는다(밀린 프레임은 버림, 초당 최대 10장).
  *  - 해상도: 대역폭이 모자라도 해상도를 낮추지 않게 MAINTAIN_RESOLUTION (서버는 결함을 640px 타일로 보므로 해상도가 곧 검출력, API §5.5).
@@ -90,6 +93,14 @@ class AiEdgeLink(
     /** 지금 PeerConnection 의 세대 — [closePc] 마다 올린다. 닫힌 연결이 뒤늦게 보내는 상태 콜백을 거른다. */
     private var gen = 0
     private var lastStats = 0L
+    // 통신 로그 요약(5초마다 한 줄) — 받은 HMD 영상 · 보낸 프레임 · 서버 메시지 수
+    private val nInspect = AtomicInteger()
+    private val nSearching = AtomicInteger()
+    private val nUnknown = AtomicInteger()
+    @Volatile private var lastUnknown: String? = null
+    @Volatile private var firstMessage = true
+    private var statsReceived = 0L
+    private var statsSent = 0L
     @Volatile private var sentInfo: String? = null
     private var argb: ByteBuffer? = null
 
@@ -135,13 +146,13 @@ class AiEdgeLink(
     private suspend fun tick() {
         val now = System.currentTimeMillis()
         if (policy.expired(now)) {
-            Log.w(TAG, "연결 시도 ${Reconnect.ATTEMPT_TIMEOUT_MS}ms 초과 — 닫고 다시")
+            CommLog.w(AI, TAG, "연결 시도 ${Reconnect.ATTEMPT_TIMEOUT_MS}ms 초과 — 닫고 다시")
             closePc()
             lost("연결 시간 초과")
         }
         if (policy.due(now)) connect(now)
         flow.onTick()
-        if (connected && now - lastStats >= STATS_MS) { lastStats = now; logStats() }
+        if (connected && now - lastStats >= STATS_MS) { lastStats = now; summary(); logStats() }
         _status.value = StreamRelay.Status(
             edgeConnected = connected, received = received, sent = sent, queued = 0,
             dropped = (received - sent).coerceAtLeast(0), edgeFps = 0.0,
@@ -154,6 +165,7 @@ class AiEdgeLink(
 
     private suspend fun connect(now: Long) {
         policy.onAttempt(now)
+        if (policy.failures == 0) CommLog.i(AI, TAG, "연결 시도 $baseUrl (스테이션 $stationId)")
         try {
             closePc()
             val myGen = gen
@@ -168,7 +180,7 @@ class AiEdgeLink(
             val sender = p.addTrack(factory.createVideoTrack("hmd", source), listOf("hmd"))
             keepResolution(sender)
             // 데이터 채널은 offer 전에 — 그래야 SDP 에 들어간다(API §5.1)
-            channel = p.createDataChannel("a4", DataChannel.Init()).also { it.registerObserver(channelObserver(it)) }
+            channel = p.createDataChannel("tacitq", DataChannel.Init()).also { it.registerObserver(channelObserver(it)) }
 
             val offer = sdp { p.createOffer(it, MediaConstraints()) } ?: error("offer 생성 실패")
             sdpSet { p.setLocalDescription(it, offer) }
@@ -180,11 +192,11 @@ class AiEdgeLink(
                     val answer = Json.parseToJsonElement(reply.body).jsonObject["sdp"]!!.jsonPrimitive.content
                     sdpSet { p.setRemoteDescription(it, SessionDescription(SessionDescription.Type.ANSWER, answer)) }
                     keepResolution(sender)                                    // 협상 뒤에야 encodings 가 채워진다 — 다시 건다
-                    Log.i(TAG, "offer 수락 — 연결 대기 $baseUrl station=$stationId")
+                    CommLog.i(AI, TAG, "offer 수락 — 연결 대기 $baseUrl station=$stationId")
                 }
                 403, 422 -> {
                     configError = "설정 오류 ${reply.code} — 스테이션·주소 확인 (${detail(reply.body)})"
-                    Log.w(TAG, configError!!)
+                    CommLog.w(AI, TAG, configError!!)
                     policy.onConfigError()
                     closePc()
                     lost("설정 오류 ${reply.code}")
@@ -192,7 +204,7 @@ class AiEdgeLink(
                 else -> { closePc(); lost("offer 응답 ${reply.code} ${detail(reply.body)}") }
             }
         } catch (e: Exception) {
-            Log.w(TAG, "연결 실패: ${e.message}")
+            CommLog.w(AI, TAG, "연결 실패: ${e.message}")
             closePc()
             lost("연결 실패 ${e.message}")
         }
@@ -204,7 +216,19 @@ class AiEdgeLink(
         p.degradationPreference = RtpParameters.DegradationPreference.MAINTAIN_RESOLUTION
         p.encodings.forEach { it.maxBitrateBps = MAX_BITRATE; it.minBitrateBps = MIN_BITRATE; it.scaleResolutionDownBy = 1.0 }
         val ok = sender.setParameters(p)
-        Log.i(TAG, "해상도 유지 설정 ok=$ok encodings=${p.encodings.size}")
+        CommLog.i(AI, TAG, "해상도 유지 설정 ok=$ok encodings=${p.encodings.size}")
+    }
+
+    /** 통신 로그 5초 요약 — HMD 영상이 안 들어오면 서버로 보낼 것도 없다는 것을 바로 보이게 */
+    private fun summary() {
+        val r = received - statsReceived; val s = sent - statsSent
+        statsReceived = received; statsSent = sent
+        val u = nUnknown.getAndSet(0)
+        val line = "최근 ${STATS_MS / 1000}초: HMD 영상 ${r}장 받음 · 서버로 ${s}장 보냄 · 서버 메시지 inspect ${nInspect.getAndSet(0)} · " +
+            "searching ${nSearching.getAndSet(0)}" + (if (u > 0) " · 모르는 메시지 $u (예: $lastUnknown)" else "") +
+            (sentInfo?.let { " · $it" } ?: "")
+        if (r == 0L) CommLog.w(AI, TAG, "$line — HMD 영상이 들어오지 않아 서버로 보낼 프레임이 없음(HMD 로그 확인)")
+        else CommLog.i(AI, TAG, line)
     }
 
     /** 실제로 나가는 영상 — WebRTC 통계(outbound-rtp). */
@@ -214,7 +238,6 @@ class AiEdgeLink(
                 val m = s.members
                 sentInfo = "보냄 ${m["frameWidth"]}×${m["frameHeight"]} · ${m["framesPerSecond"] ?: "-"}fps · " +
                     "목표 ${(m["targetBitrate"] as? Number)?.toInt()?.div(1000) ?: "-"}kbps · 제한 ${m["qualityLimitationReason"]}"
-                Log.i(TAG, sentInfo!!)
             }
         }
     }
@@ -225,7 +248,7 @@ class AiEdgeLink(
             if (s == PeerConnection.IceGatheringState.COMPLETE) gathered.complete(Unit)
         }
         override fun onConnectionChange(s: PeerConnection.PeerConnectionState) {
-            Log.i(TAG, "연결 상태 $s (세대 $myGen)")
+            CommLog.i(AI, TAG, "연결 상태 $s (세대 $myGen)")
             kotlinx.coroutines.CoroutineScope(linkThread).launch {
                 if (myGen != gen) return@launch
                 when (s) {
@@ -251,17 +274,28 @@ class AiEdgeLink(
 
     private fun channelObserver(ch: DataChannel) = object : DataChannel.Observer {
         override fun onBufferedAmountChange(l: Long) = Unit
-        override fun onStateChange() { Log.i(TAG, "데이터 채널 ${ch.state()}") }
+        override fun onStateChange() { CommLog.i(AI, TAG, "데이터 채널 ${ch.state()}") }
         override fun onMessage(b: DataChannel.Buffer) {
             val bytes = ByteArray(b.data.remaining()).also { b.data.get(it) }
             val text = String(bytes, Charsets.UTF_8)
             Log.d(TAG, "← $text")
-            flow.onMessage(AiMessages.parse(text))
+            val msg = AiMessages.parse(text)
+            if (firstMessage) { firstMessage = false; CommLog.i(AI, TAG, "첫 서버 메시지 ← ${text.take(300)}") }
+            when (msg) {
+                is AiMsg.Inspect -> nInspect.incrementAndGet()
+                is AiMsg.Searching -> nSearching.incrementAndGet()
+                is AiMsg.Unknown -> { nUnknown.incrementAndGet(); lastUnknown = text.take(200) }
+            }
+            flow.onMessage(msg)
         }
     }
 
     private fun onConnected() {
         connected = true
+        CommLog.i(AI, TAG, "연결됨 — 영상 전송 시작, 서버 메시지 대기 ($baseUrl)")
+        firstMessage = true
+        nInspect.set(0); nSearching.set(0); nUnknown.set(0)
+        statsReceived = received; statsSent = sent; lastStats = System.currentTimeMillis()
         policy.onConnected()
         flow.onConnected()
         if (unreachable) { unreachable = false; emit(Event.EdgeRecovered) }
@@ -272,7 +306,7 @@ class AiEdgeLink(
         policy.onFailure(System.currentTimeMillis())
         flow.onDisconnected()
         if (!unreachable) { unreachable = true; emit(Event.EdgeUnreachable(reason)) }
-        if (configError == null) Log.i(TAG, "끊김($reason) — 연속 실패 ${policy.failures}회, ${Reconnect.delayMs(policy.failures)}ms 뒤 재시도")
+        if (configError == null) CommLog.w(AI, TAG, "끊김($reason) — 연속 실패 ${policy.failures}회, ${Reconnect.delayMs(policy.failures)}ms 뒤 재시도")
     }
 
     private fun closePc() {
@@ -289,7 +323,7 @@ class AiEdgeLink(
     private suspend fun pumpLoop() = coroutineScope {
         while (isActive) {
             val jpeg = latest.getAndSet(null)
-            if (jpeg != null && connected) runCatching { push(jpeg) }.onFailure { Log.w(TAG, "프레임 변환 실패: ${it.message}") }
+            if (jpeg != null && connected) runCatching { push(jpeg) }.onFailure { CommLog.w(AI, TAG, "프레임 변환 실패: ${it.message}") }
             delay(FRAME_MS)
         }
     }
@@ -325,7 +359,7 @@ class AiEdgeLink(
     private suspend fun sdp(call: (SdpObserver) -> Unit): SessionDescription? = suspendCoroutine { c ->
         call(object : SdpObserver {
             override fun onCreateSuccess(d: SessionDescription) = c.resume(d)
-            override fun onCreateFailure(e: String?) { Log.w(TAG, "SDP 생성 실패 $e"); c.resume(null) }
+            override fun onCreateFailure(e: String?) { CommLog.w(AI, TAG, "SDP 생성 실패 $e"); c.resume(null) }
             override fun onSetSuccess() = Unit
             override fun onSetFailure(e: String?) = Unit
         })

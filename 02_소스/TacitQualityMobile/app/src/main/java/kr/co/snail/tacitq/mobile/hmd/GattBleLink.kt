@@ -16,7 +16,6 @@ import android.bluetooth.le.ScanSettings
 import android.content.Context
 import android.os.Build
 import android.os.ParcelUuid
-import android.util.Log
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -30,6 +29,8 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
+import kr.co.snail.tacitq.mobile.log.CommLog
+import kr.co.snail.tacitq.mobile.log.CommLog.Ch.HMD
 import java.io.IOException
 import java.util.UUID
 import kotlin.coroutines.coroutineContext
@@ -69,6 +70,7 @@ class GattBleLink(
     @Volatile private var needHello = true
     private var pingSeq = 0L
     @Volatile private var connectStartedAt = 0L
+    private var pingFailing = false                    // 통신 로그 — PING 실패는 바뀔 때만 남긴다
 
     private val _state = MutableStateFlow("BLE 준비")
     val state: StateFlow<String> = _state
@@ -79,20 +81,24 @@ class GattBleLink(
             while (coroutineContext.isActive) {
                 if (gatt == null) {
                     if (adapter == null || !adapter.isEnabled) {
-                        _state.value = "폰 블루투스 꺼짐"
+                        state("폰 블루투스 꺼짐", warn = true)
                     } else {
                         _state.value = "HMD 찾는 중"
                         val device = scanOnce(SCAN_MS)
-                        if (device != null) connect(device) else _state.value = "HMD 못 찾음 — 5초 뒤 재시도"
+                        if (device != null) connect(device)
+                        else state("HMD 못 찾음(${SCAN_MS / 1000}초 스캔) — HMD 앱·블루투스 확인, 5초 뒤 재시도", warn = true)
                     }
                     delay(RECONNECT_MS)
                     continue
                 }
                 if (ready) {
                     if (needHello) readHello()
-                    runCatching { write("""{"cmd":"PING","seq":${++pingSeq}}""".toByteArray()) }
+                    val ok = runCatching { write("""{"cmd":"PING","seq":${++pingSeq}}""".toByteArray()) }
+                        .onFailure { if (!pingFailing) CommLog.w(HMD, TAG, "PING 쓰기 실패: ${it.message}") }.isSuccess
+                    if (ok && pingFailing) CommLog.i(HMD, TAG, "PING 쓰기 다시 성공")
+                    pingFailing = !ok
                 } else if (System.currentTimeMillis() - connectStartedAt > CONNECT_TIMEOUT_MS) {
-                    Log.w(TAG, "연결 준비가 ${CONNECT_TIMEOUT_MS}ms 안에 끝나지 않음 — 다시 시도")
+                    CommLog.w(HMD, TAG, "연결 준비가 ${CONNECT_TIMEOUT_MS}ms 안에 끝나지 않음 — 다시 시도")
                     close()
                     continue
                 }
@@ -132,6 +138,12 @@ class GattBleLink(
         }
     }
 
+    /** 상태 표시 + 통신 로그(같은 문구가 이어지면 한 번만) */
+    private fun state(text: String, warn: Boolean = false) {
+        if (_state.value != text) { if (warn) CommLog.w(HMD, TAG, text) else CommLog.i(HMD, TAG, text) }
+        _state.value = text
+    }
+
     /** 영상이 끊겼을 때 — HMD IP 가 바뀌었을 수 있으니 다음 주기에 HELLO 를 다시 읽는다. */
     fun refreshVideoUrl() { needHello = true }
 
@@ -150,10 +162,10 @@ class GattBleLink(
             val o = json.parseToJsonElement(bytes.decodeToString()).jsonObject
             val url = o["video_url"]?.jsonPrimitive?.takeIf { it.isString }?.content
             if (o["type"]?.jsonPrimitive?.content == "HELLO" && !url.isNullOrBlank()) {
-                Log.i(TAG, "HMD 영상 주소 $url")
+                CommLog.i(HMD, TAG, "HMD 영상 주소 $url")
                 onVideoUrl(url)
             }
-        }.onFailure { Log.i(TAG, "HELLO 없음 — 수동 HMD 주소 사용") }
+        }.onFailure { CommLog.i(HMD, TAG, "HELLO 없음 — 수동 HMD 주소 사용") }
     }
 
     private suspend fun scanOnce(timeoutMs: Long): BluetoothDevice? {
@@ -166,7 +178,7 @@ class GattBleLink(
                         if (cont.isActive) cont.resume(result.device)
                     }
                     override fun onScanFailed(errorCode: Int) {
-                        Log.w(TAG, "스캔 실패 code=$errorCode")
+                        CommLog.w(HMD, TAG, "스캔 실패 code=$errorCode")
                         if (cont.isActive) cont.resume(null)
                     }
                 }
@@ -179,7 +191,7 @@ class GattBleLink(
     }
 
     private fun connect(device: BluetoothDevice) {
-        Log.i(TAG, "HMD 발견 ${device.address} — 연결")
+        CommLog.i(HMD, TAG, "HMD 발견 ${device.address} — 연결")
         _state.value = "HMD 연결 중"
         connectStartedAt = System.currentTimeMillis()
         gatt = device.connectGatt(context, false, callback, BluetoothDevice.TRANSPORT_LE)
@@ -187,7 +199,7 @@ class GattBleLink(
 
     /** ACK 가 안 오는 등 연결이 이상할 때 — 끊고 처음(스캔)부터 다시 붙는다. */
     fun reset() {
-        Log.w(TAG, "BLE 재설정 — 다시 연결")
+        CommLog.w(HMD, TAG, "BLE 재설정 — 다시 연결")
         _state.value = "HMD 재연결 중"
         close()
     }
@@ -205,11 +217,11 @@ class GattBleLink(
     private val callback = object : BluetoothGattCallback() {
         override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
             if (newState == BluetoothProfile.STATE_CONNECTED) {
-                Log.i(TAG, "GATT 연결 — MTU 요청")
+                CommLog.i(HMD, TAG, "GATT 연결 — MTU 요청")
                 g.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_HIGH)   // 15~30ms 간격(설계 B3)
                 g.requestMtu(MTU)
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
-                Log.w(TAG, "GATT 끊김 status=$status")
+                CommLog.w(HMD, TAG, "GATT 끊김 status=$status")
                 pendingWrite?.complete(false)
                 close()
                 _state.value = "HMD 끊김 — 재연결 대기"
@@ -217,7 +229,7 @@ class GattBleLink(
         }
 
         override fun onMtuChanged(g: BluetoothGatt, mtu: Int, status: Int) {
-            Log.i(TAG, "MTU=$mtu status=$status")
+            CommLog.i(HMD, TAG, "MTU=$mtu status=$status")
             g.discoverServices()
         }
 
@@ -226,7 +238,7 @@ class GattBleLink(
             val dn = svc?.getCharacteristic(DOWN)
             val up = svc?.getCharacteristic(UP)
             if (dn == null || up == null) {
-                Log.e(TAG, "TacitQ 서비스/특성 없음 — HMD 앱 버전 확인")
+                CommLog.w(HMD, TAG, "TacitQ 서비스/특성 없음 — HMD 앱 버전 확인")
                 g.disconnect()
                 return
             }
@@ -247,7 +259,7 @@ class GattBleLink(
         override fun onDescriptorWrite(g: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
             if (descriptor.uuid == CCCD && status == BluetoothGatt.GATT_SUCCESS) {
                 ready = true
-                Log.i(TAG, "HMD 준비 완료 (notify 켜짐)")
+                CommLog.i(HMD, TAG, "HMD 준비 완료 (notify 켜짐)")
                 _state.value = "HMD 연결됨"
                 onReady()
             }
@@ -287,7 +299,7 @@ class GattBleLink(
             if (o["type"]?.jsonPrimitive?.content == "ACK") {
                 o["seq"]?.jsonPrimitive?.longOrNull?.let(onAck)
             }
-        }.onFailure { Log.w(TAG, "UP 쪽지 해석 실패: ${bytes.decodeToString()}") }
+        }.onFailure { CommLog.w(HMD, TAG, "UP 쪽지 해석 실패: ${bytes.decodeToString()}") }
     }
 
     companion object {

@@ -134,7 +134,7 @@ fun NoteBox(title: String, body: String, accent: Color = T.Purple, bg: Color = T
 
 /** 상단 앱바. 화면 코드(M-01 등)와 공정 단계(P0·P3·P5)를 함께 보여준다. */
 @Composable
-fun ScreenBar(title: String, phase: String, color: Color) {
+fun ScreenBar(title: String, phase: String, color: Color, onLog: (() -> Unit)? = null) {
     Row(
         Modifier.fillMaxWidth().background(color).padding(horizontal = 14.dp, vertical = 13.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -143,6 +143,12 @@ fun ScreenBar(title: String, phase: String, color: Color) {
             modifier = Modifier.weight(1f))
         Text(phase, color = Color.White.copy(alpha = 0.75f), fontSize = 11.sp,
             fontWeight = FontWeight.Bold)
+        // 통신 로그 창 — 어느 화면에서나
+        onLog?.let {
+            Text("로그", color = color, fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(start = 10.dp).clip(RoundedCornerShape(10.dp)).background(Color.White)
+                    .clickable(onClick = it).padding(horizontal = 10.dp, vertical = 4.dp))
+        }
     }
 }
 

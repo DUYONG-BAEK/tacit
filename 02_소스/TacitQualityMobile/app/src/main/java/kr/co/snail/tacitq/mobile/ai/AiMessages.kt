@@ -54,6 +54,9 @@ data class AiResultView(
 )
 
 object AiMessages {
+    /** 이 앱이 따르는 서버 규격 날짜 — 통신 로그 창에 띄워 앱 빌드가 새 규격인지 확인한다 */
+    const val SPEC = "2026-11-03 프레임 단위 판정"
+
     private val json = Json { ignoreUnknownKeys = true }
 
     fun parse(text: String): AiMsg = try {

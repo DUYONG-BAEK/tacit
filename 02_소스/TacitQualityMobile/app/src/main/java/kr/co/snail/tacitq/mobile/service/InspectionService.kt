@@ -48,6 +48,7 @@ import kr.co.snail.tacitq.mobile.core.ShowCommand
 import kr.co.snail.tacitq.mobile.hmd.GattBleLink
 import kr.co.snail.tacitq.mobile.hmd.HintWire
 import kr.co.snail.tacitq.mobile.hmd.LiveWire
+import kr.co.snail.tacitq.mobile.log.CommLog
 import kr.co.snail.tacitq.mobile.hmd.HmdRenderer
 import kr.co.snail.tacitq.mobile.store.LocalStore
 import kr.co.snail.tacitq.mobile.store.QmsDatabase
@@ -96,14 +97,14 @@ class InspectionService : LifecycleService() {
             this, onAck = { seq -> hmd.onAck(seq) }, onReady = ::resendCurrentScreen,
             // HMD 가 BLE 로 알려 준 영상 주소 — 다음 연결부터 쓰고, 화면 설정에도 남긴다(IP 수동 입력 제거)
             onVideoUrl = { url ->
-                if (url != hmdUrl) { Log.i(TAG, "HMD 영상 주소 자동 변경 $hmdUrl → $url"); hmdUrl = url; DevSettings(this).hmdUrl = url }
+                if (url != hmdUrl) { CommLog.i(CommLog.Ch.HMD, TAG, "HMD 영상 주소 자동 변경 $hmdUrl → $url"); hmdUrl = url; DevSettings(this).hmdUrl = url }
             },
         )
         hmd = HmdRenderer(
             ble = ble,
             onAckFailed = { seq ->
                 engine.send(Event.HmdLost(gapMs = 0))
-                Log.w(TAG, "HMD ACK 실패 seq=$seq → OFFLINE 전이 요청 · BLE 재연결")
+                CommLog.w(CommLog.Ch.HMD, TAG, "HMD 화면 지시 ACK 없음 seq=$seq → BLE 재연결")
                 ble.reset()   // 붙으면 onReady 가 현재 화면을 다시 보낸다
             },
         )
@@ -138,7 +139,12 @@ class InspectionService : LifecycleService() {
         val profile = Profile(liveMarks = DevSettings(this).liveMarks)
         engine.send(Event.ShiftStarted(line, partNo, profile))
         val sessionId = "S-" + SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date()) + "-$line"
-        val toEngine: (Event) -> Unit = { e -> Log.i(TAG, "엣지 → 엔진: $e"); engine.send(e) }
+        val toEngine: (Event) -> Unit = { e ->
+            Log.i(TAG, "엣지 → 엔진: $e")
+            if (e is Event.JudgeResult && e.aiDecision != null) CommLog.i(CommLog.Ch.AI, TAG,
+                "제품 구간 판정 ${e.aiDecision}${e.defectLabel?.let { " $it" } ?: ""} · inspect ${e.frames}장(결함 ${e.defectFrames}장) · 저장된 결함 프레임 ${e.resultIds.size}장")
+            engine.send(e)
+        }
         val settings = DevSettings(this)
         // 엣지 종류에 따라 모의 엣지(WebSocket 중계) 또는 실제 AI 서버(WebRTC, 설계서 §9)
         val offer: (Long, Long, ByteArray, String, Boolean) -> Unit
@@ -159,7 +165,8 @@ class InspectionService : LifecycleService() {
                 onAlarm = { vibrate(3) },                         // 제품 구간에서 결함이 처음 확정될 때 1회(R5)
             )
             offer = ai::offer; edgeRun = ai::run; edgeStatus = ai.status
-            Log.i(TAG, "교대 시작 $sessionId · HMD ${this.hmdUrl} → AI 서버 ${settings.aiUrl} (${settings.stationId})")
+            CommLog.i(CommLog.Ch.AI, TAG, "교대 시작 $sessionId · AI 서버 ${settings.aiUrl} · 스테이션 ${settings.stationId}")
+            CommLog.i(CommLog.Ch.HMD, TAG, "교대 시작 $sessionId · HMD 영상 주소 ${this.hmdUrl.ifBlank { "(없음 — BLE 로 HMD 가 알려 줄 때까지 대기)" }}")
         } else {
             val relay = StreamRelay(transport = WebSocketTransport(), emit = toEngine)
             offer = relay::offer
@@ -220,7 +227,7 @@ class InspectionService : LifecycleService() {
     private val sinks = object : EffectSinks {
         override suspend fun show(cmd: ShowCommand) {
             // BLE 가 아직 안 붙었으면 쓰기가 예외를 던진다 — 앱을 죽이지 않고 남긴다(붙으면 resendCurrentScreen)
-            try { hmd.show(cmd) } catch (e: Exception) { Log.w(TAG, "SHOW ${cmd.screen} 못 보냄: ${e.message}") }
+            try { hmd.show(cmd) } catch (e: Exception) { CommLog.w(CommLog.Ch.HMD, TAG, "화면 지시 ${cmd.screen} 못 보냄: ${e.message}") }
         }
         override suspend fun persist(record: InspectionRecord) {
             store.record(record)

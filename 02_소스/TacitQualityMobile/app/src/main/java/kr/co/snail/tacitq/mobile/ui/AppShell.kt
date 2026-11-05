@@ -43,6 +43,7 @@ private val TABS = listOf(
 fun AppShell(vm: AppViewModel) {
     val screen by vm.screen.collectAsStateWithLifecycle()
     val toast by vm.toast.collectAsStateWithLifecycle()
+    var showLog by remember { mutableStateOf(false) }
 
     LaunchedEffect(toast) {
         if (toast != null) { delay(1700); vm.clearToast() }
@@ -67,7 +68,8 @@ fun AppShell(vm: AppViewModel) {
                     Screen.M03 -> T.Amber
                     Screen.M05 -> T.Teal
                     else -> T.Purple
-                }
+                },
+                onLog = { showLog = true },
             )
             Column(
                 Modifier
@@ -88,6 +90,8 @@ fun AppShell(vm: AppViewModel) {
             }
             BottomTabs(screen) { vm.go(it) }
         }
+
+        if (showLog) CommLogDialog { showLog = false }
 
         toast?.let {
             Box(
