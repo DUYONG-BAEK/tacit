@@ -17,6 +17,7 @@ import android.view.WindowManager
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.CameraState
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
@@ -147,6 +148,31 @@ class MainActivity : AppCompatActivity() {
     @Volatile private var foreground = false             // 카메라는 앱이 화면 맨 앞에 있을 때만 돈다
     @Volatile private var lastFrameAt = 0L
     @Volatile private var analysisSize = ""
+    @Volatile private var cameraBound = false
+    @Volatile private var cameraOpen = ""                 // CameraX 카메라 상태(열기 대기 · 여는 중 · 열림 …)와 오류
+
+    private fun describe(s: CameraState): String {
+        val type = when (s.type) {
+            CameraState.Type.PENDING_OPEN -> "열기 대기(다른 앱이 카메라를 쓰는 중일 수 있음)"
+            CameraState.Type.OPENING -> "여는 중"
+            CameraState.Type.OPEN -> "열림"
+            CameraState.Type.CLOSING -> "닫는 중"
+            CameraState.Type.CLOSED -> "닫힘"
+        }
+        val err = s.error?.let {
+            when (it.code) {
+                CameraState.ERROR_CAMERA_IN_USE -> "다른 앱이 카메라 사용 중"
+                CameraState.ERROR_MAX_CAMERAS_IN_USE -> "카메라 사용 수 초과(다른 앱이 사용 중)"
+                CameraState.ERROR_CAMERA_DISABLED -> "카메라 사용 금지(기기 정책)"
+                CameraState.ERROR_CAMERA_FATAL_ERROR -> "카메라 치명 오류(HMD 재부팅 필요)"
+                CameraState.ERROR_DO_NOT_DISTURB_MODE_ENABLED -> "방해 금지 모드"
+                CameraState.ERROR_STREAM_CONFIG -> "스트림 설정 실패(미리보기·분석 해상도 조합)"
+                CameraState.ERROR_OTHER_RECOVERABLE_ERROR -> "일시 오류(다시 시도 중)"
+                else -> "오류 코드 ${it.code}"
+            }
+        }
+        return "카메라 $type" + (err?.let { " · $it" } ?: "")
+    }
 
     /**
      * 카메라 상태 한 줄 — HMD 상태줄과 BLE HELLO(폰 통신 로그)에 띄운다. 폰이 영상 서버에 붙어도 프레임이 안 오면
@@ -158,7 +184,8 @@ class MainActivity : AppCompatActivity() {
         if (!foreground) return "꺼짐 — HMD 앱이 화면 뒤에 있음(앱이 앞에 있어야 카메라가 켜짐)" +
             if (!android.provider.Settings.canDrawOverlays(this)) " · '다른 앱 위에 표시' 권한 없음(폰이 앞으로 불러오지 못함)" else ""
         val at = lastFrameAt
-        if (at == 0L) return "켜는 중 — 프레임 아직 없음"
+        if (!cameraBound) return "켜는 중 — 카메라 바인딩 전"
+        if (at == 0L) return "켜는 중 — 프레임 아직 없음 · ${cameraOpen.ifEmpty { "카메라 상태 모름" }}"
         val age = System.currentTimeMillis() - at
         return if (age > 2_000) "멈춤 — 마지막 프레임 ${age / 1000}초 전" else "정상 $analysisSize"
     }
@@ -171,6 +198,7 @@ class MainActivity : AppCompatActivity() {
         if (videoMode != "hevc") {
             runCatching { ProcessCameraProvider.getInstance(this).get().unbindAll() }
             cameraNeedsRebind = true
+            cameraBound = false; cameraOpen = ""; lastFrameAt = 0L
         }
     }
 
@@ -235,14 +263,12 @@ class MainActivity : AppCompatActivity() {
                 .build()
                 .also { it.setAnalyzer(analysisExecutor, ::onFrame) }
 
-            val selector = runCatching {
+            val (camera, selector) = runCatching {
                 provider.unbindAll()
-                provider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, preview, analysis)
-                "BACK"
+                provider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, preview, analysis) to "BACK"
             }.recoverCatching { back ->
                 Log.w(TAG, "후면 카메라 바인딩 실패: ${back.message}")
-                provider.bindToLifecycle(this, CameraSelector.DEFAULT_FRONT_CAMERA, preview, analysis)
-                "FRONT"
+                provider.bindToLifecycle(this, CameraSelector.DEFAULT_FRONT_CAMERA, preview, analysis) to "FRONT"
             }.getOrElse { e ->
                 // 영상이 안 나가는 원인을 HMD 화면에서 바로 보이게 — 앱을 죽이지 않는다
                 Log.e(TAG, "카메라 바인딩 실패 — 영상 송출 불가", e)
@@ -251,6 +277,13 @@ class MainActivity : AppCompatActivity() {
             }
             Log.i(TAG, "카메라 바인딩 완료 (Preview+Analysis, $selector)")
             cameraError = null
+            cameraBound = true
+            // 열기 상태·오류(다른 앱이 사용 중 등) — 바인딩은 됐는데 프레임이 안 올 때 원인
+            camera.cameraInfo.cameraState.removeObservers(this)
+            camera.cameraInfo.cameraState.observe(this) { st ->
+                cameraOpen = describe(st)
+                Log.i(TAG, "카메라 상태 $cameraOpen")
+            }
         }, ContextCompat.getMainExecutor(this))
     }
 
