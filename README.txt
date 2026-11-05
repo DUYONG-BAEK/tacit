@@ -35,6 +35,11 @@ HMD(RealWear Navigator 520) 카메라 영상을 모바일(Android)이 받아 AI 
    git fetch origin
    git switch claude/zealous-dirac-xntfgb
    (git switch 가 없는 옛 Git 이면: git checkout claude/zealous-dirac-xntfgb)
+   사본 폴더 만들기 (Android Studio 로 여는 폴더 — 아직 없을 때만)
+   Copy-Item -Recurse "C:\dev\tacit\02_소스\TacitQualityMobile" C:\dev\TacitQualityMobile
+   Copy-Item -Recurse "C:\dev\tacit\02_소스\TacitQualityHmd" C:\dev\TacitQualityHmd
+   - 사본 폴더가 이미 있으면 Copy-Item 은 그 안에 한 겹 더 만듭니다(C:\dev\TacitQualityMobile\TacitQualityMobile).
+     이미 있으면 이 단계는 건너뛰고 3번 robocopy 로 덮어쓰세요.
 
 2. 최신 코드 받기 (매번)
    cd C:\dev\tacit
