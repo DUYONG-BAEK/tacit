@@ -28,6 +28,7 @@ SECTIONS = [
     ("ai-edge-webrtc", "실제 AI 서버 연동 (WebRTC)", "s-confirmed"),
     ("auto-connect", "연결 자동화 — 주소 · 앱 실행", "s-confirmed"),
     ("hmd-screen-1018", "현장 피드백 — 화면 전환 · 버튼 · 순서", "s-confirmed"),
+    ("frame-inspect", "AI 서버 11-03 규격 — 프레임 단위 판정", "s-confirmed"),
 ]
 
 BASE_DIR  = os.path.dirname(os.path.abspath(__file__))

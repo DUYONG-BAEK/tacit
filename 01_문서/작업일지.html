@@ -151,6 +151,7 @@
     <a class="nav-item s-confirmed" href="#ai-edge-webrtc">실제 AI 서버 연동 (WebRTC)</a>
     <a class="nav-item s-confirmed" href="#auto-connect">연결 자동화 — 주소 · 앱 실행</a>
     <a class="nav-item s-confirmed" href="#hmd-screen-1018">현장 피드백 — 화면 전환 · 버튼 · 순서</a>
+    <a class="nav-item s-confirmed" href="#frame-inspect">AI 서버 11-03 규격 — 프레임 단위 판정</a>
   </nav>
 </aside>
 
@@ -806,6 +807,44 @@ outbox 순서 = 이벤트 처리 순서.</p>
 
 <div class="warn-box"><strong>결정 (2026-10-07):</strong> 대시보드 기준 체감 화질 차이가 작고 지연이 느껴져 <strong>기본값은 MJPEG 1280×720 · JPEG 품질 80 · 약 22fps · 12~16Mbps</strong>로 확정.
 H.265 1080p 코드는 유지 — HMD <code>VIDEO_MODE</code>를 <code>"hevc"</code>로 바꾸면 재사용(실제 AI의 고해상도 필요 시).</div>
+</section>
+
+  <section id="frame-inspect">
+<div class="section-head">
+  <h3>AI 서버 2026-11-03 규격 — 프레임 단위 판정 대응</h3>
+  <span class="date-badge">2026-11-04 ~ 11-05</span>
+  <span class="status confirmed">1~4단계 완료 · 개발 서버 실장비 연동 확인</span>
+</div>
+
+<p>AI 서버가 제품 단위 판정(<code>hold → captured → result</code>)을 버리고 프레임마다 <code>inspect</code>를 보내도록 바뀌어 모바일·HMD 앱을 고쳤다.
+근거: 「제품 불량 판정 — 모바일 앱 연동 API」 2026-11-03 규격, 앱 수정 계획 개정 2판. 브랜치 <code>claude/zealous-dirac-xntfgb</code>.
+자세한 규칙은 설계서 9장.</p>
+
+<h4>단계별 변경</h4>
+<table class="col-table">
+  <tr><th style="width:16%">단계</th><th>내용</th></tr>
+  <tr><td>1 메시지·재연결</td><td><code>searching</code>·<code>inspect</code> 해석, 재연결 1→2→4→5초 + 시도 마감 10초(<code>Reconnect</code>), 닫힌 연결의 늦은 콜백 무시, 끊긴 사이 조회·<code>decision</code> API 삭제, 모의 AI 서버 자동 전환 삭제</td></tr>
+  <tr><td>2 구간·이력</td><td>제품 구간(1초 무소식·끊김이면 끝) · 결함 확정(5장 중 2장) · 진동 제품당 1회 · 이력 1건에 원판정·결함 종류·result_id 목록. 판정 화면·확인 타이머 제거. DB v2</td></tr>
+  <tr><td>3 HMD 실시간</td><td>BLE <code>LIVE</code> 쪽지(응답 없는 쓰기, 최신 1개) · HMD 판정 글자·결함 원 0.5초 유지 · 대기 화면 <code>IDLE</code> 분리 · 조준 화면 처리 건수·면 수 문구 삭제</td></tr>
+  <tr><td>4 확대 보기</td><td>M-07 결함 원·최근 결함 확대 · M-05 원판정 배지(합격 / 불합격 NG / 불합격 REVIEW)·결함 이미지 다시 보기 · 핀치 확대·이동</td></tr>
+  <tr><td>통신 로그</td><td>상단 바 "로그" 창(모바일 ↔ AI 서버 / 모바일 ↔ HMD) · 복사·지우기 · HMD 카메라 상태를 BLE HELLO 로 받아 기록</td></tr>
+  <tr><td>11-05 현장 피드백</td><td>① M-07 에 HMD 와 같은 글자·결함 원(HudMirror) ② HMD 화각 4:3·FIT_CENTER·줌 최소 — 16:9 크롭으로 기본 카메라 앱보다 약 1.33배 확대돼 보이던 문제 ③ 앱 보수 기준(PD 0.5 · QI 기준값 ×1.3) — 오탐이 시험을 방해</td></tr>
+</table>
+
+<h4>실장비 확인 (2026-11-05, 개발 서버)</h4>
+<ul class="checklist">
+  <li class="done">폰 → AI 서버: offer 수락 → CONNECTED 0.2초, 데이터 채널 OPEN</li>
+  <li class="done">HMD 영상 0장 문제 — 통신 로그로 "영상 서버 연결 OK · 프레임 0장 · HMD 카메라 켜는 중" 확인 → 원인은 <strong>HMD 앱 카메라 권한</strong>. 허용 후 정상</li>
+  <li class="done">기능 대체로 의도대로 동작(사용자 확인)</li>
+  <li>4:3 화각이 기본 카메라 앱과 같은지 · M-07 따라 그리기 일치 · 보수 기준 체감</li>
+</ul>
+
+<h4>메모</h4>
+<ul>
+  <li>이 개발 환경(클라우드)은 Android SDK 를 받을 수 없어, 안드로이드와 무관한 코드만 JVM 으로 컴파일·시험(75건)했다. 앱 빌드는 Android Studio 에서 확인.</li>
+  <li>HMD 에 디버그(<code>kr.co.snail.tacitq.hmd.debug</code>)·릴리스 앱이 같이 깔리면 둘 다 BLE 광고·카메라를 쓰려 한다 — 하나만 남긴다.</li>
+  <li>CRLF 줄바꿈 파일(서비스·HMD MainActivity 등)은 줄바꿈을 유지해 고쳤다.</li>
+</ul>
 </section>
 
   <section id="hmd-screen-1018">
