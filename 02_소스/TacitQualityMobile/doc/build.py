@@ -29,6 +29,7 @@ SECTIONS = [
     ("auto-connect", "연결 자동화 — 주소 · 앱 실행", "s-confirmed"),
     ("hmd-screen-1018", "현장 피드백 — 화면 전환 · 버튼 · 순서", "s-confirmed"),
     ("frame-inspect", "AI 서버 11-03 규격 — 프레임 단위 판정", "s-confirmed"),
+    ("product-feedback", "제품 단위 판정 서버 이전 · 피드백 · 사진 저장", "s-dev"),
 ]
 
 BASE_DIR  = os.path.dirname(os.path.abspath(__file__))

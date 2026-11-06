@@ -152,6 +152,7 @@
     <a class="nav-item s-confirmed" href="#auto-connect">연결 자동화 — 주소 · 앱 실행</a>
     <a class="nav-item s-confirmed" href="#hmd-screen-1018">현장 피드백 — 화면 전환 · 버튼 · 순서</a>
     <a class="nav-item s-confirmed" href="#frame-inspect">AI 서버 11-03 규격 — 프레임 단위 판정</a>
+    <a class="nav-item s-dev" href="#product-feedback">제품 단위 판정 서버 이전 · 피드백 · 사진 저장</a>
   </nav>
 </aside>
 
@@ -807,6 +808,44 @@ outbox 순서 = 이벤트 처리 순서.</p>
 
 <div class="warn-box"><strong>결정 (2026-10-07):</strong> 대시보드 기준 체감 화질 차이가 작고 지연이 느껴져 <strong>기본값은 MJPEG 1280×720 · JPEG 품질 80 · 약 22fps · 12~16Mbps</strong>로 확정.
 H.265 1080p 코드는 유지 — HMD <code>VIDEO_MODE</code>를 <code>"hevc"</code>로 바꾸면 재사용(실제 AI의 고해상도 필요 시).</div>
+</section>
+
+  <section id="product-feedback">
+<div class="section-head">
+  <h3>제품 단위 판정을 서버로 · 작업자 피드백 · 사진 저장</h3>
+  <span class="date-badge">2026-11-06</span>
+  <span class="status dev">구현 · 작성 환경 시험 완료 · 실서버·실기기 확인 전</span>
+</div>
+
+<p>앱이 하던 제품 구간·결함 확정·제품 판정을 AI 서버로 옮기고, 수동 모드에서 작업자가 폰 화면으로 피드백(맞음·틀림·확인필요)을 넣게 했다.
+서버는 제품이 보인 프레임 전부를 사진(JPEG 품질 90)으로 남기고, 이력·사진·디스크 사용량을 조회하게 한다.
+근거: <code>server/PLAN_product_feedback.md</code>, 앱 규격 <code>server/A4_WEBRTC_API.md</code>(2026-11-06), 배포 <code>server/DEPLOY.md</code> §5.B.</p>
+
+<h4>결정</h4>
+<table class="col-table">
+  <tr><th style="width:18%">항목</th><th>내용</th></tr>
+  <tr><td>판정 위치</td><td>계산·판정은 모두 서버. 폰은 영상 중계·표시·피드백 전달만. 규칙은 그대로(1초 무소식이면 제품 끝, 최근 5장 중 2장 결함이면 확정)</td></tr>
+  <tr><td>모드</td><td>폰은 작업자 옆 삼각대. 수동 = 제품마다 폰에서 맞음·틀림·확인필요, 자동 = 피드백 건너뜀. 음성·모션 입력은 쓰지 않는다</td></tr>
+  <tr><td>피드백 값</td><td>맞음 · 틀림 · 확인필요(그대로 남김) + 미입력(누르기 전에 다음 제품이 끝남) · 피드백 없음(자동 모드). 이력에서 누구나 바꿀 수 있고 변경 기록이 남는다(인증 없음)</td></tr>
+  <tr><td>사진</td><td>제품 프레임 전부를 JPEG 품질 90으로 서버에 저장. 영상 파일로는 저장하지 않는다. 자동 삭제 없음 — 디스크 사용량은 M-06에서 본다</td></tr>
+  <tr><td>영상 화질</td><td>WebRTC 유지. 게이트웨이 JPEG 재압축 삭제(원본 I420 전달), 게이트웨이 초당 10장 간격 제한 삭제, 폰 VP8 6→12Mbps, HMD JPEG 80→95·송출 초당 12장</td></tr>
+</table>
+
+<h4>변경</h4>
+<table class="col-table">
+  <tr><th style="width:18%">위치</th><th>내용</th></tr>
+  <tr><td>서버</td><td><code>product_end</code> 메시지, <code>inspect</code>에 product_id·면 진행·rx_at, <code>/offer</code> feedback_mode, 피드백·이력·프레임·사진·디스크 API, DB products·frames·feedback_log</td></tr>
+  <tr><td>모바일</td><td>M-01 모드, M-07 제품 결과 카드 + 버튼 3개, M-05 서버 이력(미입력·확인필요·불합격 필터, 프레임 사진 넘겨 보기, 피드백 수정, 변경 기록), M-06 서버 디스크, BLE FACES·RESULT</td></tr>
+  <tr><td>HMD</td><td>조준 화면 면 칩 줄(■ 상면 □ 엣지 □ 하면비닐, 모두 보면 검사 완료), 제품 결과 2초(합격·불합격), JPEG 95·초당 12장</td></tr>
+</table>
+
+<h4>시험</h4>
+<ul class="checklist">
+  <li class="done">서버(작성 환경 — 실제 FastAPI·websockets·aiortc·PostgreSQL 16 + 가짜 YOLO): /ws·HTTP 42건, WebRTC 게이트웨이 종단(버린 프레임 없음)</li>
+  <li class="done">모바일 JVM 단위 시험 52건, HMD 17건</li>
+  <li>안드로이드 화면·서비스 빌드 (Android Studio)</li>
+  <li>실서버 배포(DEPLOY §5.B — <code>product_frames</code> 마운트 필수)·실기기 종단·지연 물리 측정</li>
+</ul>
 </section>
 
   <section id="frame-inspect">

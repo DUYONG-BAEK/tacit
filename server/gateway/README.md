@@ -1,18 +1,20 @@
 # A4 WebRTC 게이트웨이
 
+> **2026-11-06 개정**: 프레임을 JPEG로 다시 압축하지 않고 디코딩한 원본(I420)을 넘긴다 (손실 압축 한 번 줄임). 초당 10장 간격 제한(`FORWARD_FPS`)을 없앴다 — 도착 간격이 조금만 흔들려도 다음 장을 버려 실측 초당 약 7장의 원인으로 봤다. `/offer`에 `feedback_mode`(manual/auto)를 받아 `/ws?mode=`로 넘기고, `product_end` 메시지를 그대로 중계한다. 프록시에 `/products*`(PUT 피드백 포함)·`/storage`를 더했다. 근거는 `PLAN_product_feedback.md`.
+>
 > **2026-11-03 개정**: 판정이 제품 단위(`hold` → `captured` → `result`)에서 **프레임 단위(`inspect`)** 로 바뀌었다 (`PLAN_realtime_inspect.md`). 게이트웨이는 분석하지 않으므로 바뀐 것은 네 가지다 — `result`의 base64 이미지를 지우는 처리 삭제(새 메시지에는 이미지가 없다), `POST /results/<id>/decision` 프록시 삭제, OK `inspect`는 파일 로그에 한 줄씩 남기지 않고 연결 끝에 `relay_summary`로 개수만 남김, 테스트 클라이언트의 `--stop-after-captured` 삭제. 앱 규격은 `A4_WEBRTC_API.md` (2026-11-03), 서버 배포·운영은 `DEPLOY.md`.
 >
 > **2026-10-23 개정**: 판정이 PD(제품 탐지) → QI(불량 탐지)로 바뀌었다 — 프레임 전달 초당 5장 → 10장, 프록시 경로에서 `/mask` 삭제.
 >
 > **2026-10-07 개정**: 모바일 연동 변경을 구현하고 실서버에서 확인했다 — `station_id`, 연결 거부(422·403·503), 장애 시 연결 닫기, 결과 조회 프록시 (`A4_PLAN.md`(보관) §11.5 "모바일 연동 변경 실서버 확인").
 
-앱이 **영상(WebRTC)** 을 보내는 **운영 전송**의 입구다. 게이트웨이는 영상을 받아 프레임을 JPEG로 A4 API의 `/ws`에 넘기고, 결과를 앱에 돌려준다. 분석은 하지 않는다. A4 코드를 import하지 않고, A4 API에는 `/ws`와 `/results/*` 프록시로만 붙는다. DB에도 붙지 않는다.
+앱이 **영상(WebRTC)** 을 보내는 **운영 전송**의 입구다. 게이트웨이는 영상을 받아 디코딩한 원본 프레임(I420)을 A4 API의 `/ws`에 넘기고, 결과를 앱에 돌려준다. 분석은 하지 않는다. A4 코드를 import하지 않고, A4 API에는 `/ws`와 `/results/*`·`/products*`·`/storage` 프록시로만 붙는다. DB에도 붙지 않는다.
 
 ```
-헤드마운트 카메라 → 앱 ─┬─ WebRTC 영상 (운영) ──▶ gateway :8080 ── JPEG 프레임 ──▶ A4 API /ws :8000
+헤드마운트 카메라 → 앱 ─┬─ WebRTC 영상 (운영) ──▶ gateway :8080 ── 원본 프레임(I420) ──▶ A4 API /ws :8000
                        └─ JPEG 이미지 (테스트) ───────────────────────────────▶ A4 API /ws :8000
 결과: A4 API ──▶ gateway ──▶ 데이터 채널(JSON) ──▶ 앱
-조회: 앱 ──▶ GET :8080/results/<result_id>[/overlay] ──▶ (프록시) ──▶ A4 API
+조회: 앱 ──▶ :8080/results/*, /products*, /storage ──▶ (프록시) ──▶ A4 API
 ```
 
 앱이 `/ws`에 JPEG를 직접 보내는 경로는 **테스트용 전송**으로 남아 있다 (DEPLOY.md §1). 두 전송은 같은 메시지를 받는다. 모바일 연동 규격 전체는 `A4_WEBRTC_API.md`를 따른다.
@@ -20,18 +22,18 @@
 ## 앱 연동 규격
 
 1. `RTCPeerConnection`에 카메라 영상 트랙을 붙이고 **데이터 채널을 하나 연다** (이름 무관). 결과는 이 채널로만 온다.
-2. offer를 만들어 `POST /offer` `{"sdp": ..., "type": "offer", "station_id": "ST-01"}` → answer `{"sdp": ..., "type": "answer"}`를 적용한다. ICE 후보는 answer에 모두 포함된다 (trickle 불필요).
+2. offer를 만들어 `POST /offer` `{"sdp": ..., "type": "offer", "station_id": "ST-01", "feedback_mode": "manual"}` → answer `{"sdp": ..., "type": "answer"}`를 적용한다. ICE 후보는 answer에 모두 포함된다 (trickle 불필요).
    - 게이트웨이는 answer를 만들기 전에 A4 API `/ws`에 먼저 연결해 확인한다.
-   - `422`: `station_id`가 없거나 빈 값. `403`: 등록되지 않은 스테이션. `503`: 판정 서버(A4 API 또는 DB)에 연결할 수 없음.
+   - `422`: `station_id`가 없거나 빈 값, `feedback_mode`가 manual·auto가 아님(없으면 auto). `403`: 등록되지 않은 스테이션. `503`: 판정 서버(A4 API 또는 DB)에 연결할 수 없음.
 3. 데이터 채널 메시지는 `/ws`와 같다 (`searching` / `inspect`, `A4_WEBRTC_API.md` §3). 게이트웨이는 고치지 않고 그대로 넘긴다.
    - `inspect`는 제품이 보이는 프레임마다 온다 (초당 최대 10개). `decision`(OK / NG / REVIEW)과 `detections`(제품 상자 안의 결함)로 표시한다.
    - 메시지에 이미지는 없다. 서버가 저장한 결함 프레임의 `inspect`에만 `result_id`·`overlay_url`이 붙고, 이미지는 `GET http://<서버>:8080<overlay_url>`로 받는다.
 4. 연결 하나가 `/ws` 세션 하나다. 연결을 유지한 채 제품을 바꿔 가며 비춘다.
 5. **장애 시 게이트웨이가 연결을 닫는다.** A4 API 쪽 연결이 끊기거나 중계 중 예외가 나면 WebRTC 연결이 닫힌다. 앱은 연결 상태(`disconnected` 기준 권장)로 감지하고 새 `POST /offer`로 재연결한다 (새 세션). 끊긴 동안의 프레임은 판정되지 않고, 끊기기 전에 받은 `result_id`의 이미지는 그대로 조회할 수 있다.
 
-`/results/*`(조회 2개)는 게이트웨이가 A4 API로 그대로 넘긴다. 이미지는 A4 API가 `results/`에 저장한 파일이고, 게이트웨이 메모리에는 두지 않는다. 사람의 최종 판정(`POST /results/<id>/decision`)은 없어졌다 — `404`.
+`/results/*`(조회 2개)와 `/products`·`/products/<id>`·`PUT /products/<id>/feedback`·`/products/<id>/frames`·`/products/<id>/frames/<seq>.jpg`·`/storage`는 게이트웨이가 A4 API로 쿼리 문자열까지 그대로 넘긴다. 이미지는 A4 API가 `results/`에 저장한 파일이고, 게이트웨이 메모리에는 두지 않는다. 사람의 최종 판정(`POST /results/<id>/decision`)은 없어졌다 — `404`.
 
-영상 해상도·코덱은 정하지 않는다. 게이트웨이는 받은 프레임을 초당 최대 10장까지 JPEG(quality 95)로 넘긴다 (`FORWARD_FPS`).
+영상 해상도·코덱은 정하지 않는다. 게이트웨이는 받은 프레임을 거르지 않고 모두 원본(I420)으로 넘긴다: `b"I420"` + 가로·세로(uint16 LE) + `rx_at`(int64 LE, 게이트웨이가 받은 시각 epoch ms) + Y·U·V 평면. 앱이 초당 10장 이하로 보내고, A4 API가 가장 최근 프레임만 처리한다. 4K 원본도 약 12MB로 uvicorn WebSocket 기본 한도(16MB) 안이다.
 
 ## 실행 (프로젝트 폴더 `$PWD`에서)
 
@@ -67,7 +69,7 @@ until curl -sf -o /dev/null localhost:8080/docs; do sleep 1; done; echo "gateway
 
 게이트웨이는 `--network host`라 호스트 방화벽을 그대로 탄다. 앱(사내 Wi-Fi `192.168.1.0/24`)이 붙으려면 두 가지를 열어야 한다.
 
-- TCP 8080: `POST /offer`, `/results/*` 조회.
+- TCP 8080: `POST /offer`, `/results/*`·`/products*`·`/storage`.
 - UDP 임시 포트 범위: WebRTC 미디어. aiortc는 ICE용 UDP 소켓을 포트 0으로 열어 커널의 임시 포트 범위(`net.ipv4.ip_local_port_range`)에서 받는다. 연결마다 포트가 달라 범위 전체를 연다.
 
 출처는 사내 Wi-Fi 대역으로만 제한한다. 대역이나 포트 범위가 다른 서버에서는 아래 확인 명령의 출력에 맞춰 값을 바꾼다.

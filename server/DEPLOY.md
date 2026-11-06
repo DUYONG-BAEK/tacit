@@ -1,15 +1,18 @@
 # 제품 불량 판정 서버 — 구성·배포·운영
 
-기준: 2026-11-03 코드 (프레임 단위 판정). **실서버 미확인** — 작성 환경에서 가짜 모델로만 확인했다 (§8). gpudev는 아직 2026-10-29 코드(제품 단위)로 돈다 — 올리는 절차는 §5.A.
+기준: 2026-11-06 코드 (제품 단위 판정·작업자 피드백·제품 프레임 사진 저장). **이번 변경은 실서버 미확인** — 작성 환경에서 가짜 모델로만 확인했다 (§8). gpudev는 2026-11-03 코드(프레임 단위)로 돈다 — 올리는 절차는 §5.B.
 
 이상탐지(DINOv2 + memory bank) 서버를 내리고, **PD(제품 탐지) → QI(불량 탐지)** 두 YOLO 모델로 다시 올린다. 이 문서가 서버의 기준 문서다.
 
+> **2026-11-06 변경**: 제품 구간·결함 확정·제품 판정을 앱에서 **서버로** 옮겼다 (`product_end` 메시지, `products` 테이블). 작업자 피드백(맞음·틀림·확인필요)과 이력 조회 API, 제품이 보인 프레임 **전부의 사진 저장**, 디스크 사용량 API를 더했다. 게이트웨이는 JPEG로 다시 압축하지 않고 원본(I420)을 넘긴다. 결정과 근거는 `PLAN_product_feedback.md`.
+>
 > **2026-11-03 변경**: 판정을 제품 단위(같은 제품을 3~10장 모아 한 번)에서 **프레임 단위**(제품이 보이는 프레임마다 `inspect`)로 바꿨다. 작업자가 제품을 든 채 돌려 보며 멈추지 않기 때문이다. 결정과 근거는 `PLAN_realtime_inspect.md`, 앱 규격은 `A4_WEBRTC_API.md`(2026-11-03).
 
 | 문서 | 내용 |
 |---|---|
 | `DEPLOY.md` (이 문서) | 구성, 판정 규칙, 기록, 배포·운영 절차 |
 | `A4_WEBRTC_API.md` | 모바일 앱 연동 규격 (메시지·조회·연결) |
+| `PLAN_product_feedback.md` | 제품 단위 판정·피드백·사진 저장의 결정·규격·구현 결과 (2026-11-06) |
 | `PLAN_realtime_inspect.md` | 프레임 단위 전환의 결정·변경 내용·위험 (2026-11-03) |
 | `gateway/README.md` | WebRTC 게이트웨이 상세 |
 | `A4_PLAN.md` | **보관용.** 이상탐지 단계의 기획·측정 기록. §7.5(WebRTC·DB 설계 근거)는 지금 구성에도 그대로 적용된다 |
@@ -19,17 +22,18 @@
 ## 1. 구성
 
 ```
-헤드마운트 카메라 → 앱 ─┬─ WebRTC 영상 (운영) ──▶ a4-gateway :8080 ── JPEG 프레임 ──▶ a4-api /ws :8000
-                       └─ JPEG 이미지 (테스트) ────────────────────────────────▶ a4-api /ws :8000
-a4-api: 프레임마다 PD ─(제품 있음)─▶ QI ─▶ inspect (프레임마다) / 결함 프레임은 1초에 1장 저장 ─▶ a4-db 기록
+헤드마운트 카메라 → 앱 ─┬─ WebRTC 영상 (운영) ──▶ a4-gateway :8080 ── 원본 프레임(I420) ──▶ a4-api /ws :8000
+                       └─ JPEG 이미지 (테스트) ──────────────────────────────────▶ a4-api /ws :8000
+a4-api: 프레임마다 PD ─(제품 있음)─▶ QI ─▶ inspect (프레임마다) ─▶ 제품 구간·확정 ─▶ product_end (제품마다)
+        제품 프레임은 전부 사진 저장, 결함 프레임은 1초에 1장 오버레이 ─▶ a4-db 기록
 결과: a4-api ──▶ a4-gateway ──▶ 데이터 채널(JSON) ──▶ 앱
-조회: 앱 ──▶ GET :8080/results/<result_id>[/overlay] ──▶ (프록시) ──▶ a4-api
+조회: 앱 ──▶ :8080/results/*, /products*, /storage ──▶ (프록시) ──▶ a4-api
 ```
 
 | 컨테이너 | 이미지 | 역할 | GPU | 네트워크 |
 |---|---|---|---|---|
-| `a4-db` | `postgres:17` | 저장한 결함 프레임 기록 (§4.3) | — | `a4-net` |
-| `a4-api` | `a4-api` (`api/`) | PD·QI 추론, `/ws`, `/predict`, `/results/*`, DB 기록 | 1장 | `a4-net`, `-p 8000:8000` |
+| `a4-db` | `postgres:17` | 제품·프레임·결함 프레임·피드백 기록 (§4.3) | — | `a4-net` |
+| `a4-api` | `a4-api` (`api/`) | PD·QI 추론, 제품 단위 판정, `/ws`, `/predict`, `/results/*`, `/products*`, `/storage`, DB 기록 | 1장 | `a4-net`, `-p 8000:8000` |
 | `a4-gateway` | `a4-gateway` (`gateway/`) | WebRTC 수신·중계. 분석하지 않는다 | — | `--network host` (:8080) |
 
 **모델** (서버는 추론만 한다. 학습은 서버 밖에서 하고 `.pt`만 가져온다)
@@ -82,7 +86,8 @@ $PWD/
 ```
 logs/a4-api/<날짜>.jsonl          API 이벤트 (§4.1)
 logs/a4-gateway/<날짜>.jsonl      게이트웨이 이벤트 (gateway/README.md)
-frames/<날짜>/<result_id>.jpg     저장한 결함 프레임 원본 (§4.2. 제품 단위 때는 <result_id>/NN.jpg)
+product_frames/<날짜>/<session_id>/<seq>.jpg  제품이 보인 프레임 사진 전부 (§4.2, 2026-11-06부터)
+frames/<날짜>/<result_id>.jpg     옛 결함 프레임 원본 (2026-11-06 전. 제품 단위 때는 <result_id>/NN.jpg). 새 코드는 쓰지 않는다
 results/<날짜>/<result_id>/overlay.jpg  결과 오버레이 (§4.2)
 db/                               PostgreSQL 데이터 (a4-db). 호스트에서 직접 건드리지 않는다
 stream_out/, webrtc_out/          테스트 클라이언트 출력 (지워도 된다)
@@ -114,7 +119,7 @@ archive_product_mode/            제품 단위 단계의 코드·문서·DB 덤�
 - **decision**: 기준값 `T = detect.QI_CONF`(임시 0.25)에 대해 `score > T × 1.1` → `NG`, `score < T × 0.9` → `OK`, 그 사이 → `REVIEW`.
 - QI 추론 하한은 `T × 0.9`로 자동 계산한다. 그보다 낮은 결함은 판정을 OK에서 바꾸지 못하므로 받지 않는다. 그래서 **OK ⇔ `detections == []`** 이고, NG·REVIEW면 `detections`가 1개 이상이다.
 - `defect_label` = 가장 확실한 결함 이름(`detections[0].label`), OK면 `null`.
-- 프레임 사이에서 상자를 합치거나 제품을 추적하지 않는다. 깜빡임(결함이 잡혔다 안 잡혔다)은 앱이 표시를 약 0.5초 유지해 처리한다 (`A4_WEBRTC_API.md` §3.4).
+- 프레임 사이에서 상자를 합치지 않는다. 깜빡임(결함이 잡혔다 안 잡혔다)은 앱이 표시를 약 0.5초 유지해 처리한다 (`A4_WEBRTC_API.md` §3.4). 프레임을 모아 제품 하나로 판정하는 것은 아래 §3.4의 제품 구간이 한다.
 
 ### 3.4 흐름·저장 (`api.stream_endpoint`)
 
@@ -125,9 +130,13 @@ archive_product_mode/            제품 단위 단계의 코드·문서·DB 덤�
                                        NG·REVIEW이고 마지막 저장 후 SAVE_INTERVAL_S(1초) 지남 → 저장
 ```
 
-- **저장**: 결함 프레임(NG·REVIEW)을 **연결마다 1초에 최대 1장** 저장한다. 저장하는 프레임의 `inspect`에만 `result_id`·`overlay_url`이 붙고, 나머지는 `null`이다.
-- 순서: `inspect`를 **먼저 보내고** 원본·오버레이·DB 행은 뒤에서(스레드) 쓴다. 4K 오버레이 인코딩만 약 90ms라 전송을 늦추지 않기 위해서다. 그래서 `inspect`를 받자마자 오버레이를 요청하면 `404`일 수 있다 (앱은 0.5초 뒤 한 번 더).
-- 연결이 끊겨도 진행 중인 저장은 끝낸다 (최대 10초 기다림).
+- **제품 구간** (`stream.Products`, 2026-11-06 — 옛 앱 규칙을 옮김): 첫 제품 프레임에서 시작, 마지막 제품 프레임 뒤 `SEGMENT_END_S`(1초) 동안 제품 프레임이 없거나 연결이 끊기면 끝. `searching` 한 장은 끝내지 않는다. 프레임이 오지 않아도 `TICK_S`(0.2초)마다 끝을 검사한다. 한 번에 제품 하나를 든다고 본다 (추적기 없음).
+- **결함 확정·제품 판정**: 구간 안 최근 `CONFIRM_WINDOW`(5)장 중 `CONFIRM_HITS`(2)장 이상이 NG·REVIEW면 확정 (안에 NG가 있으면 NG, 없으면 REVIEW, 나중에 NG로 올라갈 수 있다). 확정이 없으면 `PASS`, 있으면 `FAIL`. 끝나면 `product_end`를 보낸다 (연결이 끊겨 끝나면 보내지 못하고 기록만 한다).
+- **면 진행**: PD 라벨(엣지·상면·하면비닐)별로 그 제품에서 잡힌 프레임 수. `FACE_MIN_FRAMES`(3)장 이상이면 그 면을 본 것, 모두 보면 `complete`. 구간을 끝내지는 않는다. `inspect`·`product_end`에 실린다.
+- **피드백 모드**: `/ws?mode=manual|auto`(게이트웨이는 `/offer`의 `feedback_mode`를 넘긴다). 제품의 피드백 초기값이 수동이면 `NOT_ENTERED`(미입력), 자동이면 `NONE`(피드백 없음). 사람은 `PUT /products/{id}/feedback`으로 `CORRECT`·`WRONG`·`UNSURE`를 넣고 바꾼다 (누구나, 변경 기록 `feedback_log`).
+- **저장**: 제품 프레임은 **전부** 사진(§4.2)과 `frames` 행을 남긴다. 결함 프레임(NG·REVIEW)은 그와 별도로 **연결마다 1초에 최대 1장** 오버레이와 `results` 행을 남기고, 그 프레임의 `inspect`에만 `result_id`·`overlay_url`이 붙는다 (나머지는 `null`).
+- 순서: `inspect`를 **먼저 보내고** 사진·오버레이·DB 행은 뒤에서 쓴다. 기록은 연결마다 한 줄로 차례대로 한다 (`products` → `results` → `frames` 외래 키 순서). 그래서 `inspect`를 받자마자 오버레이를 요청하면 `404`일 수 있다 (앱은 0.5초 뒤 한 번 더).
+- 연결이 끊겨도 남은 기록은 끝낸다 (최대 60초 기다림, 넘으면 `write_timeout`).
 - 수집·조기 종료·놓침·치움, `hold`/`captured`/`result`, 중앙값, 연속 판정 알림(`alert`), 사람의 최종 판정은 **없어졌다** (2026-11-03, `PLAN_realtime_inspect.md` D1·D4).
 
 ### 3.5 설정값
@@ -141,8 +150,15 @@ archive_product_mode/            제품 단위 단계의 코드·문서·DB 덤�
 | | `PD_MODEL`, `QI_MODEL` | 파일명 | `models/` 안의 모델 파일 |
 | | `DEVICE` | 0 | 컨테이너에 보이는 첫 GPU |
 | `api/stream.py` | `REVIEW_MARGIN` | 0.1 | REVIEW 폭 (T 대비) |
-| `api/api.py` | `SAVE_INTERVAL_S` | 1.0 | 결함 프레임 저장 간격 (연결마다) |
-| `gateway/gateway.py` | `FORWARD_FPS` | 10 | 게이트웨이가 넘기는 초당 프레임 = 앱이 받는 `inspect`의 최대 빈도 |
+| | `SEGMENT_END_S` | 1.0 | 마지막 제품 프레임 뒤 이만큼 없으면 제품 끝 |
+| | `CONFIRM_WINDOW`, `CONFIRM_HITS` | 5, 2 | 결함 확정: 최근 5장 중 2장 |
+| | `FACE_MIN_FRAMES` | 3 | 면을 "봄"으로 치는 프레임 수 |
+| `api/api.py` | `SAVE_INTERVAL_S` | 1.0 | 결함 프레임(오버레이·`results`) 저장 간격 (연결마다) |
+| | `FRAME_JPEG_QUALITY` | 90 | 제품 프레임 사진 JPEG 품질 (I420 원본을 받았을 때. JPEG를 받으면 그대로 저장) |
+| | `TICK_S` | 0.2 | 프레임이 없을 때 제품 끝 검사 간격 |
+| | `STORAGE_SCAN_S` | 300 | `/storage` 용량 계산 간격 |
+
+- 게이트웨이의 `FORWARD_FPS`(초당 10장 간격 제한)는 2026-11-06에 없앴다. 도착 간격이 조금만 흔들려도 다음 장을 버리므로 2026-11-05 실측 초당 약 7장의 원인으로 봤다. 앱이 초당 10장 이하로 보내고 API가 가장 최근 프레임만 처리한다.
 
 - 설정값은 코드에 있다. **바꾸면 이미지를 다시 빌드하고 컨테이너를 새로 만든다** (§6.1).
 - 환경변수 `CONSECUTIVE_N`(연속 판정 알림)은 없어졌다. `docker run`에서 넘기지 않았으므로 명령은 바뀌지 않는다.
@@ -165,13 +181,18 @@ archive_product_mode/            제품 단위 단계의 코드·문서·DB 덤�
 |---|---|---|
 | `startup` | 기동 (모델 로드·예열 끝) | checkpoint(`pd파일@수정시각\|qi파일@수정시각`), pd_classes, qi_classes, pd_conf, qi_conf |
 | `db_ready` | DB 접속·스키마 확인 끝 | — |
-| `db_error` | DB 호출 실패 (판정은 계속) | where(`station_exists`/`open_session`/`insert_result`/`close_session`), error |
+| `db_error` | DB 호출 실패 (판정은 계속) | where(`station_exists`/`open_session`/`insert_result`/`insert_product`/`insert_frame`/`end_product`/`close_session`), error |
 | `predict` | `/predict` 요청마다 | req, client, filename, bytes, image_size, status(200/400/422), error(`unreadable_image`/`too_large`/`product_not_found`), 200이면 products(개수), defects(제품 상자 안 결함 개수), score, decision, threshold, checkpoint, ms(decode/pd/qi/encode) |
-| `ws_rejected` | `/ws` 스테이션 미등록 (4403) | station, reason |
-| `ws_open` | `/ws` 연결 | session, source(`gateway`/`direct`), client(게이트웨이 연결 ID), station, peer |
+| `ws_rejected` | `/ws` 스테이션 미등록 (4403)·잘못된 mode (4422) | station 또는 mode, reason(`unregistered`/`bad_mode`) |
+| `ws_open` | `/ws` 연결 | session, source(`gateway`/`direct`), client(게이트웨이 연결 ID), station, mode, peer |
 | `inspect_saved` | 결함 프레임을 저장한 뒤 (연결마다 1초에 최대 1건) | result_id, session, source, client, station, seq, decision, defect_label, score, detections, products(개수), frame_size, threshold, checkpoint, file(원본 경로, 실패면 null), ms(decode/pd/qi) |
-| `frame_save_error`, `result_save_error` | 원본·오버레이 저장 실패 (디스크 등) | result_id, error |
-| `ws_close` | 연결 종료 | session, source, client, station, duration_s, frames, processed, skipped_frames, product_frames, defect_frames, saved, ms_avg(decode/pd/qi), error |
+| `frame_save_error` | 제품 프레임 사진 저장 실패 (디스크 등) | session, seq, error |
+| `result_save_error` | 오버레이 저장 실패 | result_id, error |
+| `product_end` | 제품이 끝난 뒤 (DB 행을 채운 뒤) | session, source, client, station, mode, product_id, started_at, ended_at, end_reason(`gap`/`disconnect`), decision, ai_decision, defect_label, frames, defect_frames, faces, faces_seen, complete, best_result_id, result_ids, threshold, feedback_mode, feedback |
+| `feedback` | `PUT /products/{id}/feedback` 성공 | product_id, value, source(`live`/`history`), device |
+| `storage_scan`, `storage_scan_error` | `/storage` 용량 계산 (`STORAGE_SCAN_S`마다) | ms, data_bytes / error |
+| `write_error`, `write_timeout` | 연결의 기록 줄에서 예외 · 끊긴 뒤 60초 안에 남은 기록을 못 끝냄 | error / pending |
+| `ws_close` | 연결 종료 | session, source, client, station, mode, duration_s, frames, processed, skipped_frames, product_frames, defect_frames, saved, products, ms_avg(decode/pd/qi), error |
 
 **`ws_close` 숫자** (연결 하나):
 
@@ -182,10 +203,11 @@ archive_product_mode/            제품 단위 단계의 코드·문서·DB 덤�
 | `skipped_frames` | **깨진 프레임**(이미지 아님·잘림·해상도 초과)으로 건너뛴 수. 처리가 밀려 건너뛴 수가 아니다 |
 | `product_frames` | 제품이 보여 QI를 돌린 수 = 보낸 `inspect` 수 |
 | `defect_frames` | 그중 NG·REVIEW 수 |
-| `saved` | 저장을 **시작한** 수 = `result_id`를 붙여 보낸 수. 저장 실패는 `frame_save_error` 등으로 따로 남는다 |
+| `saved` | 결함 프레임(오버레이) 저장을 **시작한** 수 = `result_id`를 붙여 보낸 수. 저장 실패는 `result_save_error` 등으로 따로 남는다 |
+| `products` | 이 연결에서 시작한 제품 수 |
 | `ms_avg` | 프레임 한 장 평균 ms. decode·pd는 `processed`로, qi는 `product_frames`로 나눈다 (QI는 제품 프레임에서만 돈다). qi는 타일 하나가 아니라 **프레임 한 장**(1080p 8타일, 4K 32타일) 기준이다 |
 
-- **처리가 밀려 건너뛴 수** = `frames − processed − skipped_frames`. 실제 처리 속도(fps)는 `processed / duration_s`다. 게이트웨이는 초당 10장을 넘기므로, 10에 못 미치면 처리가 밀린 것이다 (§8 처리 속도).
+- **처리가 밀려 건너뛴 수** = `frames − processed − skipped_frames`. 실제 처리 속도(fps)는 `processed / duration_s`다. 단 `duration_s`에는 영상이 오지 않은 시간도 들어가므로, 비추는 동안의 속도는 `frames` 행·`inspect_saved`의 `seq` 간격으로 본다 (2026-11-05 로그 분석).
 - 연결 사이에 합칠 때는 평균의 평균을 내지 않는다 — `ms_avg × 횟수`로 합계를 되살려 더한 뒤 나눈다.
 - `/predict`의 `ms.pd`·`ms.qi`는 모델 락 대기를 포함한다. `/ws`의 `ms`도 같다 (다른 연결·`/predict`와 모델을 나눠 쓴다).
 - `/ws`는 프레임마다 로그를 남기지 않는다 (저장한 결함 프레임만 `inspect_saved`). 메시지 흐름은 게이트웨이 로그 `a4_message`(NG·REVIEW, `searching`)와 `relay_summary`(개수)에서 본다.
@@ -194,28 +216,33 @@ archive_product_mode/            제품 단위 단계의 코드·문서·DB 덤�
 
 ### 4.2 프레임·결과 저장
 
-- `frames/<날짜>/<result_id>.jpg`: 저장한 결함 프레임의 원본, **받은 바이트 그대로** (게이트웨이 경유면 게이트웨이가 만든 JPEG quality 95). 확장자는 받은 형식을 따른다.
+- `product_frames/<날짜>/<session_id>/<seq 6자리>.jpg` (2026-11-06부터): **제품이 보인 프레임 전부**. 게이트웨이 경유(I420 원본)는 `FRAME_JPEG_QUALITY`(90)로 압축하고, JPEG를 받은 연결(테스트·직접 연결)은 받은 바이트 그대로 쓴다. 경로는 `frames.file`·`results.frames_dir`에 남는다. 제품이 안 보인 프레임은 저장하지 않는다.
+- 양: 1920×1440 품질 90이 한 장 약 0.3~0.5MB면, 제품을 계속 비출 때 스테이션 하나당 시간당 약 11~18GB (추정). 실제 양은 `GET /storage`·앱 M-06에서 본다.
+- `frames/<날짜>/<result_id>.jpg`: 2026-11-06 전에 저장한 결함 프레임의 원본 (받은 바이트 그대로 — 게이트웨이가 만든 JPEG quality 95). 새 코드는 쓰지 않는다.
 - `results/<날짜>/<result_id>/overlay.jpg`: 그 프레임 위에 결함 상자. 테두리와 글자는 상자 **바깥쪽**에 그린다 (결함이 수십 px로 작아 안쪽에 그리면 가린다). 조회 엔드포인트가 이 파일을 돌려준다.
 - `result_id` = `[direct_]<세션 12자리>-<seq 6자리>`. 게이트웨이를 거치지 않은 연결(테스트)은 `direct_`가 붙는다.
 - 날짜·`ts`는 컨테이너 시간대(Dockerfile `TZ=Asia/Seoul`, `tzdata` 설치)를 따른다. `ts`가 `+09:00`으로 끝나야 한다.
-- **저장된 프레임은 라벨이 아니다.** 재학습에 쓰려면 사람이 확인한 것만 학습 데이터로 옮긴다. 가모델의 오탐도 그대로 저장된다.
-- 자동 삭제가 없다. 디스크를 지켜본다 (`du -sh logs frames results db`). 결함이 계속 보이면 연결마다 초당 원본 1장 + 오버레이 1장 (1080p 약 0.3~0.6MB씩). 많으면 `SAVE_INTERVAL_S`를 늘린다.
+- **저장된 프레임은 라벨이 아니다.** 라벨은 제품의 피드백(`products.feedback`)이다: `CORRECT` → 제품 판정 그대로, `WRONG` → 반대, 그 밖(`UNSURE`·`NOT_ENTERED`·`NONE`) → 학습에서 뺀다. 가모델의 오탐도 그대로 저장된다.
+- **자동 삭제가 없다** (2026-11-06 결정). 디스크는 `GET /storage`(앱 M-06)나 `du -sh logs product_frames frames results db`로 지켜본다.
 - 제품 단위 때의 폴더(`frames/<날짜>/<result_id>/NN.jpg`)는 그대로 남아 있다. 지우지 않는다.
 
 ### 4.3 DB (`a4-db`, PostgreSQL 17)
 
-스키마는 `a4-api` 기동 시 없으면 만든다 (`db.py`의 `SCHEMA`). 기록 주체는 `a4-api`뿐이다. **스키마는 제품 단위 때와 같다** — 테이블·컬럼을 바꾸지 않고 뜻만 프레임 단위로 쓴다.
+스키마는 `a4-api` 기동 시 없으면 만든다 (`db.py`의 `SCHEMA`, `CREATE … IF NOT EXISTS`·`ALTER … ADD COLUMN IF NOT EXISTS`). 기록 주체는 `a4-api`뿐이다. 2026-11-06에 `products`·`frames`·`feedback_log` 테이블과 `sessions.feedback_mode`를 더했다 — 옛 테이블·행은 그대로 둔다.
 
 | 테이블 | 내용 |
 |---|---|
 | `stations` | 등록된 스테이션. SQL로 추가한다 (§5 ⑥) |
-| `sessions` | `/ws` 세션 |
-| `results` | **저장한 결함 프레임 하나**: `status`(항상 `done`), `decision`(NG·REVIEW), `defect_label`, `score`, `scores`(`[score]`), `threshold`, `detections`, `frame_size`, `checkpoint`, `frames_dir`(원본 파일 경로), `overlay_path`, `attempt`(그 연결의 `seq`), `captured_at` = `result_at` |
+| `sessions` | `/ws` 세션. `feedback_mode`(manual/auto) |
+| `products` | **제품 하나**: 시작 때 넣고 끝날 때 채운다. `decision`(PASS/FAIL), `ai_decision`(OK/NG/REVIEW), `defect_label`, `frames`, `defect_frames`, `faces`, `faces_seen`, `complete`, `best_result_id`, `result_ids`, `threshold`, `checkpoint`, `end_reason`, `feedback`(CORRECT/WRONG/UNSURE/NOT_ENTERED/NONE), `feedback_at`. `ended_at`이 NULL이면 서버가 기록 중 멈춘 제품이다 |
+| `frames` | **제품 프레임 하나**: (`session_id`, `seq`), `product_id`, `ts`, `decision`, `score`, `defect_label`, `products`(PD 상자), `detections`, `frame_size`, `file`(사진 경로), `result_id`. 스테이션 하나당 초당 최대 10행 |
+| `feedback_log` | 피드백 변경 한 줄: `product_id`, `before`, `after`, `source`(live/history), `device`, `changed_at` |
+| `results` | **저장한 결함 프레임 하나** (1초에 1장): `status`(항상 `done`), `decision`(NG·REVIEW), `defect_label`, `score`, `scores`(`[score]`), `threshold`, `detections`, `frame_size`, `checkpoint`, `frames_dir`(사진 경로 — `frames.file`과 같다), `overlay_path`, `attempt`(그 연결의 `seq`), `captured_at` = `result_at` |
 | `decisions`, `alerts` | 제품 단위 때의 사람의 최종 판정·연속 판정 알림. **옛 데이터 보존용** — 새 코드는 쓰지 않는다 |
 
 - 행은 파일(원본·오버레이)을 쓴 뒤에 `done`으로 한 번에 넣는다. 그래서 조회에 행이 보이면 이미지도 있다.
 - 제품 단위 때의 행(`pending`·`failed`, 여러 장의 `scores`, `alert_id`)도 같은 테이블에 남아 있다. 기간을 섞어 볼 때는 `scores`의 길이나 날짜·`checkpoint`로 나눈다.
-- 엔드포인트: `GET /results/{id}`, `GET /results/{id}/overlay` (규격은 `A4_WEBRTC_API.md` §4). 조회 응답의 `alert`는 이전 규격과 모양을 맞추려고 남긴 필드로 항상 `null`이다. `POST /results/{id}/decision`은 없어졌다 (`404`).
+- 엔드포인트: `GET /results/{id}`, `GET /results/{id}/overlay`, `PUT /products/{id}/feedback`, `GET /products`, `GET /products/{id}`, `GET /products/{id}/frames`, `GET /products/{id}/frames/{seq}.jpg`, `GET /storage` (규격은 `A4_WEBRTC_API.md` §4). 조회 응답의 `alert`는 이전 규격과 모양을 맞추려고 남긴 필드로 항상 `null`이다. `POST /results/{id}/decision`은 없어졌다 (`404`).
 - 풀 설정(연결 대기 1초, 꺼낼 때 연결 확인)의 근거는 `A4_PLAN.md`(보관) §7.5·§8-16. 이번 전환에서 바뀌지 않았다.
 
 ```bash
@@ -236,7 +263,20 @@ SELECT defect_label, decision, count(*) FROM results
 WHERE status = 'done' AND decision <> 'OK' GROUP BY defect_label, decision ORDER BY count(*) DESC;"
 ```
 
-- 저장은 1초에 1장으로 솎아낸 것이라, 위 개수는 "결함이 보인 프레임 수"가 아니다 (그건 `ws_close.defect_frames`).
+- 저장은 1초에 1장으로 솎아낸 것이라, 위 개수는 "결함이 보인 프레임 수"가 아니다 (그건 `ws_close.defect_frames`, 또는 `frames`에서 `decision <> 'OK'`).
+
+```bash
+# 오늘 제품 판정·피드백 집계
+docker exec a4-db psql -U a4 -d a4 -c "
+SELECT station_id, decision, feedback, count(*) FROM products
+WHERE started_at >= current_date GROUP BY 1, 2, 3 ORDER BY 1, 2, 3;"
+
+# 학습 라벨이 있는 제품 (맞음·틀림)과 그 사진 수
+docker exec a4-db psql -U a4 -d a4 -c "
+SELECT p.product_id, p.decision, p.feedback, count(f.file) AS photos FROM products p
+JOIN frames f USING (product_id) WHERE p.feedback IN ('CORRECT', 'WRONG')
+GROUP BY 1, 2, 3 ORDER BY p.product_id DESC LIMIT 20;"
+```
 - 모델을 바꾸면 판정 기준도 바뀐다. 기간을 길게 볼 때는 `checkpoint`로 나눠 본다.
 
 ---
@@ -280,6 +320,47 @@ export A4_DB_PASSWORD=$(docker inspect a4-db --format '{{range .Config.Env}}{{pr
 - 6. §5 ⑧ 확인. 7. `A4_WEBRTC_API.md` 머리말을 배포 날짜와 확인 결과로 고치고, §8의 "확인하지 않은 것"을 옮긴다. 8. 앱 개발자에게 알린다 (개발 서버가 새 규격으로 바뀐다).
 - **되돌리기**: `archive_product_mode/`의 `api`·`gateway`를 제자리로 복사해 다시 빌드하고 같은 명령으로 띄운다. DB는 새 행이 더해지기만 하므로 그대로 둬도 된다 (옛 코드는 새 행을 제품 단위 결과로 조회할 뿐이다).
 - 옛 제품 단위 코드의 연속 판정 알림은 되돌린 뒤 새 행(결함 프레임)까지 세게 된다. 되돌린 뒤 알림이 이상하면 스테이션별 마지막 알림 이후 행을 확인한다.
+
+### 5.B 프레임 단위 → 제품 단위·피드백 (gpudev, 2026-11-06 코드)
+
+2026-11-03 코드(프레임 단위)로 돌고 있는 서버에 이번 코드를 올린다. `a4-db`와 데이터·비밀번호는 그대로 쓰고, 새 테이블은 API가 기동하며 만든다. **`product_frames/` 폴더를 새로 붙여야 한다** — 빠뜨리면 사진이 컨테이너 안에 쌓였다가 컨테이너를 다시 만들 때 사라지고, `/storage`의 디스크 값도 컨테이너 기준이 된다.
+
+```bash
+cd /home/admin/odServer   # 프로젝트 폴더 ($PWD)
+
+# 1. 지금 코드·문서 보관 — 서비스는 계속 돈다
+mkdir -p archive_frame_mode && cp -a api gateway DEPLOY.md A4_WEBRTC_API.md archive_frame_mode/ && ls archive_frame_mode
+
+# 2. 새 코드·문서 복사 → 빌드. 빌드가 실패하면 여기서 멈춘다 (서비스 그대로)
+cp -a /tmp/new/api/. api/
+cp -a /tmp/new/gateway/. gateway/
+cp /tmp/new/DEPLOY.md /tmp/new/A4_WEBRTC_API.md /tmp/new/PLAN_product_feedback.md .
+grep -c "class Products" api/stream.py; grep -c "def to_i420" gateway/gateway.py
+#   기대: 1 / 1
+docker build -t a4-api api/ --no-cache
+docker build -t a4-gateway gateway/ --no-cache
+
+# 3. 사진 폴더 — API 컨테이너가 쓰므로 미리 만든다
+mkdir -p product_frames
+
+# 4. DB 덤프 — 여기서부터 서비스 중단
+docker exec a4-db pg_dump -U a4 a4 > archive_frame_mode/a4_db.sql && ls -l archive_frame_mode/a4_db.sql
+docker rm -f a4-gateway a4-api
+
+# 5. 비밀번호를 읽고 §5 ⑤의 docker run(product_frames 마운트가 더해졌다) → startup·db_ready, 이어서 §5 ⑦
+export A4_DB_PASSWORD=$(docker inspect a4-db --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^POSTGRES_PASSWORD=//p')
+[ -n "$A4_DB_PASSWORD" ] && echo "password set" || echo "EMPTY — 여기서 멈춘다"
+
+# 6. 새 테이블·마운트 확인
+docker exec a4-db psql -U a4 -d a4 -c '\dt'
+#   기대: alerts, decisions, feedback_log, frames, products, results, sessions, stations
+docker inspect a4-api --format '{{range .Mounts}}{{.Destination}} {{end}}'
+#   기대: /app/product_frames 가 들어 있다
+```
+
+- 7. §5 ⑧ 확인에 더해: 앱(또는 `webrtc_client.py --mode manual`)으로 제품을 비췄다 치우면 `product_end`가 오는지, `GET :8080/products?station=ST-02&limit=1`에 그 제품이 보이는지, `product_frames/<오늘>/`에 사진이 쌓이는지, `GET :8080/storage`가 200인지.
+- 8. `A4_WEBRTC_API.md` 머리말을 배포 날짜와 확인 결과로 고치고, 앱 개발자에게 알린다.
+- **되돌리기**: `archive_frame_mode/`의 `api`·`gateway`를 제자리로 복사해 다시 빌드하고, 옛 명령(`product_frames` 마운트 없이)으로 띄운다. 새 테이블은 옛 코드가 쓰지 않으므로 그대로 둬도 된다.
 
 ### 처음 설치 — 이상탐지를 내리고 PD·QI로 다시 올리기 (①~⑧)
 
@@ -403,6 +484,7 @@ docker run -d --name a4-api --gpus '"device=0"' -p 8000:8000 --restart unless-st
   -v $PWD/models:/app/models:ro \
   -v $PWD/logs/a4-api:/app/logs \
   -v $PWD/frames:/app/frames \
+  -v $PWD/product_frames:/app/product_frames \
   -v $PWD/results:/app/results \
   --log-opt max-size=50m --log-opt max-file=3 \
   a4-api
@@ -627,7 +709,7 @@ docker rm -f a4-api
 
 ### 6.4 GPU 여러 장
 
-GPU마다 API 컨테이너를 하나씩 띄운다. `frames/`·`results/`·`models/`는 공유하고 `logs/`는 따로 붙인다. DB는 같은 `a4-db`.
+GPU마다 API 컨테이너를 하나씩 띄운다. `frames/`·`product_frames/`·`results/`·`models/`는 공유하고 `logs/`는 따로 붙인다. DB는 같은 `a4-db`.
 
 ```bash
 docker rm -f a4-api-1
@@ -637,6 +719,7 @@ docker run -d --name a4-api-1 --gpus '"device=1"' -p 8001:8000 --restart unless-
   -v $PWD/models:/app/models:ro \
   -v $PWD/logs/a4-api-1:/app/logs \
   -v $PWD/frames:/app/frames \
+  -v $PWD/product_frames:/app/product_frames \
   -v $PWD/results:/app/results \
   --log-opt max-size=50m --log-opt max-file=3 \
   a4-api
@@ -647,7 +730,7 @@ docker run -d --name a4-api-1 --gpus '"device=1"' -p 8001:8000 --restart unless-
 ### 6.5 백업·디스크
 
 - DB: `docker exec a4-db pg_dump -U a4 a4 > a4_$(TZ=Asia/Seoul date +%F).sql`. `db/`를 직접 복사하지 않는다.
-- 디스크: `du -sh logs frames results db`. 자동 삭제가 없다 (§4.2).
+- 디스크: `GET /storage`(앱 M-06) 또는 `du -sh logs product_frames frames results db`. 자동 삭제가 없다 (§4.2).
 
 ### 6.6 되돌리기와 보관물 정리
 
@@ -689,6 +772,15 @@ cat /proc/sys/net/ipv4/ip_local_port_range
 ---
 
 ## 8. 알려진 제약과 확인하지 않은 것
+
+**확인한 것 — 제품 단위·피드백 (작성 환경, 2026-11-06)** — 이번에는 실제 FastAPI·websockets·aiortc·psycopg(PostgreSQL 16)를 설치해 돌렸다. PD·QI만 색으로 상자를 찾는 가짜 YOLO다. `/ws`·HTTP 42건 + WebRTC 게이트웨이 종단:
+
+- 제품 구간(1초 무소식·프레임이 끊긴 뒤 tick·연결 끊김), 확정(NG 3장 → FAIL/NG, REVIEW만 → FAIL/REVIEW), 면 진행(3장째부터 `faces_seen`, 세 면 → `complete`), `product_end` 필드·순서(앞 제품 끝이 다음 제품 첫 `inspect`보다 먼저), 피드백 초기값(manual `NOT_ENTERED`·auto `NONE`).
+- 저장: 제품 프레임마다 사진·`frames` 행, JPEG 입력은 받은 바이트 그대로, I420 입력은 JPEG로, 결함 프레임 1초에 1장 `results`·오버레이, `best_result_id`, 끊김 제품 `disconnect` 기록.
+- API: 피드백 입력·같은 값 무기록·수정·변경 기록·`NONE` 입력 422·없는 제품 404, 목록(최신 순·`before` 페이지·feedback/decision/날짜 필터·잘못된 필터 422), 상세, 프레임 목록·사진·`overlay=1`·없는 프레임 404, `/storage`, `/ws?mode=bad` 4422.
+- 게이트웨이: `webrtc_client.py --mode manual`로 동영상(10fps, 90장) → 제품 2개(FAIL·PASS) `product_end`, 제품 프레임 40장 모두 `inspect`(간격 제한 삭제로 버린 장 없음), `/products*`·`PUT`·`/storage` 중계, 잘못된 `feedback_mode` 422.
+
+**확인하지 않은 것 (2026-11-06)**: 실제 YOLO·GPU, 실서버(gpudev) 배포, 실제 모바일·HMD 앱 연결(앱의 안드로이드 코드는 이 환경에서 빌드하지 못했다), I420 전달·JPEG 품질 90에서의 처리 속도와 디스크 증가량.
 
 **확인한 것 — 프레임 단위 (작성 환경, 2026-11-03)** — torch·ultralytics·FastAPI·websockets·psycopg·aiortc를 설치할 수 없어 PD·QI를 색으로 상자를 찾는 가짜 모델로, FastAPI·websockets·aiortc·httpx를 대역으로 바꾸고 실제 `api.py`·`stream.py`·`detect.py`·`db.py`·`stream_client.py`·`gateway.py`·`webrtc_client.py`를 돌렸다. SQL은 psql을 거쳐 실제 PostgreSQL 16에서 실행했다 (드라이버만 대역). 125개 확인 통과.
 

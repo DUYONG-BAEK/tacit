@@ -1,24 +1,30 @@
-TacitQ 품질검사 지원 시스템 소스 (2026-11-05 기준)
+TacitQ 품질검사 지원 시스템 소스 (2026-11-06 기준)
 (주)스네일, 대외비
 
 [구성]
 HMD(RealWear Navigator 520) 카메라 영상을 모바일(Android)이 받아 AI 판정 서버로 보내고,
-서버가 프레임마다 돌려주는 판정을 HMD 화면(BLE)과 폰 화면에 실시간으로 표시하고 제품 단위로 기록합니다.
+서버가 프레임마다 돌려주는 판정을 HMD 화면(BLE)과 폰 화면에 실시간으로 표시합니다.
+제품 단위 판정·기록·사진 저장은 AI 서버가 하고, 폰은 결과를 보여 주고 작업자 피드백을 서버로 보냅니다.
  - HMD에서 모바일: MJPEG 4:3 1920x1440 (HTTP, 폰 핫스팟). 화각은 HMD 기본 카메라 앱과 같게(줌 최소)
  - 모바일에서 AI 서버: WebRTC 영상 + 데이터 채널(JSON), 개발 서버 192.168.1.11:8080, 스테이션 ST-02
-   서버 규격: 「제품 불량 판정 — 모바일 앱 연동 API」 2026-11-03 (프레임 단위 판정: searching / inspect)
- - 모바일에서 HMD: BLE (화면 지시 SHOW, 진행 안내 HINT, 실시간 결함 LIVE, HMD 영상 주소·카메라 상태 HELLO)
- - 판정: OK는 합격, NG와 REVIEW는 불합격. 제품을 비추는 동안 결함이 5장 중 2장 이상 잡히면 확정(진동 1회),
-   제품을 내리고 1초 지나면 이력 1건
+   서버 규격: server/A4_WEBRTC_API.md 2026-11-06 (searching / inspect / product_end, 피드백·이력 API)
+ - 모바일에서 HMD: BLE (화면 지시 SHOW, 진행 안내 HINT, 실시간 결함 LIVE, 면 진행 FACES, 제품 결과 RESULT,
+   HMD 영상 주소·카메라 상태 HELLO)
+ - 판정(서버): 제품을 비추는 동안 결함이 5장 중 2장 이상 잡히면 불합격, 제품을 내리고 1초 지나면 제품 끝(product_end)
+ - 모드(M-01): 수동 = 제품마다 폰에서 맞음·틀림·확인필요, 자동 = 피드백 건너뜀. 이력(M-05)에서 언제든 바꿀 수 있음
  - PD(제품 탐지)·QI(불량 탐지) 임곗값은 AI 서버가 정합니다. 앱은 서버 판정을 그대로 씁니다
    (바꾸려면 서버 관리자에게 요청)
 
 [폴더]
 01_문서
  - 설계서.html: 9장이 AI 서버(WebRTC, 프레임 단위 판정) 연동
- - 작업일지.html: 단계별 작업과 시험 결과 (마지막 항목: 2026-11-03 규격 대응)
+ - 작업일지.html: 단계별 작업과 시험 결과 (마지막 항목: 2026-11-06 제품 단위 판정 서버 이전·피드백)
  - TacitQ_*.pptx: 10월 현황 자료 (11-03 규격 변경 전 내용)
    두 html 은 02_소스/TacitQualityMobile/doc 의 build.py 로 만든 사본입니다 (sections/*.html 을 고친 뒤 build)
+
+server (AI 판정 서버 — 배포는 DEPLOY.md §5.B, 이번 변경 근거는 PLAN_product_feedback.md)
+ - api/: 판정 API (PD·QI, /ws, 제품 단위 판정, 피드백·이력·사진·디스크 API)
+ - gateway/: WebRTC 게이트웨이 (원본 프레임 전달)
 
 02_소스
  - TacitQualityMobile: 모바일 앱 (Kotlin, Jetpack Compose, Room, WebRTC)
