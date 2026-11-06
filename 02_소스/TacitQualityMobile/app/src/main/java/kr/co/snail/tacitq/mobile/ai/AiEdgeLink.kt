@@ -49,7 +49,8 @@ import kotlin.coroutines.suspendCoroutine
 
 /**
  * 실제 AI 엣지 연결 — HMD JPEG 를 WebRTC 영상 트랙으로 AI 서버에 보내고, 데이터 채널 메시지를 [AiFlow] 로 넘긴다.
- * 설계서 §9 · 「제품 불량 판정 — 모바일 앱 연동 API」 2026-11-03 규격 §5. 모의 엣지용 [StreamRelay] 자리를 그대로 대신한다(같은 offer · status).
+ * 설계서 §9 · 「제품 불량 판정 — 모바일 앱 연동 API」 2026-11-03 규격 §5 + 2026-11-06 제품 단위(`server/PLAN_product_feedback.md`).
+ * 모의 엣지용 [StreamRelay] 자리를 그대로 대신한다(같은 offer · status).
  *
  *  - 영상: 마지막 JPEG 1장만 들고 있다가 [FRAME_MS] 마다 I420 으로 바꿔 넣는다(밀린 프레임은 버림, 초당 최대 10장).
  *  - 해상도: 대역폭이 모자라도 해상도를 낮추지 않게 MAINTAIN_RESOLUTION (서버는 결함을 640px 타일로 보므로 해상도가 곧 검출력, API §5.5).
@@ -63,16 +64,22 @@ class AiEdgeLink(
     private val stationId: String,
     private val emit: (Event) -> Unit,
     profile: Profile = Profile(),
+    /** 피드백 모드 — `/offer` 의 feedback_mode (manual · auto). 바꾸려면 새로 연결한다 */
+    private val feedbackMode: String = FeedbackMode.AUTO,
     /** HMD 조준 화면 진행 안내(제품을 비춰 주세요 · 검사 중) */
     onHint: (text: String, tone: String) -> Unit = { _, _ -> },
     /** 실시간 결함 표시(HMD LIVE · M-07) — NG·REVIEW 프레임과 지우는 순간 */
     onLive: (LiveMark) -> Unit = {},
-    /** 제품 구간에서 결함이 처음 확정되는 순간(진동) */
-    onAlarm: () -> Unit = {},
+    /** 면 진행 표시(HMD FACES · M-07) — 바뀔 때만 */
+    onFaces: (FacesMark) -> Unit = {},
+    /** 제품이 끝남(서버 product_end) — 결과 카드 · HMD 결과 · 진동 */
+    onProduct: (AiProduct) -> Unit = {},
+    /** 연결될 때마다(첫 연결 포함) — 끊긴 사이 끝난 제품을 서버에서 다시 받을 때 쓴다 */
+    private val onLinkUp: () -> Unit = {},
 ) {
     private val appContext = context.applicationContext
     private val api = AiResultsApi(baseUrl)
-    private val flow = AiFlow(emit, stationId, profile, onHint = onHint, onLive = onLive, onAlarm = onAlarm)
+    private val flow = AiFlow(emit, profile.markHoldMs, onHint = onHint, onLive = onLive, onFaces = onFaces, onProduct = onProduct)
     private val policy = Reconnect()
     // WebRTC 콜백(신호 스레드)에서 pc 를 닫으면 멈추므로, 연결 다루기는 모두 이 한 줄 스레드에서 한다
     private val linkThread = Executors.newSingleThreadExecutor { Thread(it, "AiEdgeLink") }.asCoroutineDispatcher()
@@ -96,6 +103,7 @@ class AiEdgeLink(
     // 통신 로그 요약(5초마다 한 줄) — 받은 HMD 영상 · 보낸 프레임 · 서버 메시지 수
     private val nInspect = AtomicInteger()
     private val nSearching = AtomicInteger()
+    private val nProduct = AtomicInteger()
     private val nUnknown = AtomicInteger()
     @Volatile private var lastUnknown: String? = null
     @Volatile private var firstMessage = true
@@ -151,7 +159,6 @@ class AiEdgeLink(
             lost("연결 시간 초과")
         }
         if (policy.due(now)) connect(now)
-        flow.onTick()
         if (connected && now - lastStats >= STATS_MS) { lastStats = now; summary(); logStats() }
         _status.value = StreamRelay.Status(
             edgeConnected = connected, received = received, sent = sent, queued = 0,
@@ -165,7 +172,7 @@ class AiEdgeLink(
 
     private suspend fun connect(now: Long) {
         policy.onAttempt(now)
-        if (policy.failures == 0) CommLog.i(AI, TAG, "연결 시도 $baseUrl (스테이션 $stationId)")
+        if (policy.failures == 0) CommLog.i(AI, TAG, "연결 시도 $baseUrl (스테이션 $stationId, 모드 $feedbackMode)")
         try {
             closePc()
             val myGen = gen
@@ -186,7 +193,7 @@ class AiEdgeLink(
             sdpSet { p.setLocalDescription(it, offer) }
             withTimeoutOrNull(GATHER_MS) { gathered.await() }                // trickle 없음 — 후보 수집 끝까지 기다린다
 
-            val reply = withContext(Dispatchers.IO) { api.offer(p.localDescription.description, stationId) }
+            val reply = withContext(Dispatchers.IO) { api.offer(p.localDescription.description, stationId, feedbackMode) }
             when (reply.code) {
                 200 -> {
                     val answer = Json.parseToJsonElement(reply.body).jsonObject["sdp"]!!.jsonPrimitive.content
@@ -225,7 +232,7 @@ class AiEdgeLink(
         statsReceived = received; statsSent = sent
         val u = nUnknown.getAndSet(0)
         val line = "최근 ${STATS_MS / 1000}초: HMD 영상 ${r}장 받음 · 서버로 ${s}장 보냄 · 서버 메시지 inspect ${nInspect.getAndSet(0)} · " +
-            "searching ${nSearching.getAndSet(0)}" + (if (u > 0) " · 모르는 메시지 $u (예: $lastUnknown)" else "") +
+            "searching ${nSearching.getAndSet(0)} · product_end ${nProduct.getAndSet(0)}" + (if (u > 0) " · 모르는 메시지 $u (예: $lastUnknown)" else "") +
             (sentInfo?.let { " · $it" } ?: "")
         if (r == 0L) CommLog.w(AI, TAG, "$line — HMD 영상이 들어오지 않아 서버로 보낼 프레임이 없음(HMD 로그 확인)")
         else CommLog.i(AI, TAG, line)
@@ -284,6 +291,12 @@ class AiEdgeLink(
             when (msg) {
                 is AiMsg.Inspect -> nInspect.incrementAndGet()
                 is AiMsg.Searching -> nSearching.incrementAndGet()
+                is AiMsg.ProductEnd -> {
+                    nProduct.incrementAndGet()
+                    val p = msg.product
+                    CommLog.i(AI, TAG, "제품 끝 ${p.productId} ${p.decision}(${p.aiDecision}${p.defectLabel?.let { " $it" } ?: ""}) · " +
+                        "프레임 ${p.frames}장(결함 ${p.defectFrames}) · 면 ${p.facesSeen.joinToString("·").ifEmpty { "-" }}${if (p.complete) " 완료" else ""} · ${p.endReason}")
+                }
                 is AiMsg.Unknown -> { nUnknown.incrementAndGet(); lastUnknown = text.take(200) }
             }
             flow.onMessage(msg)
@@ -294,10 +307,11 @@ class AiEdgeLink(
         connected = true
         CommLog.i(AI, TAG, "연결됨 — 영상 전송 시작, 서버 메시지 대기 ($baseUrl)")
         firstMessage = true
-        nInspect.set(0); nSearching.set(0); nUnknown.set(0)
+        nInspect.set(0); nSearching.set(0); nProduct.set(0); nUnknown.set(0)
         statsReceived = received; statsSent = sent; lastStats = System.currentTimeMillis()
         policy.onConnected()
         flow.onConnected()
+        onLinkUp()
         if (unreachable) { unreachable = false; emit(Event.EdgeRecovered) }
     }
 
@@ -383,8 +397,10 @@ class AiEdgeLink(
         const val TICK_MS = 500L
         const val FRAME_MS = 100L                 // 초당 최대 10장 — 서버도 초당 10프레임까지만 쓴다(API §5.5)
         const val GATHER_MS = 5_000L
-        const val MAX_BITRATE = 6_000_000
-        const val MIN_BITRATE = 2_000_000          // 처음부터 낮은 비트레이트로 시작해 해상도를 깎지 않게
+        // 2026-11-06: 6→12Mbps(출발값) — 압축을 덜 해 작은 결함을 지키려고(PLAN_product_feedback.md §7.3).
+        // 폰 소프트웨어 VP8 이 1920×1440 초당 10장을 이 비트레이트로 내는지 통신 로그의 "보냄 … fps" 로 확인한다.
+        const val MAX_BITRATE = 12_000_000
+        const val MIN_BITRATE = 4_000_000          // 처음부터 낮은 비트레이트로 시작해 해상도를 깎지 않게
         const val STATS_MS = 5_000L
     }
 }

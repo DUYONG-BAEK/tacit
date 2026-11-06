@@ -8,11 +8,20 @@ import kr.co.snail.tacitq.hmd.protocol.Downlink
  *  - 결함은 프레임마다 잡혔다 안 잡혔다 하므로 마지막 결함 LIVE 뒤 [holdMs] 동안 표시를 유지한다(깜빡임 억제).
  *    모바일 Profile.markHoldMs 와 같은 값이어야 한다.
  *  - d=null(제품을 내림·서버 끊김)·BLE 끊김이면 즉시 지운다([clear]).
- *  - 가운데 큰 글자는 조준 화면(H-01)에서만 LIVE(유지 중) > HINT > 화면 기본값. 그 밖의 화면(대기·판정·H-09 등)은 기본값.
+ *  - 제품 결과(RESULT)는 받은 뒤 [resultMs] 동안 보인다.
+ *  - 가운데 큰 글자는 조준 화면(H-01)에서만 RESULT(표시 중) > LIVE(유지 중) > HINT > 화면 기본값.
+ *    그 밖의 화면(대기·판정·H-09 등)은 기본값. 모바일 `hmd/HudMirror.kt` 와 같은 규칙이어야 한다.
  */
-class LiveHold(private val holdMs: Long = 500) {
+class LiveHold(private val holdMs: Long = 500, private val resultMs: Long = RESULT_MS) {
     private var live: Downlink.Live? = null
     private var at = 0L
+    private var result: Downlink.Result? = null
+    private var resultAt = 0L
+
+    fun onResult(r: Downlink.Result, now: Long) { result = r; resultAt = now }
+
+    /** 지금 보일 제품 결과 — 표시 시간이 지났으면 null */
+    fun currentResult(now: Long): Downlink.Result? = result?.takeIf { now - resultAt < resultMs }
 
     fun onLive(m: Downlink.Live, now: Long) {
         if (m.d == null) { clear(); return }
@@ -20,23 +29,39 @@ class LiveHold(private val holdMs: Long = 500) {
         at = now
     }
 
-    fun clear() { live = null }
+    fun clear() { live = null; result = null }
 
     /** 지금 보일 LIVE — 유지 시간이 지났으면 null */
     fun current(now: Long): Downlink.Live? = live?.takeIf { now - at < holdMs }
 
-    /** 유지가 끝나는 시각까지 남은 시간(다시 그릴 타이머용). 보일 것이 없으면 null */
-    fun remainingMs(now: Long): Long? = current(now)?.let { holdMs - (now - at) }
+    /** 유지·결과 표시가 끝나는 시각까지 남은 시간 중 짧은 것(다시 그릴 타이머용). 보일 것이 없으면 null */
+    fun remainingMs(now: Long): Long? = listOfNotNull(
+        current(now)?.let { holdMs - (now - at) },
+        currentResult(now)?.let { resultMs - (now - resultAt) },
+    ).minOrNull()
 
-    /** 가운데 큰 글자와 색 — 조준 화면이면 LIVE > HINT > 기본값 */
+    /** 가운데 큰 글자와 색 — 조준 화면이면 RESULT > LIVE > HINT > 기본값 */
     fun big(base: HudSpec, hint: Pair<String, Tone>?, now: Long): Pair<String, Tone> {
         if (base.screen != "H-01") return base.big to base.bigTone
+        currentResult(now)?.let { return resultText(it.d, it.l) }
         current(now)?.let { return text(it) }
         hint?.let { return it }
         return base.big to base.bigTone
     }
 
     companion object {
+        /** 제품 결과 표시 시간 — 모바일 HudMirror.RESULT_SHOW_MS 와 같은 값 */
+        const val RESULT_MS = 2_000L
+
+        /** 제품 결과 문구 — 모바일 HudMirror.resultText 와 같다 */
+        fun resultText(d: String, l: String?): Pair<String, Tone> =
+            if (d == "PASS") "✓ 합격" to Tone.OK
+            else ("✕ 불합격" + (l?.ifBlank { null }?.let { " · $it" }.orEmpty())) to Tone.BAD
+
+        /** 면 칩 줄 — `■ 상면   □ 엣지   □ 하면비닐` (+ `   ✓ 검사 완료`). 모바일 HudMirror.facesText 와 같다 */
+        fun facesText(f: Downlink.Faces): String =
+            f.all.joinToString("   ") { (if (it in f.s) "■ " else "□ ") + it } + if (f.c) "   ✓ 검사 완료" else ""
+
         fun text(m: Downlink.Live): Pair<String, Tone> {
             val label = m.l?.ifBlank { null }?.let { " · $it" }.orEmpty()
             return if (m.d == "NG") "✕ 불량$label" to Tone.BAD else "? 애매$label" to Tone.WARN

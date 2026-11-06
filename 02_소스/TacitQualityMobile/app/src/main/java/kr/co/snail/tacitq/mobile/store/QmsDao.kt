@@ -24,10 +24,6 @@ interface QmsDao {
     @Query("SELECT * FROM inspection ORDER BY capturedAt DESC")
     suspend fun allInspections(): List<InspectionEntity>
 
-    /** 이력 화면(M-05) 실시간 — 행이 바뀔 때마다 새 목록을 흘려보낸다 */
-    @Query("SELECT * FROM inspection ORDER BY capturedAt DESC LIMIT :n")
-    fun observeInspections(n: Int = 300): kotlinx.coroutines.flow.Flow<List<InspectionEntity>>
-
     /** 용량 정리 — 동기화 끝난 이력만. 서버에 이미 있으므로 지워도 된다. */
     @Query("DELETE FROM inspection WHERE syncedAt IS NOT NULL AND capturedAt < :before")
     suspend fun pruneSynced(before: Long)

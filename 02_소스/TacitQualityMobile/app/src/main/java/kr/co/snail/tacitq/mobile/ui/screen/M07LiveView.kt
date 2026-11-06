@@ -5,6 +5,7 @@ import android.graphics.BitmapFactory
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
@@ -30,7 +31,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.sample
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kr.co.snail.tacitq.mobile.ai.AiResultsApi
+import kr.co.snail.tacitq.mobile.ai.FeedbackMode
 import kr.co.snail.tacitq.mobile.ai.DefectCrop
 import kr.co.snail.tacitq.mobile.ai.LiveMark
 import kr.co.snail.tacitq.mobile.core.Profile
@@ -63,6 +68,9 @@ fun LiveViewScreen(@Suppress("UNUSED_PARAMETER") vm: AppViewModel) {
     val hudScreen by InspectionService.hudScreen.collectAsStateWithLifecycle()
     val hudHint by InspectionService.hudHint.collectAsStateWithLifecycle()
     val hudOverlay by InspectionService.hudOverlay.collectAsStateWithLifecycle()
+    val hudFaces by InspectionService.hudFaces.collectAsStateWithLifecycle()
+    val hudResult by InspectionService.hudResult.collectAsStateWithLifecycle()
+    val card by InspectionService.lastProduct.collectAsStateWithLifecycle()
     val ctx = LocalContext.current
     val settings = remember { DevSettings(ctx) }
     val sampled = remember { InspectionService.liveFrame.sample(100) }
@@ -77,6 +85,14 @@ fun LiveViewScreen(@Suppress("UNUSED_PARAMETER") vm: AppViewModel) {
         mark = m.mark
         delay((MARK_HOLD_MS - (System.currentTimeMillis() - m.at)).coerceAtLeast(0))
         mark = null
+    }
+    // 제품 결과 — HMD 와 같이 보낸 뒤 RESULT_SHOW_MS 동안
+    var result by remember { mutableStateOf<Pair<String, String?>?>(null) }
+    LaunchedEffect(hudResult) {
+        val r = hudResult ?: run { result = null; return@LaunchedEffect }
+        result = r.decision to r.label
+        delay((HudMirror.RESULT_SHOW_MS - (System.currentTimeMillis() - r.at)).coerceAtLeast(0))
+        result = null
     }
     var fps by remember { mutableStateOf(0.0) }
     val window = remember { ArrayDeque<Pair<Long, Long>>() }   // (받은 시각, HMD 순번) — 최근 1초
@@ -108,7 +124,7 @@ fun LiveViewScreen(@Suppress("UNUSED_PARAMETER") vm: AppViewModel) {
             b != null -> {
                 // HMD 와 같은 화면 — 영상(자르지 않고 가운데) + HMD 가 그리는 글자·결함 원
                 Image(b.asImageBitmap(), contentDescription = "HMD 영상", contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize())
-                HmdScreen(HudMirror.view(hudScreen, hudHint, mark, hudOverlay), mark, circles = settings.liveMarks)
+                HmdScreen(HudMirror.view(hudScreen, hudHint, mark, hudOverlay, hudFaces, result), mark, circles = settings.liveMarks)
             }
         }
         if (running && hmdBle != "HMD 연결됨") Text(
@@ -116,6 +132,9 @@ fun LiveViewScreen(@Suppress("UNUSED_PARAMETER") vm: AppViewModel) {
             modifier = Modifier.align(Alignment.BottomCenter).padding(6.dp).background(Color(0xAA000000)).padding(horizontal = 6.dp, vertical = 2.dp),
         )
     }
+
+    // 제품 결과 카드 — 서버가 끝낸 마지막 제품. 수동 모드면 맞음·틀림·확인필요(폰이 작업자 옆 삼각대에 있다)
+    if (running) card?.let { ResultCard(it, settings) }
 
     // 최근 결함 확대 — 서버가 저장한 결함 프레임(result_id)이 오면 바뀐다. 누르면 전체 화면(API §4.2)
     if (running) lastDefectId?.let { id ->
@@ -189,7 +208,7 @@ private fun HmdScreen(v: HudMirror.View, mark: LiveMark?, circles: Boolean) {
                    horizontalAlignment = Alignment.CenterHorizontally) {
                 if (v.big.isNotEmpty()) Text(v.big, color = Color(v.bigTone.argb), fontSize = sp(44f), fontWeight = FontWeight.Bold,
                                              textAlign = TextAlign.Center, style = TextStyle(shadow = shadow))
-                if (v.lines.isNotEmpty()) Text(v.lines.joinToString("\n"), color = Color(HudMirror.Tone.STOP.argb), fontSize = sp(22f),
+                if (v.lines.isNotEmpty()) Text(v.lines.joinToString("\n"), color = Color(v.linesTone.argb), fontSize = sp(22f),
                                                textAlign = TextAlign.Center, style = TextStyle(shadow = shadow),
                                                modifier = Modifier.padding(top = 10.dp * k))
             }
@@ -198,6 +217,53 @@ private fun HmdScreen(v: HudMirror.View, mark: LiveMark?, circles: Boolean) {
             Text(it, color = Color(0xFF101620), fontSize = sp(20f), fontWeight = FontWeight.Bold,
                  modifier = Modifier.align(Alignment.TopCenter).padding(top = 56.dp * k).background(Color(0xE6F0A95C))
                      .padding(horizontal = 16.dp * k, vertical = 6.dp * k))
+        }
+    }
+}
+
+/**
+ * 제품 결과 카드 — 판정·결함 종류·면·대표 결함 확대. 수동 모드면 버튼 3개로 피드백을 보낸다(source=live).
+ * 누르기 전에 다음 제품이 끝나면 카드가 새 제품으로 바뀌고, 이전 제품은 서버에 미입력으로 남는다(M-05 에서 고친다).
+ */
+@Composable
+private fun ResultCard(card: InspectionService.Companion.ProductCard, settings: DevSettings) {
+    val p = card.product
+    val scope = rememberCoroutineScope()
+    val api = remember(settings.aiUrl) { AiResultsApi(settings.aiUrl) }
+    var sending by remember(p.productId) { mutableStateOf(false) }
+    SectionTitle("제품 결과")
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(T.Surface)
+            .border(1.dp, T.Line, RoundedCornerShape(10.dp)).padding(12.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            ProductBadge(p)
+            Text(
+                listOfNotNull(p.defectLabel, "프레임 ${p.frames}장 · 결함 ${p.defectFrames}장").joinToString(" · "),
+                fontSize = 12.5.sp, color = T.Slate, modifier = Modifier.padding(start = 10.dp).weight(1f),
+            )
+        }
+        facesLine(p)?.let { Text(it, fontSize = 12.sp, color = if (p.complete) T.Green else T.Muted, modifier = Modifier.padding(top = 4.dp)) }
+        p.bestResultId?.let { DefectThumb(it, settings.aiUrl, Modifier.padding(top = 8.dp).fillMaxWidth(0.45f)) }
+        if (card.mode == FeedbackMode.MANUAL) {
+            Text("AI 판정이 맞나요?", fontSize = 14.sp, color = T.Ink, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 10.dp))
+            FeedbackButtons(card.sent ?: p.feedback, enabled = !sending) { f ->
+                sending = true
+                scope.launch {
+                    val r = sendFeedback(api, p.productId, f, "live", settings.deviceLabel)
+                    sending = false
+                    // 그 사이 다음 제품 카드로 바뀌었으면 건드리지 않는다
+                    InspectionService.lastProduct.update { c ->
+                        if (c == null || c.product.productId != p.productId) c
+                        else r.fold({ c.copy(product = it, sent = it.feedback, error = null) },
+                                    { c.copy(error = it.message ?: "서버 연결 실패") })
+                    }
+                }
+            }
+            card.error?.let { Text(it, fontSize = 12.sp, color = T.Red, modifier = Modifier.padding(top = 4.dp)) }
+            card.sent?.let { Text("저장됨 — ${feedbackLabel(it)} (이력에서 바꿀 수 있음)", fontSize = 12.sp, color = T.Muted, modifier = Modifier.padding(top = 4.dp)) }
+        } else {
+            Text("자동 모드 — 피드백 없음 (이력에서 넣을 수 있음)", fontSize = 12.sp, color = T.Muted, modifier = Modifier.padding(top = 8.dp))
         }
     }
 }

@@ -44,10 +44,7 @@ data class Profile(
     val lateMs: Long = 1_500,             // 결과 지연 경계 → 회수 (R05)
     val confirmWaitMs: Long = 10_000,     // 확인 대기 (R12)
     val commitGraceMs: Long = 1_000,      // 제스처 확정 유예 (R09)
-    // ── AI 서버 프레임 단위 판정(2026-11-03 규격) — 출발값, 현장 시험으로 조정 ──
-    val confirmWindow: Int = 5,           // 결함 확정: 최근 confirmWindow 장 중
-    val confirmHits: Int = 2,             //   confirmHits 장 이상이 NG·REVIEW 면 확정
-    val segmentEndMs: Long = 1_000,       // 마지막 inspect 뒤 이만큼 inspect 가 없으면 제품 구간 끝
+    // ── AI 서버(2026-11-06) — 제품 구간·결함 확정은 서버 stream.py 가 정한다(SEGMENT_END_S·CONFIRM_*) ──
     val markHoldMs: Long = 500,           // 결함 표시 유지 — HMD LiveHold 와 같은 값
     val liveMarks: Boolean = true,        // HMD 에 결함 원(상자)을 보낸다 — 끄면 판정 글자만
 )

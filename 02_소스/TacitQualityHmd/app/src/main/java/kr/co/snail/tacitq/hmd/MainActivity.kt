@@ -154,6 +154,7 @@ class MainActivity : AppCompatActivity() {
     @Volatile private var cameraError: String? = null
     @Volatile private var foreground = false             // 카메라는 앱이 화면 맨 앞에 있을 때만 돈다
     @Volatile private var lastFrameAt = 0L
+    private var nextSendAt = 0L                    // MJPEG 다음 송출 예정 시각 (분석 스레드에서만)
     @Volatile private var analysisSize = ""
     @Volatile private var cameraBound = false
     @Volatile private var cameraOpen = ""                 // CameraX 카메라 상태(열기 대기 · 여는 중 · 열림 …)와 오류
@@ -305,8 +306,12 @@ class MainActivity : AppCompatActivity() {
             ui.post { binding.marks.contentAspect = aspect }      // 결함 원 — 미리보기와 같은 비율로 맞춤
         }
         lastFrameAt = capturedAt
+        // 초당 MJPEG_FPS 장만 JPEG 로 만든다(품질을 올린 만큼 핫스팟 대역폭을 아낀다 — 폰은 0.1초마다 최신 1장만 쓴다).
+        // 예정 시각 방식에 반 간격 허용 — 도착 간격이 조금 흔들려도 다음 장을 버리지 않아 평균이 MJPEG_FPS 가 된다.
+        if (capturedAt < nextSendAt - MJPEG_FRAME_MS / 2) { image.close(); return }
+        nextSendAt = maxOf(nextSendAt + MJPEG_FRAME_MS, capturedAt - MJPEG_FRAME_MS / 2)
         try {
-            server.updateFrame(YuvToJpeg.convert(image), capturedAt)
+            server.updateFrame(YuvToJpeg.convert(image, MJPEG_QUALITY), capturedAt)
         } catch (e: Exception) {
             Log.w(TAG, "프레임 변환 실패: ${e.message}")
         } finally {
@@ -430,5 +435,9 @@ class MainActivity : AppCompatActivity() {
         private const val VIDEO_H = 1080
         private const val VIDEO_FPS = 30
         private const val VIDEO_BITRATE = 8_000_000
+        // 2026-11-06: JPEG 품질 80 → 95, 송출 초당 12장 (server/PLAN_product_feedback.md §7.4, 출발값)
+        private const val MJPEG_QUALITY = 95
+        private const val MJPEG_FPS = 12
+        private const val MJPEG_FRAME_MS = 1000L / MJPEG_FPS
     }
 }

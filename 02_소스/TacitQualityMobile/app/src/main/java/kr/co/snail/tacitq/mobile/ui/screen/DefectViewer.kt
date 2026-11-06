@@ -153,9 +153,9 @@ private fun FrameCanvas(s: Load.Ok, crop: CropSquare?, modifier: Modifier, circl
     }
 }
 
-/** 핀치 확대(1~8배)·끌어서 이동 */
+/** 핀치 확대(1~8배)·끌어서 이동 — M-05 프레임 보기도 쓴다 */
 @Composable
-private fun Zoomable(modifier: Modifier, content: @Composable () -> Unit) {
+internal fun Zoomable(modifier: Modifier, content: @Composable () -> Unit) {
     var scale by remember { mutableFloatStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
     Box(
@@ -175,7 +175,7 @@ private fun Zoomable(modifier: Modifier, content: @Composable () -> Unit) {
 }
 
 @Composable
-private fun Stepper(label: String, index: Int, count: Int, onChange: (Int) -> Unit) {
+internal fun Stepper(label: String, index: Int, count: Int, onChange: (Int) -> Unit) {
     Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center) {
         Text("◀", color = if (index > 0) Color.White else Color.DarkGray, fontSize = 18.sp,

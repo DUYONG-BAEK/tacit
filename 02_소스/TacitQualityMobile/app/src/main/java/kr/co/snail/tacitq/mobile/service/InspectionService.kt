@@ -31,6 +31,10 @@ import kr.co.snail.tacitq.mobile.core.Profile
 import kr.co.snail.tacitq.mobile.core.Screens
 import kotlinx.coroutines.flow.StateFlow
 import kr.co.snail.tacitq.mobile.ai.AiEdgeLink
+import kr.co.snail.tacitq.mobile.ai.AiMessages
+import kr.co.snail.tacitq.mobile.ai.AiProduct
+import kr.co.snail.tacitq.mobile.ai.AiResultsApi
+import kr.co.snail.tacitq.mobile.ai.FacesMark
 import kr.co.snail.tacitq.mobile.ai.LiveMark
 import kr.co.snail.tacitq.mobile.relay.DevSettings
 import kr.co.snail.tacitq.mobile.relay.Hello
@@ -45,9 +49,11 @@ import kr.co.snail.tacitq.mobile.core.Event
 import kr.co.snail.tacitq.mobile.core.InspectionRecord
 import kr.co.snail.tacitq.mobile.core.Mode
 import kr.co.snail.tacitq.mobile.core.ShowCommand
+import kr.co.snail.tacitq.mobile.hmd.FacesWire
 import kr.co.snail.tacitq.mobile.hmd.GattBleLink
 import kr.co.snail.tacitq.mobile.hmd.HintWire
 import kr.co.snail.tacitq.mobile.hmd.LiveWire
+import kr.co.snail.tacitq.mobile.hmd.ResultWire
 import kr.co.snail.tacitq.mobile.log.CommLog
 import kr.co.snail.tacitq.mobile.hmd.HmdRenderer
 import kr.co.snail.tacitq.mobile.store.LocalStore
@@ -141,8 +147,6 @@ class InspectionService : LifecycleService() {
         val sessionId = "S-" + SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date()) + "-$line"
         val toEngine: (Event) -> Unit = { e ->
             Log.i(TAG, "엣지 → 엔진: $e")
-            if (e is Event.JudgeResult && e.aiDecision != null) CommLog.i(CommLog.Ch.AI, TAG,
-                "제품 구간 판정 ${e.aiDecision}${e.defectLabel?.let { " $it" } ?: ""} · inspect ${e.frames}장(결함 ${e.defectFrames}장) · 저장된 결함 프레임 ${e.resultIds.size}장")
             engine.send(e)
         }
         val settings = DevSettings(this)
@@ -151,7 +155,9 @@ class InspectionService : LifecycleService() {
         val edgeRun: suspend () -> Unit
         val edgeStatus: StateFlow<StreamRelay.Status>
         if (settings.edgeKind == DevSettings.EDGE_AI) {
-            val ai = AiEdgeLink(this, settings.aiUrl, settings.stationId, toEngine, profile,
+            val api = AiResultsApi(settings.aiUrl)
+            var linkUps = 0                                       // AiEdgeLink 연결 스레드에서만 바뀐다
+            val ai = AiEdgeLink(this, settings.aiUrl, settings.stationId, toEngine, profile, feedbackMode = settings.feedbackMode,
                 onHint = { text, tone ->
                     hudHint.value = text to tone                  // M-07 HMD 화면 따라 그리기
                     // HMD 조준 화면 진행 안내 — 화면 지시(SHOW)와 달리 순번·ACK 없이 최신 것만 보낸다
@@ -163,7 +169,15 @@ class InspectionService : LifecycleService() {
                     liveMark.value = LiveMarkAt(m, System.currentTimeMillis())    // M-07 결함 원
                     m.resultId?.let { lastDefectId.value = it }                   // M-07 최근 결함 확대
                 },
-                onAlarm = { vibrate(3) },                         // 제품 구간에서 결함이 처음 확정될 때 1회(R5)
+                // 면 진행 — 바뀔 때만 온다. HMD 조준 화면의 면 칩 줄
+                onFaces = { f ->
+                    hudFaces.value = f.takeIf { it.all.isNotEmpty() }
+                    effectScope.launch { runCatching { ble.write(FacesWire.encode(f)) } }
+                },
+                // 제품 끝(서버 판정) — M-07 결과 카드, HMD 결과 2초, 불합격이면 진동 1회
+                onProduct = { p -> showProduct(p, settings.feedbackMode) },
+                // 다시 연결되면(교대 첫 연결은 빼고) — 끊긴 사이 서버가 끝낸 제품(disconnect)을 카드로 받는다
+                onLinkUp = { if (linkUps++ > 0) ioScope.launch { recoverProduct(api, settings.stationId, settings.feedbackMode) } },
             )
             offer = ai::offer; edgeRun = ai::run; edgeStatus = ai.status
             CommLog.i(CommLog.Ch.AI, TAG, "교대 시작 $sessionId · AI 서버 ${settings.aiUrl} · 스테이션 ${settings.stationId}")
@@ -194,6 +208,28 @@ class InspectionService : LifecycleService() {
         running.value = true
     }
 
+    /** 제품 결과 — 서버 판정을 그대로 보인다(폰은 판정하지 않음). 새 제품이 오면 카드를 바꾼다(이전 제품은 미입력으로 남음). */
+    private fun showProduct(p: AiProduct, mode: String) {
+        if (lastProduct.value?.product?.productId == p.productId) return
+        lastProduct.value = ProductCard(p, mode)
+        val decision = p.decision ?: return                       // 끝나지 않은 제품(서버 기록 중 멈춤)은 결과를 띄우지 않는다
+        hudResult.value = HudResult(decision, p.defectLabel, System.currentTimeMillis())
+        effectScope.launch { runCatching { ble.write(ResultWire.encode(decision, p.defectLabel)) } }
+        if (!p.pass) vibrate(3)
+    }
+
+    /** 끊긴 사이 끝난 제품 — 서버 마지막 제품이 연결이 끊겨 끝났고(disconnect) 아직 카드로 안 띄웠으면 띄운다 */
+    private fun recoverProduct(api: AiResultsApi, station: String, mode: String) {
+        val r = runCatching { api.products(station, limit = 1) }.getOrNull() ?: return
+        if (r.code != 200) return
+        val p = runCatching { AiMessages.parseProducts(r.body).items.firstOrNull() }.getOrNull() ?: return
+        val shown = lastProduct.value?.product?.productId
+        if (p.endReason == "disconnect" && p.productId != shown && p.decision != null) {
+            CommLog.i(CommLog.Ch.AI, TAG, "끊긴 사이 끝난 제품 ${p.productId} ${p.decision} — 결과 카드로 띄움")
+            lastProduct.value = ProductCard(p, mode)
+        }
+    }
+
     /**
      * BLE 가 (다시) 붙었을 때 — 그 사이 보낸 지시는 못 갔으므로 지금 화면을 다시 보낸다.
      * 판정 화면 중에 끊겼다면 조준 화면으로 돌아가지만, 판정은 상태기계·폰 진동에 이미 남아 있다.
@@ -215,6 +251,9 @@ class InspectionService : LifecycleService() {
         liveFrame.value = null
         liveMark.value = null
         lastDefectId.value = null
+        lastProduct.value = null
+        hudFaces.value = null
+        hudResult.value = null
         hudHint.value = null
         hudOverlay.value = null
         val job = relayJob
@@ -360,6 +399,18 @@ class InspectionService : LifecycleService() {
         val hudScreen = MutableStateFlow<ShowCommand?>(null)
         val hudHint = MutableStateFlow<Pair<String, String>?>(null)
         val hudOverlay = MutableStateFlow<String?>(null)
+        /** M-07 따라 그리기 — 면 칩 줄(null = 숨김) · 제품 결과(보낸 시각부터 HudMirror.RESULT_SHOW_MS 동안) */
+        val hudFaces = MutableStateFlow<FacesMark?>(null)
+        val hudResult = MutableStateFlow<HudResult?>(null)
+
+        class HudResult(val decision: String, val label: String?, val at: Long)
+
+        /**
+         * M-07 결과 카드 — 마지막으로 끝난 제품. [mode] 가 수동이면 맞음·틀림·확인필요 버튼을 보인다.
+         * [sent] 는 이 화면에서 보낸 피드백(서버 응답 기준), [error] 는 보내기 실패 문구.
+         */
+        data class ProductCard(val product: AiProduct, val mode: String, val sent: String? = null, val error: String? = null)
+        val lastProduct = MutableStateFlow<ProductCard?>(null)
 
         fun start(ctx: Context, line: String, partNo: String, hmdUrl: String, edgeUrl: String) {
             ctx.startForegroundService(

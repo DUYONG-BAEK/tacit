@@ -69,4 +69,52 @@ class AiMessagesTest {
         assertEquals("칩찍힘", v.detections.single().label)
         assertEquals("/results/c311ab4b00e5-000030/overlay", v.overlayUrl)
     }
+
+    @Test fun `inspect 제품 단위 필드 - 없으면 기본값`() {
+        val m = AiMessages.parse("""{"state":"inspect","seq":3,"frame_size":[1920,1440],"decision":"OK","defect_label":null,
+            "score":0,"threshold":0.4,"products":[],"detections":[],"result_id":null,"overlay_url":null,
+            "product_id":"abc-p0002","faces":{"상면":4,"엣지":1,"하면비닐":0},"faces_seen":["상면"],"complete":false,"rx_at":1762390000123}""") as AiMsg.Inspect
+        assertEquals("abc-p0002", m.productId)
+        assertEquals(mapOf("상면" to 4, "엣지" to 1, "하면비닐" to 0), m.faces)
+        assertEquals(listOf("상면"), m.facesSeen)
+        assertEquals(1762390000123L, m.rxAt)
+        val old = AiMessages.parse("""{"state":"inspect","seq":3,"frame_size":[1920,1080],"decision":"OK","defect_label":null,
+            "score":0,"threshold":0.4,"products":[],"detections":[],"result_id":null,"overlay_url":null}""") as AiMsg.Inspect
+        assertEquals(null, old.productId); assertEquals(emptyMap<String, Int>(), old.faces); assertEquals(null, old.rxAt)
+    }
+
+    @Test fun `product_end 를 읽는다`() {
+        val m = AiMessages.parse("""{"state":"product_end","product_id":"c311-p0007","started_at":"2026-11-06T10:12:03.120+09:00",
+            "ended_at":"2026-11-06T10:12:09.870+09:00","end_reason":"gap","decision":"FAIL","ai_decision":"NG","defect_label":"칩찍힘",
+            "frames":61,"defect_frames":7,"faces":{"상면":30,"엣지":22,"하면비닐":9},"faces_seen":["상면","엣지","하면비닐"],
+            "complete":true,"best_result_id":"c311-000123","result_ids":["c311-000123","c311-000131"],"threshold":0.4,
+            "feedback_mode":"manual","feedback":"NOT_ENTERED"}""") as AiMsg.ProductEnd
+        val p = m.product
+        assertEquals("c311-p0007", p.productId); assertEquals("FAIL", p.decision); assertEquals(false, p.pass)
+        assertEquals("NG", p.aiDecision); assertEquals(61, p.frames); assertEquals(7, p.defectFrames)
+        assertEquals(true, p.complete); assertEquals("c311-000123", p.bestResultId)
+        assertEquals(listOf("c311-000123", "c311-000131"), p.resultIds)
+        assertEquals("manual", p.feedbackMode); assertEquals("NOT_ENTERED", p.feedback)
+    }
+
+    @Test fun `제품 목록·상세·프레임·저장소 응답`() {
+        val page = AiMessages.parseProducts("""{"items":[{"product_id":"a-p0002","station_id":"ST-02","started_at":"x","ended_at":null,
+            "decision":null,"ai_decision":null,"defect_label":null,"frames":0,"defect_frames":0,"complete":false,"best_result_id":null,
+            "feedback_mode":"auto","feedback":"NONE","feedback_at":null}],"next_before":"a-p0002"}""")
+        assertEquals("a-p0002", page.nextBefore); assertEquals(null, page.items.single().decision); assertEquals("NONE", page.items.single().feedback)
+        val d = AiMessages.parseProduct("""{"product_id":"a-p0001","decision":"PASS","feedback":"WRONG","feedback_log":[
+            {"before":"NOT_ENTERED","after":"UNSURE","source":"live","device":"SM-1","changed_at":"t1"},
+            {"before":"UNSURE","after":"WRONG","source":"history","device":null,"changed_at":"t2"}]}""")
+        assertEquals(true, d.pass)
+        assertEquals(listOf("UNSURE", "WRONG"), d.feedbackLog.map { it.after }); assertEquals(null, d.feedbackLog[1].device)
+        val f = AiMessages.parseFrames("""{"items":[{"seq":12,"ts":"t","decision":"NG","score":0.8,"defect_label":"칩찍힘",
+            "products":[],"detections":[{"label":"칩찍힘","conf":0.8,"box":[1,2,3,4]}],"frame_size":[1920,1440],"result_id":"r","has_image":true}],"total":61}""")
+        assertEquals(61, f.total); assertEquals(12L, f.items.single().seq); assertEquals(1440, f.items.single().frameH); assertTrue(f.items.single().hasImage)
+        val s = AiMessages.parseStorage("""{"measured_at":null,"disk_total_bytes":2000,"disk_used_bytes":500,"disk_free_bytes":1500,
+            "data_bytes":null,"per_day_bytes":[]}""")
+        assertEquals(1500L, s.diskFree); assertTrue(s.data.isEmpty())
+        val s2 = AiMessages.parseStorage("""{"measured_at":"t","disk_total_bytes":1,"disk_used_bytes":1,"disk_free_bytes":0,
+            "data_bytes":{"product_frames":312122,"logs":7},"per_day_bytes":[{"date":"2026-11-06","bytes":338031}]}""")
+        assertEquals(312122L, s2.data["product_frames"]); assertEquals(listOf("2026-11-06" to 338031L), s2.perDay)
+    }
 }

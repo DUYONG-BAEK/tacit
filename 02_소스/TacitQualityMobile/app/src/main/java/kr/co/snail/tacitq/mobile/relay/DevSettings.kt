@@ -1,12 +1,15 @@
 package kr.co.snail.tacitq.mobile.relay
 
 import android.content.Context
+import android.os.Build
+import android.provider.Settings
+import kr.co.snail.tacitq.mobile.ai.FeedbackMode
 
 /**
  * 개발용 연결 설정 — HMD 영상 주소 · 엣지 종류 · 엣지 주소. 기기에 저장한다.
  * 엣지 종류: [EDGE_MOCK] 모의 엣지(WebSocket) / [EDGE_AI] 실제 AI 서버(WebRTC, 설계서 §9).
  */
-class DevSettings(context: Context) {
+class DevSettings(private val context: Context) {
     private val prefs = context.getSharedPreferences("dev_connection", Context.MODE_PRIVATE)
 
     var hmdUrl: String
@@ -30,6 +33,15 @@ class DevSettings(context: Context) {
         get() = prefs.getBoolean(KEY_LIVE_MARKS, true)
         set(v) = prefs.edit().putBoolean(KEY_LIVE_MARKS, v).apply()
 
+    /** 피드백 모드 — [FeedbackMode.MANUAL] 제품마다 폰에서 맞음·틀림·확인필요 / [FeedbackMode.AUTO] 피드백 건너뜀 */
+    var feedbackMode: String
+        get() = prefs.getString(KEY_FEEDBACK_MODE, FeedbackMode.MANUAL)!!
+        set(v) = prefs.edit().putString(KEY_FEEDBACK_MODE, v).apply()
+
+    /** 피드백 변경 기록에 남길 기기 이름(인증 아님) — 모델명 + ANDROID_ID 앞 6자리 */
+    val deviceLabel: String
+        get() = Build.MODEL + "-" + (Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID) ?: "").take(6)
+
     var stationId: String
         get() = prefs.getString(KEY_STATION, DEFAULT_STATION)!!
         set(v) = prefs.edit().putString(KEY_STATION, v.trim()).apply()
@@ -41,6 +53,7 @@ class DevSettings(context: Context) {
         private const val KEY_AI = "ai_url"
         private const val KEY_STATION = "station_id"
         private const val KEY_LIVE_MARKS = "live_marks"
+        private const val KEY_FEEDBACK_MODE = "feedback_mode"
         const val EDGE_MOCK = "mock"
         const val EDGE_AI = "ai"
         const val DEFAULT_HMD = "http://172.20.10.3:8080"

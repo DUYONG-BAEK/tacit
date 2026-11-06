@@ -39,6 +39,31 @@ object HintWire {
         }.toString().encodeToByteArray()
 }
 
+/**
+ * 면 진행 쪽지 — `{"cmd":"FACES","s":["상면"],"all":["상면","엣지","하면비닐"],"c":false}` · 지우기 `{"cmd":"FACES","s":[],"all":[],"c":false}`.
+ * 조준 화면에 면 칩 줄([HudMirror.facesText])을 띄운다. 순번·ACK 없음(최신 것만 의미 있음), 바뀔 때만 보낸다.
+ */
+object FacesWire {
+    fun encode(f: kr.co.snail.tacitq.mobile.ai.FacesMark): ByteArray = kotlinx.serialization.json.buildJsonObject {
+        put("cmd", kotlinx.serialization.json.JsonPrimitive("FACES"))
+        put("s", kotlinx.serialization.json.JsonArray(f.seen.map { kotlinx.serialization.json.JsonPrimitive(it) }))
+        put("all", kotlinx.serialization.json.JsonArray(f.all.map { kotlinx.serialization.json.JsonPrimitive(it) }))
+        put("c", kotlinx.serialization.json.JsonPrimitive(f.complete))
+    }.toString().encodeToByteArray()
+}
+
+/**
+ * 제품 결과 쪽지 — `{"cmd":"RESULT","d":"FAIL","l":"칩찍힘"}`. HMD 조준 화면 가운데에 합격/불합격을
+ * [HudMirror.RESULT_SHOW_MS] 동안 크게 띄운다(LIVE·HINT 보다 앞). 순번·ACK 없음.
+ */
+object ResultWire {
+    fun encode(decision: String, label: String?): ByteArray = kotlinx.serialization.json.buildJsonObject {
+        put("cmd", kotlinx.serialization.json.JsonPrimitive("RESULT"))
+        put("d", kotlinx.serialization.json.JsonPrimitive(decision))
+        put("l", kotlinx.serialization.json.JsonPrimitive(label))
+    }.toString().encodeToByteArray()
+}
+
 /** 내부 결정 → 전선 쪽지. seq 는 렌더러가 부여한다. */
 fun ShowCommand.toWire(seq: Long) = ShowWire(
     screen = screen,

@@ -6,6 +6,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -17,7 +18,7 @@ import java.util.UUID
  * BLE GATT 주소 — 설계서에 없어 HMD 쪽에서 정의했다. 모바일 BleLink(C1)도 **같은 값**을 써야 한다.
  *
  * HMD = GATT 서버(광고), 모바일 = 클라이언트.
- *  - [DOWN] 모바일 → HMD 쪽지(SHOW·PING·HINT·LIVE). write / write-no-response(LIVE).
+ *  - [DOWN] 모바일 → HMD 쪽지(SHOW·PING·HINT·LIVE·FACES·RESULT). write / write-no-response(LIVE).
  *  - [UP]   HMD → 모바일 쪽지(ACK, 이후 HELLO·HEARTBEAT·GESTURE). notify.
  */
 object BleUuids {
@@ -63,6 +64,13 @@ sealed interface Downlink {
      * d: NG · REVIEW (null = 즉시 지움) · l: 결함 종류 · b: 결함 상자 [x1,y1,x2,y2] 영상 기준 0~1000 (null = 원 끔)
      */
     data class Live(val d: String?, val l: String? = null, val b: List<List<Int>>? = null) : Downlink
+    /**
+     * 면 진행 — 조준 화면에 면 칩 줄. s: 본 면, all: 면 전체(PD 라벨, 서버가 정함), c: 모든 면을 봄.
+     * all 이 비면 지운다. 순번·ACK 없음. 모바일 `hmd/ShowWire.kt` FacesWire 와 같아야 한다.
+     */
+    data class Faces(val s: List<String>, val all: List<String>, val c: Boolean) : Downlink
+    /** 제품 결과 — d: PASS · FAIL, l: 결함 종류. 조준 화면 가운데에 LiveHold.RESULT_MS 동안. 순번·ACK 없음. */
+    data class Result(val d: String, val l: String? = null) : Downlink
     data class Unknown(val reason: String) : Downlink
 }
 
@@ -81,6 +89,10 @@ object Wire {
                 l = obj.str("l"),
                 b = (obj["b"] as? JsonArray)?.map { box -> box.jsonArray.map { it.jsonPrimitive.int } },
             )
+            "FACES" -> Downlink.Faces(
+                s = obj.strings("s"), all = obj.strings("all"), c = obj["c"]?.jsonPrimitive?.booleanOrNull ?: false,
+            )
+            "RESULT" -> obj.str("d")?.let { Downlink.Result(it, obj.str("l")) } ?: Downlink.Unknown("RESULT d 없음")
             else -> Downlink.Unknown("cmd=$cmd")
         }
     } catch (e: Exception) {
@@ -88,6 +100,8 @@ object Wire {
     }
 
     private fun JsonObject.str(k: String): String? = (this[k] as? JsonPrimitive)?.takeIf { it.isString }?.content
+    private fun JsonObject.strings(k: String): List<String> =
+        (this[k] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.content } ?: emptyList()
 
     /** UP 특성 읽기 응답 — 모바일이 연결 직후 읽어 HMD 영상 주소를 자동으로 맞춘다(IP 수동 입력 제거). */
     /** [camera]: 카메라 상태 한 줄(정상 · 꺼짐 — 사유 · 시작 실패 — 사유) — 폰 통신 로그에 그대로 남는다 */

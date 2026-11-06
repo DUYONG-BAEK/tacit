@@ -162,4 +162,34 @@ class HudLogicTest {
 
     private fun show(screen: String, vararg f: Pair<String, String>) =
         kr.co.snail.tacitq.hmd.protocol.ShowWire(screen = screen, seq = 1, fields = mapOf(*f))
+
+    @Test fun `FACES RESULT 쪽지를 해석한다`() {
+        val f = Wire.parse("""{"cmd":"FACES","s":["상면"],"all":["상면","엣지","하면비닐"],"c":false}""".encodeToByteArray())
+        assertEquals(Downlink.Faces(listOf("상면"), listOf("상면", "엣지", "하면비닐"), false), f)
+        assertEquals(Downlink.Result("FAIL", "칩찍힘"), Wire.parse("""{"cmd":"RESULT","d":"FAIL","l":"칩찍힘"}""".encodeToByteArray()))
+        assertEquals(Downlink.Result("PASS", null), Wire.parse("""{"cmd":"RESULT","d":"PASS","l":null}""".encodeToByteArray()))
+        assertTrue(Wire.parse("""{"cmd":"RESULT"}""".encodeToByteArray()) is Downlink.Unknown)
+    }
+
+    @Test fun `제품 결과는 2초 동안 LIVE HINT 보다 먼저`() {
+        val hold = LiveHold()
+        val aim = Screens.from(kr.co.snail.tacitq.hmd.protocol.ShowWire(screen = "H-01", seq = 1))
+        hold.onLive(Downlink.Live("NG", "칩찍힘"), 1_000)
+        hold.onResult(Downlink.Result("FAIL", "칩찍힘"), 1_100)
+        assertEquals("✕ 불합격 · 칩찍힘" to Tone.BAD, hold.big(aim, "검사 중" to Tone.OK, 1_200))
+        assertEquals(300L, hold.remainingMs(1_200))                    // LIVE 유지(1.0초 → 1.5초)가 결과(3.1초)보다 먼저 끝난다
+        assertEquals("✕ 불합격 · 칩찍힘" to Tone.BAD, hold.big(aim, "검사 중" to Tone.OK, 3_099))
+        assertEquals("검사 중" to Tone.OK, hold.big(aim, "검사 중" to Tone.OK, 3_100))
+        hold.onResult(Downlink.Result("PASS"), 4_000)
+        assertEquals("✓ 합격" to Tone.OK, hold.big(aim, null, 4_000))
+        hold.clear()                                                   // BLE 끊김
+        assertEquals(null, hold.currentResult(4_001))
+        assertEquals("대기 화면은 결과를 그리지 않는다", "검사 대기", hold.also { it.onResult(Downlink.Result("PASS"), 5_000) }.big(Screens.idle(), null, 5_000).first)
+    }
+
+    @Test fun `면 칩 줄 - 모바일 HudMirror 와 같은 문구`() {
+        val all = listOf("상면", "엣지", "하면비닐")
+        assertEquals("■ 상면   □ 엣지   □ 하면비닐", LiveHold.facesText(Downlink.Faces(listOf("상면"), all, false)))
+        assertEquals("■ 상면   ■ 엣지   ■ 하면비닐   ✓ 검사 완료", LiveHold.facesText(Downlink.Faces(all, all, true)))
+    }
 }

@@ -43,4 +43,12 @@ class LiveWireTest {
         val s = bytes.decodeToString()
         assertTrue("가장 확실한 상자는 남는다", s.contains("[[0,0,3,5]"))
     }
+
+    @Test fun `FACES 와 RESULT 쪽지`() {
+        assertEquals("""{"cmd":"FACES","s":["상면"],"all":["상면","엣지","하면비닐"],"c":false}""",
+            FacesWire.encode(kr.co.snail.tacitq.mobile.ai.FacesMark(listOf("상면"), listOf("상면", "엣지", "하면비닐"), false)).decodeToString())
+        assertEquals("""{"cmd":"FACES","s":[],"all":[],"c":false}""", FacesWire.encode(kr.co.snail.tacitq.mobile.ai.FacesMark.CLEAR).decodeToString())
+        assertEquals("""{"cmd":"RESULT","d":"FAIL","l":"칩찍힘"}""", ResultWire.encode("FAIL", "칩찍힘").decodeToString())
+        assertEquals("""{"cmd":"RESULT","d":"PASS","l":null}""", ResultWire.encode("PASS", null).decodeToString())
+    }
 }

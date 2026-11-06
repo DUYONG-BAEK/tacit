@@ -1,14 +1,22 @@
 package kr.co.snail.tacitq.mobile.ui.screen
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kr.co.snail.tacitq.mobile.ai.AiMessages
+import kr.co.snail.tacitq.mobile.ai.AiResultsApi
+import kr.co.snail.tacitq.mobile.ai.AiStorage
 import kr.co.snail.tacitq.mobile.data.SampleData
+import kr.co.snail.tacitq.mobile.relay.DevSettings
 import kr.co.snail.tacitq.mobile.model.*
 import kr.co.snail.tacitq.mobile.ui.components.*
 import kr.co.snail.tacitq.mobile.ui.theme.T
@@ -38,6 +46,8 @@ fun AdminDashboardScreen(vm: AppViewModel) {
     val gestureUsed = inspections.count { it.inputMethod == InputMethod.GESTURE.code }
     val gestureFail = inspections.sumOf { it.gestureRetries }
     val gestureFailRate = if (gestureUsed == 0) 0.0 else gestureFail * 100.0 / gestureUsed
+
+    ServerStorage()
 
     Row(Modifier.fillMaxWidth()) {
         MetricTile("%.1f%%".format(failRate), "불량률", "▼0.3", T.Ink)
@@ -89,3 +99,49 @@ fun AdminDashboardScreen(vm: AppViewModel) {
         fontSize = 10.5.sp, color = T.Muted, modifier = Modifier.padding(top = 8.dp)
     )
 }
+
+/**
+ * AI 서버 디스크 사용량 — `GET /storage`. 서버는 프레임 사진을 자동으로 지우지 않으므로 여기서 남은 공간을 본다.
+ * 폴더별·날짜별 용량은 서버가 5분마다 계산한 값이다(measured_at). 남은 공간이 [WARN_FREE] 아래면 빨강.
+ */
+@Composable
+private fun ServerStorage() {
+    val ctx = LocalContext.current
+    val api = remember { AiResultsApi(DevSettings(ctx).aiUrl) }
+    var storage by remember { mutableStateOf<AiStorage?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var reload by remember { mutableIntStateOf(0) }
+    LaunchedEffect(reload) {
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val r = api.storage()
+                if (r.code != 200) throw IllegalStateException("조회 실패 ${r.code}")
+                AiMessages.parseStorage(r.body)
+            }
+        }.fold({ storage = it; error = null }, { error = it.message ?: "서버 연결 실패" })
+    }
+    Row {
+        SectionTitle("AI 서버 디스크")
+        Spacer(Modifier.weight(1f))
+        Text("새로 고침", fontSize = 12.sp, color = T.Purple, fontWeight = FontWeight.Bold,
+             modifier = Modifier.clickable { reload++ }.padding(top = 14.dp, end = 4.dp))
+    }
+    val s = storage
+    if (s == null) { Field("상태", error ?: "불러오는 중…", accent = if (error != null) T.Red else null); return }
+    val freeRate = if (s.diskTotal > 0) s.diskFree.toDouble() / s.diskTotal else 1.0
+    Row {
+        Field("남은 공간", "${gb(s.diskFree)} (%.0f%%)".format(freeRate * 100), accent = if (freeRate < WARN_FREE) T.Red else T.Green,
+              modifier = Modifier.weight(1f))
+        Field("사용 / 전체", "${gb(s.diskUsed)} / ${gb(s.diskTotal)}", modifier = Modifier.weight(1f))
+    }
+    if (s.data.isNotEmpty()) Field(
+        "종류별", s.data.entries.joinToString(" · ") { (k, v) -> "${DATA_LABEL[k] ?: k} ${gb(v)}" },
+    )
+    if (s.perDay.isNotEmpty()) Field("날짜별 (최근 7일)", s.perDay.take(7).joinToString("\n") { (d, b) -> "$d  ${gb(b)}" })
+    Text("계산 시각 ${s.measuredAt?.take(19)?.replace('T', ' ') ?: "아직 없음(서버 기동 직후)"}", fontSize = 10.5.sp, color = T.Muted)
+}
+
+private const val WARN_FREE = 0.10
+private val DATA_LABEL = mapOf("product_frames" to "제품 프레임 사진", "results" to "결함 오버레이", "frames" to "옛 결함 원본", "logs" to "로그")
+
+private fun gb(bytes: Long): String = if (bytes >= 1L shl 30) "%.1fGB".format(bytes / 1073741824.0) else "%.0fMB".format(bytes / 1048576.0)

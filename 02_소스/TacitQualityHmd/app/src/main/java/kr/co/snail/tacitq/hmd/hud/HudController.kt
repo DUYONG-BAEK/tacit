@@ -29,7 +29,8 @@ class HudController(
     private var screenSeq = 0L                    // 지금 화면을 그린 쪽지의 seq (ttl 소거 판단용 — OVERLAY 는 제외)
     private var lastAim: HudSpec? = null          // 마지막 조준 화면 — 판정 화면 ttl 이 끝나면 여기로 돌아간다
     private var hint: Pair<String, Tone>? = null  // AI 서버 진행 안내(HINT) — 조준 화면 가운데에 표시
-    private val liveHold = LiveHold()             // 실시간 결함(LIVE) — 마지막 결함 뒤 0.5초 유지
+    private val liveHold = LiveHold()             // 실시간 결함(LIVE) 0.5초 유지 · 제품 결과(RESULT) 2초
+    private var faces: Downlink.Faces? = null     // 면 진행(FACES) — 조준 화면 본문 줄에 면 칩
     private val liveExpire = Runnable { drawLive() }
 
     var lastInfo: String = "-"
@@ -48,6 +49,8 @@ class HudController(
             is Downlink.Ping -> gate.onPing(now)
             is Downlink.Hint -> onHint(msg, now)
             is Downlink.Live -> onLive(msg, now)
+            is Downlink.Faces -> { gate.onPing(now); faces = msg.takeIf { it.all.isNotEmpty() }; drawLive() }
+            is Downlink.Result -> { gate.onPing(now); liveHold.onResult(msg, now); drawLive() }
             is Downlink.Unknown -> Log.w(TAG, "모르는 쪽지: ${msg.reason} (${bytes.size}B)")
         }
     }
@@ -59,7 +62,8 @@ class HudController(
 
     fun onLinkDisconnected() {
         gate.onDisconnected(System.currentTimeMillis())
-        liveHold.clear()                                      // 폰이 끊기면 결함 표시는 바로 지운다(R1)
+        liveHold.clear()                                      // 폰이 끊기면 결함·결과 표시는 바로 지운다(R1)
+        faces = null
         drawLive()
     }
 
@@ -116,13 +120,20 @@ class HudController(
         drawLive()
     }
 
-    /** 큰 글자(LIVE > HINT > 기본값)와 결함 원. 유지 시간이 남았으면 끝날 때 다시 그리도록 타이머를 건다. */
+    /**
+     * 큰 글자(RESULT > LIVE > HINT > 기본값)·결함 원·면 칩 줄. 유지 시간이 남았으면 끝날 때 다시 그리도록 타이머를 건다.
+     * 면 칩 줄은 조준 화면의 본문 줄(lines)에 그린다 — 조준 화면은 본문 줄이 비어 있다.
+     */
     private fun drawLive() {
         main.removeCallbacks(liveExpire)
         val base = current ?: return
         val now = System.currentTimeMillis()
         val (big, tone) = liveHold.big(base, hint, now)
         b.big.set(big, tone)
+        if (base.screen == "H-01") {
+            val f = faces
+            b.lines.set(f?.let(LiveHold::facesText).orEmpty(), if (f?.c == true) Tone.OK else Tone.STOP)
+        }
         b.marks.show(if (base.screen == "H-01") liveHold.current(now) else null)
         liveHold.remainingMs(now)?.let { main.postDelayed(liveExpire, it) }
     }
@@ -155,8 +166,8 @@ class HudController(
         b.hud.setBackgroundColor(spec.bg)
         b.topLeft.set(spec.topLeft, spec.topLeftTone)
         b.topRight.set(spec.topRight, spec.topRightTone)
-        drawLive()                                            // 큰 글자는 LIVE > HINT > 기본값 — 한 곳(LiveHold.big)에서 정한다
-        b.lines.text = spec.lines.joinToString("\n")
+        b.lines.set(spec.lines.joinToString("\n"), Tone.STOP)
+        drawLive()                                            // 큰 글자(RESULT > LIVE > HINT > 기본값)·조준 화면 면 칩 줄 — 한 곳에서 정한다
         b.keys.text = spec.keys.joinToString("      ")
 
         b.options.removeAllViews()

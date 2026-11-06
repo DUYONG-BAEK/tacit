@@ -1,5 +1,6 @@
 package kr.co.snail.tacitq.mobile.hmd
 
+import kr.co.snail.tacitq.mobile.ai.FacesMark
 import kr.co.snail.tacitq.mobile.ai.LiveMark
 import kr.co.snail.tacitq.mobile.core.Profile
 import kr.co.snail.tacitq.mobile.core.Screens
@@ -32,5 +33,20 @@ class HudMirrorTest {
 
     @Test fun `OVERLAY 띠는 화면과 함께`() {
         assertEquals("⚠ 서버 지연 · 검사 계속", HudMirror.view(aim, null, null, "서버 지연 · 검사 계속").overlay)
+    }
+
+    @Test fun `제품 결과는 LIVE 보다 먼저`() {
+        val v = HudMirror.view(aim, "검사 중" to "OK", LiveMark("NG", "칩찍힘"), null, result = "FAIL" to "칩찍힘")
+        assertEquals("✕ 불합격 · 칩찍힘", v.big); assertEquals(HudMirror.Tone.BAD, v.bigTone)
+        assertEquals("✓ 합격" to HudMirror.Tone.OK, HudMirror.view(aim, null, null, null, result = "PASS" to null).let { it.big to it.bigTone })
+    }
+
+    @Test fun `면 칩 줄`() {
+        val all = listOf("상면", "엣지", "하면비닐")
+        val v = HudMirror.view(aim, null, null, null, faces = FacesMark(listOf("상면"), all, false))
+        assertEquals(listOf("■ 상면   □ 엣지   □ 하면비닐"), v.lines); assertEquals(HudMirror.Tone.STOP, v.linesTone)
+        val done = HudMirror.view(aim, null, null, null, faces = FacesMark(all, all, true))
+        assertEquals(listOf("■ 상면   ■ 엣지   ■ 하면비닐   ✓ 검사 완료"), done.lines); assertEquals(HudMirror.Tone.OK, done.linesTone)
+        assertEquals(emptyList<String>(), HudMirror.view(aim, null, null, null, faces = FacesMark.CLEAR).lines)
     }
 }

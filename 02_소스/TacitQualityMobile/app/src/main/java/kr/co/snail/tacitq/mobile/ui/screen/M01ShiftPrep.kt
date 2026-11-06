@@ -17,6 +17,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kr.co.snail.tacitq.mobile.ai.FeedbackMode
 import kr.co.snail.tacitq.mobile.model.*
 import kr.co.snail.tacitq.mobile.relay.DevSettings
 import kr.co.snail.tacitq.mobile.service.InspectionService
@@ -49,6 +50,7 @@ fun ShiftPrepScreen(vm: AppViewModel) {
     var edgeKind by remember { mutableStateOf(settings.edgeKind) }
     var aiUrl by remember { mutableStateOf(settings.aiUrl) }
     var liveMarks by remember { mutableStateOf(settings.liveMarks) }
+    var feedbackMode by remember { mutableStateOf(settings.feedbackMode) }
     var stationId by remember { mutableStateOf(settings.stationId) }
     val hmdBle by InspectionService.hmdBle.collectAsStateWithLifecycle()
     val blePermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { r ->
@@ -126,6 +128,20 @@ fun ShiftPrepScreen(vm: AppViewModel) {
                 modifier = Modifier
                     .padding(end = 18.dp)
                     .clickable(enabled = !relay) { liveMarks = v; settings.liveMarks = v },
+            )
+        }
+    }
+    // 피드백 모드 — 수동: 제품마다 폰 화면에서 맞음·틀림·확인필요 / 자동: 피드백 건너뜀. 검사 중에는 못 바꾼다(연결 때 서버에 알림)
+    Row(Modifier.padding(top = 8.dp)) {
+        Text("모드", fontSize = 13.sp, color = T.Ink, modifier = Modifier.padding(end = 14.dp))
+        listOf(FeedbackMode.MANUAL to "수동 (폰에서 피드백)", FeedbackMode.AUTO to "자동 (피드백 건너뜀)").forEach { (v, label) ->
+            val on = feedbackMode == v
+            Text(
+                (if (on) "● " else "○ ") + label,
+                fontSize = 13.sp, color = if (on) T.Purple else T.Muted,
+                modifier = Modifier
+                    .padding(end = 18.dp)
+                    .clickable(enabled = !relay) { feedbackMode = v; settings.feedbackMode = v },
             )
         }
     }
