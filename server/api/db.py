@@ -4,7 +4,10 @@ api.py가 기동 시(lifespan) init(), 종료 시 close()를 부른다. 함수�
 asyncio.to_thread로, 엔드포인트에서는 스레드풀(동기 def)에서 부른다.
 DATABASE_URL은 init()에서만 읽는다.
 
-results 한 행 = /ws에서 저장한 결함 프레임(NG·REVIEW) 하나. 파일(원본·오버레이)을 쓴 뒤 done으로 한 번에 넣는다.
+results 한 행 = /ws에서 저장한 결함 프레임(NG·REVIEW) 하나 (연결마다 1초에 1장, 실시간 확대 보기용). 오버레이를 쓴 뒤 done으로 넣는다.
+products 한 행 = 제품 하나 (PLAN_product_feedback.md §5). 시작 때 넣고(insert_product), 끝날 때 채운다(end_product).
+frames 한 행 = 제품이 보인 프레임 하나 (사진 파일 경로 포함). feedback_log 한 행 = 피드백 변경 하나.
+한 연결의 products·frames·results 쓰기는 api.py가 연결마다 한 줄로 차례대로 부른다 (외래 키 순서).
 제품 단위 판정 때의 행(pending/failed, 여러 장의 scores, alert_id)과 decisions·alerts 테이블은 옛 데이터 보존용으로
 남아 있고, 새 코드는 쓰지 않는다.
 """
@@ -15,11 +18,13 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
-# 테이블 정의는 제품 단위 판정 때와 같다 (스키마를 바꾸지 않는다). 프레임 단위에서 컬럼의 뜻:
+# stations·sessions·alerts·results·decisions는 옛 정의 그대로 두고(sessions에 feedback_mode만 추가),
+# products·frames·feedback_log를 더한다 (PLAN_product_feedback.md §5). results에서 컬럼의 뜻:
 #   attempt     -> 그 연결에서 프레임의 seq
 #   status      -> 항상 done (pending·failed는 옛 행에만 있다)
 #   scores      -> [score] (한 장)
-#   frames_dir  -> 원본 프레임 파일 경로 (<날짜>/<result_id>.jpg). 저장 실패면 NULL
+#   frames_dir  -> 그 프레임의 사진 경로 (product_frames/ 아래 <날짜>/<session_id>/<seq 6자리>.jpg, frames.file과 같다).
+#                  옛 행은 frames/ 아래 <날짜>/<result_id>.jpg. 저장 실패면 NULL
 #   alert_id, decisions, alerts -> 쓰지 않는다
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS stations (
@@ -63,6 +68,58 @@ CREATE TABLE IF NOT EXISTS results (
   captured_at  timestamptz NOT NULL DEFAULT now(),
   result_at    timestamptz
 );
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS feedback_mode text NOT NULL DEFAULT 'auto';  -- manual | auto
+CREATE TABLE IF NOT EXISTS products (
+  product_id     text PRIMARY KEY,
+  session_id     text NOT NULL REFERENCES sessions,
+  station_id     text REFERENCES stations,
+  feedback_mode  text NOT NULL,                 -- manual | auto (세션 값)
+  started_at     timestamptz NOT NULL,
+  ended_at       timestamptz,                   -- NULL: 끝나지 않음 (서버가 기록 중 멈춤)
+  end_reason     text,                          -- gap | disconnect
+  decision       text,                          -- PASS | FAIL
+  ai_decision    text,                          -- OK | NG | REVIEW
+  defect_label   text,
+  frames         int NOT NULL DEFAULT 0,
+  defect_frames  int NOT NULL DEFAULT 0,
+  faces          jsonb,                         -- {"상면": 30, …}
+  faces_seen     jsonb,
+  complete       boolean NOT NULL DEFAULT false,
+  best_result_id text REFERENCES results,
+  result_ids     jsonb,                         -- 저장된 결함 프레임, 점수 높은 순
+  threshold      double precision,
+  checkpoint     text,
+  feedback       text NOT NULL,                 -- CORRECT | WRONG | UNSURE | NOT_ENTERED | NONE
+  feedback_at    timestamptz
+);
+CREATE INDEX IF NOT EXISTS products_station_started ON products (station_id, started_at DESC, product_id DESC);
+CREATE INDEX IF NOT EXISTS products_started ON products (started_at DESC, product_id DESC);
+CREATE TABLE IF NOT EXISTS frames (
+  session_id   text NOT NULL REFERENCES sessions,
+  seq          int NOT NULL,
+  product_id   text NOT NULL REFERENCES products,
+  ts           timestamptz NOT NULL,
+  decision     text NOT NULL,                   -- OK | NG | REVIEW
+  score        double precision NOT NULL,
+  defect_label text,
+  products     jsonb NOT NULL,                  -- PD 상자
+  detections   jsonb NOT NULL,
+  frame_size   jsonb NOT NULL,
+  file         text,                            -- product_frames/ 아래 경로 (<날짜>/<session_id>/<seq 6자리>.jpg). 저장 실패면 NULL
+  result_id    text REFERENCES results,
+  PRIMARY KEY (session_id, seq)
+);
+CREATE INDEX IF NOT EXISTS frames_product ON frames (product_id, seq);
+CREATE TABLE IF NOT EXISTS feedback_log (
+  id          bigserial PRIMARY KEY,
+  product_id  text NOT NULL REFERENCES products,
+  before      text NOT NULL,
+  after       text NOT NULL,
+  source      text NOT NULL,                    -- live | history
+  device      text,
+  changed_at  timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS feedback_log_product ON feedback_log (product_id, id);
 CREATE TABLE IF NOT EXISTS decisions (
   result_id   text PRIMARY KEY REFERENCES results,
   final       text NOT NULL,              -- OK | NG (옛 데이터)
@@ -99,10 +156,11 @@ def station_exists(station_id: str) -> bool:
         return conn.execute("SELECT 1 FROM stations WHERE station_id = %s", (station_id,)).fetchone() is not None
 
 
-def open_session(session_id: str, station_id: str | None, source: str, client: str | None) -> None:
+def open_session(session_id: str, station_id: str | None, source: str, client: str | None,
+                 feedback_mode: str) -> None:
     with pool.connection() as conn:
-        conn.execute("INSERT INTO sessions (session_id, station_id, source, client) VALUES (%s, %s, %s, %s)",
-                     (session_id, station_id, source, client))
+        conn.execute("INSERT INTO sessions (session_id, station_id, source, client, feedback_mode)"
+                     " VALUES (%s, %s, %s, %s, %s)", (session_id, station_id, source, client, feedback_mode))
 
 
 def close_session(session_id: str) -> None:
@@ -158,3 +216,125 @@ def overlay_path(result_id: str) -> str | None:
 
 def _iso(value) -> str | None:
     return value.isoformat(timespec="milliseconds") if value else None
+
+
+# ── 제품 (PLAN_product_feedback.md §4·§5) ──
+
+FEEDBACK_VALUES = ("CORRECT", "WRONG", "UNSURE")  # 사람이 넣는 값. NOT_ENTERED·NONE은 서버만 정한다
+_PRODUCT_LIST_COLUMNS = ("product_id, station_id, started_at, ended_at, decision, ai_decision, defect_label, frames,"
+                         " defect_frames, complete, best_result_id, feedback_mode, feedback, feedback_at")
+
+
+def insert_product(product_id: str, session_id: str, station_id: str | None, feedback_mode: str, started_at: str,
+                   feedback: str, checkpoint: str) -> None:
+    with pool.connection() as conn:
+        conn.execute("INSERT INTO products (product_id, session_id, station_id, feedback_mode, started_at, feedback,"
+                     " checkpoint) VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                     (product_id, session_id, station_id, feedback_mode, started_at, feedback, checkpoint))
+
+
+def insert_frame(session_id: str, message: dict, ts: str, file: str | None) -> None:
+    """제품 프레임 하나. message는 그 프레임의 inspect 메시지 (product_id 포함)."""
+    with pool.connection() as conn:
+        conn.execute(
+            "INSERT INTO frames (session_id, seq, product_id, ts, decision, score, defect_label, products, detections,"
+            " frame_size, file, result_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+            (session_id, message["seq"], message["product_id"], ts, message["decision"], message["score"],
+             message["defect_label"], Jsonb(message["products"]), Jsonb(message["detections"]),
+             Jsonb(message["frame_size"]), file, message["result_id"]))
+
+
+def end_product(end: dict) -> None:
+    """product_end 메시지로 제품 행을 채운다. 피드백은 건드리지 않는다 (그 사이에 들어왔을 수 있다)."""
+    with pool.connection() as conn:
+        conn.execute(
+            "UPDATE products SET ended_at = %s, end_reason = %s, decision = %s, ai_decision = %s, defect_label = %s,"
+            " frames = %s, defect_frames = %s, faces = %s, faces_seen = %s, complete = %s, best_result_id = %s,"
+            " result_ids = %s, threshold = %s WHERE product_id = %s",
+            (end["ended_at"], end["end_reason"], end["decision"], end["ai_decision"], end["defect_label"],
+             end["frames"], end["defect_frames"], Jsonb(end["faces"]), Jsonb(end["faces_seen"]), end["complete"],
+             end["best_result_id"], Jsonb(end["result_ids"]), end["threshold"], end["product_id"]))
+
+
+def set_feedback(product_id: str, value: str, source: str, device: str | None) -> dict | None:
+    """피드백을 바꾸고 변경 기록을 남긴다. 같은 값이면 기록하지 않는다. 없는 제품이면 None."""
+    with pool.connection() as conn, conn.transaction():
+        row = conn.execute("SELECT feedback FROM products WHERE product_id = %s FOR UPDATE", (product_id,)).fetchone()
+        if row is None:
+            return None
+        if row["feedback"] != value:
+            conn.execute("UPDATE products SET feedback = %s, feedback_at = now() WHERE product_id = %s",
+                         (value, product_id))
+            conn.execute("INSERT INTO feedback_log (product_id, before, after, source, device) VALUES (%s, %s, %s, %s, %s)",
+                         (product_id, row["feedback"], value, source, device))
+    return get_product(product_id)
+
+
+def list_products(station: str | None, start, end, feedback: list[str] | None, decision: str | None,
+                  limit: int, before: str | None) -> dict:
+    """이력 목록, 최신 순. start·end는 started_at 범위(aware datetime, end는 미포함). before는 이전 페이지의 마지막 product_id."""
+    where, args = [], []
+    if station is not None:
+        where.append("station_id = %s"); args.append(station)
+    if start is not None:
+        where.append("started_at >= %s"); args.append(start)
+    if end is not None:
+        where.append("started_at < %s"); args.append(end)
+    if feedback:
+        where.append("feedback = ANY(%s)"); args.append(feedback)
+    if decision is not None:
+        where.append("decision = %s"); args.append(decision)
+    if before is not None:
+        where.append("(started_at, product_id) < (SELECT started_at, product_id FROM products WHERE product_id = %s)")
+        args.append(before)
+    sql = (f"SELECT {_PRODUCT_LIST_COLUMNS} FROM products" + (" WHERE " + " AND ".join(where) if where else "")
+           + " ORDER BY started_at DESC, product_id DESC LIMIT %s")
+    with pool.connection() as conn:
+        rows = conn.execute(sql, (*args, limit + 1)).fetchall()
+    items = [_product_item(r) for r in rows[:limit]]
+    return {"items": items, "next_before": items[-1]["product_id"] if len(rows) > limit else None}
+
+
+def get_product(product_id: str) -> dict | None:
+    with pool.connection() as conn:
+        row = conn.execute("SELECT * FROM products WHERE product_id = %s", (product_id,)).fetchone()
+        if row is None:
+            return None
+        log = conn.execute("SELECT before, after, source, device, changed_at FROM feedback_log WHERE product_id = %s"
+                           " ORDER BY id", (product_id,)).fetchall()
+    item = _product_item(row)
+    item |= {"faces": row["faces"], "faces_seen": row["faces_seen"], "result_ids": row["result_ids"] or [],
+             "threshold": row["threshold"], "checkpoint": row["checkpoint"], "end_reason": row["end_reason"],
+             "feedback_log": [{**r, "changed_at": _iso(r["changed_at"])} for r in log]}
+    return item
+
+
+def list_frames(product_id: str, offset: int, limit: int) -> dict | None:
+    """제품의 프레임 목록 (seq 순). 없는 제품이면 None."""
+    with pool.connection() as conn:
+        if conn.execute("SELECT 1 FROM products WHERE product_id = %s", (product_id,)).fetchone() is None:
+            return None
+        total = conn.execute("SELECT count(*) AS n FROM frames WHERE product_id = %s", (product_id,)).fetchone()["n"]
+        rows = conn.execute(
+            "SELECT seq, ts, decision, score, defect_label, products, detections, frame_size, result_id, file"
+            " FROM frames WHERE product_id = %s ORDER BY seq OFFSET %s LIMIT %s", (product_id, offset, limit)).fetchall()
+    items = [{"seq": r["seq"], "ts": _iso(r["ts"]), "decision": r["decision"], "score": r["score"],
+              "defect_label": r["defect_label"], "products": r["products"], "detections": r["detections"],
+              "frame_size": r["frame_size"], "result_id": r["result_id"], "has_image": r["file"] is not None}
+             for r in rows]
+    return {"items": items, "total": total}
+
+
+def get_frame(product_id: str, seq: int) -> dict | None:
+    """프레임 한 장의 파일 경로와 결함 (이미지 조회용). 없으면 None."""
+    with pool.connection() as conn:
+        return conn.execute("SELECT file, detections FROM frames WHERE product_id = %s AND seq = %s",
+                            (product_id, seq)).fetchone()
+
+
+def _product_item(row: dict) -> dict:
+    return {"product_id": row["product_id"], "station_id": row["station_id"], "started_at": _iso(row["started_at"]),
+            "ended_at": _iso(row["ended_at"]), "decision": row["decision"], "ai_decision": row["ai_decision"],
+            "defect_label": row["defect_label"], "frames": row["frames"], "defect_frames": row["defect_frames"],
+            "complete": row["complete"], "best_result_id": row["best_result_id"], "feedback_mode": row["feedback_mode"],
+            "feedback": row["feedback"], "feedback_at": _iso(row["feedback_at"])}

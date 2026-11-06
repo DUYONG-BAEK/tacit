@@ -1,6 +1,6 @@
 """폰 대신 /ws에 프레임을 보내는 테스트 클라이언트.
 
-사용: python stream_client.py 입력... [--url ws://localhost:8000/ws] [--fps 10] [--hold 10] [--gap 30] [--out 폴더]
+사용: python stream_client.py 입력... [--url "ws://localhost:8000/ws?mode=manual"] [--fps 10] [--hold 10] [--gap 30] [--out 폴더]
     동영상(.mp4/.mov 등): --fps 간격으로 프레임을 골라 JPEG로 보낸다 (폰 영상을 그대로 써도 된다).
     사진: 같은 사진을 --hold장 연속으로 보낸다 (제품을 비추고 있는 상태).
     입력 사이에 검은 프레임을 --gap장 보낸다 (제품을 치운 상태 — 서버가 searching을 보낸다).
@@ -79,6 +79,7 @@ class Report:
         self.ok_run, self.ok_from = 0, 0.0
         self.decisions: Counter = Counter()
         self.saved = 0
+        self.products: Counter = Counter()  # product_end의 decision별 수
 
     def elapsed(self) -> float:
         return time.perf_counter() - self.start
@@ -91,6 +92,8 @@ class Report:
     def message(self, message: dict) -> None:
         now = self.elapsed()
         if message["state"] != "inspect":
+            if message["state"] == "product_end":
+                self.products[message["decision"]] += 1
             self.flush()
             print(f"{now:6.2f}s  {message}")
             return
@@ -112,7 +115,8 @@ class Report:
         self.flush()
         d = self.decisions
         print(f"요약: inspect {sum(d.values())} (OK {d['OK']} / REVIEW {d['REVIEW']} / NG {d['NG']}), "
-              f"저장 {self.saved}")
+              f"저장 {self.saved}, 제품 {sum(self.products.values())} (PASS {self.products['PASS']} / "
+              f"FAIL {self.products['FAIL']})")
 
 
 async def main() -> None:

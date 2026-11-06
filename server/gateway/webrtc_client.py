@@ -8,7 +8,7 @@
     영상이 끝나면 마지막 프레임의 판정을 받으려고 --linger초 더 연결을 유지한다.
     /offer가 실패하면 상태 코드와 본문을 출력하고 끝난다 (403 미등록 스테이션, 503 판정 서버 장애).
     연결 상태 변화를 출력하고, 게이트웨이가 연결을 닫으면(장애) 영상 끝을 기다리지 않고 끝난다.
-    끝에 요약: 받은 inspect 수, decision별 개수, 저장(result_id) 수.
+    끝에 요약: 받은 inspect 수, decision별 개수, 저장(result_id) 수, product_end의 판정별 수.
 """
 
 import argparse
@@ -55,6 +55,7 @@ class Report:
         self.ok_run, self.ok_from = 0, 0.0
         self.decisions: Counter = Counter()
         self.saved = 0
+        self.products: Counter = Counter()  # product_end의 decision별 수
 
     def elapsed(self) -> float:
         return time.perf_counter() - self.start
@@ -72,6 +73,8 @@ class Report:
     def message(self, message: dict) -> None:
         now = self.elapsed()
         if message["state"] != "inspect":
+            if message["state"] == "product_end":
+                self.products[message["decision"]] += 1
             self.line(str(message))
             return
         self.decisions[message["decision"]] += 1
@@ -92,7 +95,8 @@ class Report:
         self.flush()
         d = self.decisions
         print(f"요약: inspect {sum(d.values())} (OK {d['OK']} / REVIEW {d['REVIEW']} / NG {d['NG']}), "
-              f"저장 {self.saved}")
+              f"저장 {self.saved}, 제품 {sum(self.products.values())} (PASS {self.products['PASS']} / "
+              f"FAIL {self.products['FAIL']})")
 
 
 async def main() -> None:
@@ -100,6 +104,7 @@ async def main() -> None:
     parser.add_argument("video", type=Path)
     parser.add_argument("--station", required=True, help="스테이션 ID (DB stations에 등록된 값)")
     parser.add_argument("--gateway", default="http://localhost:8080")
+    parser.add_argument("--mode", choices=["manual", "auto"], default="auto", help="피드백 모드 (/offer feedback_mode)")
     parser.add_argument("--out", type=Path, help="저장된 결함 프레임의 오버레이를 받을 폴더")
     parser.add_argument("--linger", type=float, default=2, help="영상 종료 후 마지막 판정을 기다리는 시간(초)")
     args = parser.parse_args()
@@ -141,7 +146,8 @@ async def main() -> None:
     try:
         answer = await asyncio.to_thread(
             post_json, args.gateway + "/offer",
-            {"sdp": pc.localDescription.sdp, "type": pc.localDescription.type, "station_id": args.station})
+            {"sdp": pc.localDescription.sdp, "type": pc.localDescription.type, "station_id": args.station,
+             "feedback_mode": args.mode})
     except urllib.error.HTTPError as e:  # 403 미등록 스테이션, 503 판정 서버 장애, 422 station_id 오류
         print(f"/offer 실패: {e.code} {e.read().decode()}")
         await close()

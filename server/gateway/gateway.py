@@ -1,17 +1,22 @@
-"""WebRTC 수신 게이트웨이 — 앱이 보낸 WebRTC 영상을 받아 프레임을 JPEG로 A4 API의 /ws에 넘기고,
+"""WebRTC 수신 게이트웨이 — 앱이 보낸 WebRTC 영상을 받아 디코딩한 원본 프레임(I420)을 A4 API의 /ws에 넘기고,
 /ws가 보낸 메시지를 앱의 데이터 채널로 돌려준다. 분석은 하지 않는다 (A4 API가 전부 한다).
 
-    앱 ── WebRTC 영상 ──────▶ gateway ── WebSocket(JPEG 프레임) ──▶ A4 API /ws
-    앱 ◀── 데이터 채널(JSON) ── gateway ◀── JSON(searching/inspect) ── A4 API /ws
-    앱 ── /results/<id>[/overlay] ──▶ gateway ──▶ A4 API   (그대로 넘긴다)
+    앱 ── WebRTC 영상 ──────▶ gateway ── WebSocket(I420 원본 프레임) ──▶ A4 API /ws
+    앱 ◀── 데이터 채널(JSON) ── gateway ◀── JSON(searching/inspect/product_end) ── A4 API /ws
+    앱 ── /results/*, /products*, /storage ──▶ gateway ──▶ A4 API   (그대로 넘긴다)
+
+프레임은 다시 압축하지 않는다 (PLAN_product_feedback.md §7.1): b"I420" + width·height(uint16 LE) + rx_at(int64 LE,
+게이트웨이가 받은 시각 epoch ms) + Y·U·V 평면. 앱이 초당 10장 이하로 보내고 A4 API가 가장 최근 프레임만 처리하므로
+게이트웨이는 프레임을 거르지 않는다.
 
 연결 절차 (앱):
     1. RTCPeerConnection에 카메라 영상 트랙을 붙이고, 데이터 채널을 하나 연다 (이름 무관).
-    2. offer를 만들어 POST /offer {"sdp", "type", "station_id"} -> answer {"sdp", "type"}를 받아 적용한다.
+    2. offer를 만들어 POST /offer {"sdp", "type", "station_id", "feedback_mode"} -> answer {"sdp", "type"}를 받아 적용한다.
+       feedback_mode는 manual / auto (없으면 auto) — /ws에 ?mode=로 넘긴다.
        게이트웨이는 answer를 만들기 전에 /ws에 먼저 연결해 확인한다.
        422: station_id가 없거나 빈 값, 403: 등록되지 않은 스테이션 (/ws close 4403),
        503: 판정 서버(A4 API 또는 DB)에 연결할 수 없음.
-    3. 데이터 채널로 /ws와 같은 JSON이 그대로 온다 (searching / inspect, A4_WEBRTC_API.md §3).
+    3. 데이터 채널로 /ws와 같은 JSON이 그대로 온다 (searching / inspect / product_end, A4_WEBRTC_API.md §3).
        메시지에 이미지는 없다 — 저장된 결함 프레임의 이미지는 inspect의 overlay_url로 받는다.
     4. /ws가 끊기거나 중계 중 예외가 나면 게이트웨이가 WebRTC 연결을 닫는다. 앱은 새 POST /offer로 재연결한다.
        끊기기 전에 받은 result_id의 이미지는 재연결 뒤에도 GET /results/<result_id>/overlay로 받는다.
@@ -20,7 +25,7 @@
 
 로그: 연결마다 ID(peer)를 만들어 모든 출력에 붙이고, /ws에 ?client=<ID>로 넘겨 A4 API 로그와 맞춘다.
 출력(print)과 같은 내용을 logs/<날짜>.jsonl에도 남긴다. 날짜가 바뀌면 새 파일에 쓰고, 지우지 않는다.
-decision이 OK인 inspect는 초당 최대 FORWARD_FPS개라 한 줄씩 남기지 않고, 연결이 끝날 때 개수만
+decision이 OK인 inspect는 초당 최대 10개라 한 줄씩 남기지 않고, 연결이 끝날 때 개수만
 relay_summary 한 줄로 남긴다.
 """
 
@@ -33,7 +38,9 @@ import uuid
 from pathlib import Path
 from urllib.parse import quote
 
-import cv2
+import struct
+from typing import Literal
+
 import httpx
 import websockets
 from aiortc import RTCPeerConnection, RTCSessionDescription
@@ -42,11 +49,8 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 A4_WS_URL = os.environ.get("A4_WS_URL", "ws://localhost:8000/ws")
-A4_HTTP_URL = os.environ.get("A4_HTTP_URL", "http://localhost:8000")  # /results/* 프록시 대상
-# /ws는 처리 중 온 프레임 중 최신 것만 쓰므로 그 이상 보내면 대역폭만 쓴다. 앱이 받는 inspect도
-# 초당 이 수를 넘지 않는다 (A4_WEBRTC_API.md §3).
-FORWARD_FPS = 10
-JPEG_QUALITY = 95   # 재인코딩 손실을 줄이려고 높게
+A4_HTTP_URL = os.environ.get("A4_HTTP_URL", "http://localhost:8000")  # /results/*·/products*·/storage 프록시 대상
+I420_HEADER = struct.Struct("<4sHHq")  # magic, width, height, rx_at — A4 API detect.I420_HEADER와 같아야 한다
 LOG_DIR = Path("logs")  # 날짜와 시각은 컨테이너 시간대(Dockerfile의 TZ=Asia/Seoul)를 따른다
 
 app = FastAPI(title="A4 WebRTC gateway")
@@ -72,6 +76,7 @@ class Offer(BaseModel):
     sdp: str
     type: str
     station_id: str = Field(min_length=1)  # 없거나 빈 값이면 FastAPI가 422
+    feedback_mode: Literal["manual", "auto"] = "auto"  # 다른 값이면 422. 옛 앱(필드 없음)은 auto
 
 
 @app.post("/offer")
@@ -79,14 +84,15 @@ async def offer(body: Offer, request: Request) -> dict:
     peer = uuid.uuid4().hex[:6]  # 이 연결의 로그 ID. A4 API의 /ws 로그에는 client로 남는다
     client = request.client.host if request.client else None
     station = body.station_id
-    log_event(f"[peer {peer}] offer from {client} (station {station})", "offer", peer=peer, client=client,
-              station=station)
+    mode = body.feedback_mode
+    log_event(f"[peer {peer}] offer from {client} (station {station}, mode {mode})", "offer", peer=peer, client=client,
+              station=station, mode=mode)
 
     # /ws를 먼저 연결하고 첫 메시지로 확인한다. 실패하면 answer를 만들지 않아 앱이 장애를 바로 안다.
     # ?client=: A4 API가 게이트웨이 경유로 기록하고, 두 로그를 이 ID로 맞춰 본다 (DEPLOY.md §4.1)
     ws = None
     try:
-        ws = await websockets.connect(f"{A4_WS_URL}?client={peer}&station={quote(station)}", max_size=None)
+        ws = await websockets.connect(f"{A4_WS_URL}?client={peer}&station={quote(station)}&mode={mode}", max_size=None)
         await asyncio.wait_for(ws.recv(), timeout=5)  # {"state": "searching"} — 연결 확인용, 앱에는 보내지 않는다
     except websockets.ConnectionClosed as e:
         code = e.rcvd.code if e.rcvd else None  # A4 API의 거부: 4403 미등록, 4503 DB 장애. 프레임 없이 끊기면 None
@@ -138,15 +144,13 @@ async def forward(track, ws, pc: RTCPeerConnection, channel: asyncio.Future, pee
     A4 API가 /ws를 닫으면 다음 ws.send()가 ConnectionClosed를 낸다 (websockets의 끊김 감지 방법)."""
     summary = {"inspect": 0, "OK": 0, "REVIEW": 0, "NG": 0, "undelivered": 0}  # relay_messages가 센다
     relay = asyncio.create_task(relay_messages(ws, channel, peer, summary))
-    last = 0.0
     try:
         while True:
-            frame = await track.recv()  # 모든 프레임을 받아야 수신 큐가 쌓이지 않는다
-            now = time.monotonic()
-            if now - last < 1 / FORWARD_FPS:
-                continue
-            last = now
-            await ws.send(await asyncio.to_thread(to_jpeg, frame))
+            frame = await track.recv()
+            rx_at = round(time.time() * 1000)
+            # 거르지 않는다 — 앱이 초당 10장 이하로 보내고, A4 API가 가장 최근 프레임만 처리한다.
+            # (옛 1/FORWARD_FPS 간격 제한은 도착 간격이 조금만 흔들려도 다음 장을 버린다 — 2026-11-05 실측 초당 약 7장의 원인으로 본다)
+            await ws.send(await asyncio.to_thread(to_i420, frame, rx_at))
     except MediaStreamError:
         log_event(f"[peer {peer}] track ended", "track_ended", peer=peer)  # 앱이 영상을 끊음
     except Exception as e:  # A4 API 쪽 끊김 포함
@@ -167,9 +171,12 @@ async def forward(track, ws, pc: RTCPeerConnection, channel: asyncio.Future, pee
         await pc.close()
 
 
-def to_jpeg(frame) -> bytes:
-    image = frame.to_ndarray(format="bgr24")
-    return cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])[1].tobytes()
+def to_i420(frame, rx_at: int) -> bytes:
+    """디코딩한 프레임 -> b"I420" 머리말 + Y·U·V 평면 (다시 압축하지 않는다). 홀수 크기는 짝수로 줄인다."""
+    if frame.format.name != "yuv420p" or frame.width % 2 or frame.height % 2:
+        frame = frame.reformat(width=frame.width & ~1, height=frame.height & ~1, format="yuv420p")
+    planes = frame.to_ndarray(format="yuv420p")  # (h * 3 / 2, w) — Y 다음 U, V
+    return I420_HEADER.pack(b"I420", frame.width, frame.height, rx_at) + planes.tobytes()
 
 
 async def relay_messages(ws, channel: asyncio.Future, peer: str, summary: dict) -> None:
@@ -194,8 +201,10 @@ async def relay_messages(ws, channel: asyncio.Future, peer: str, summary: dict) 
 
 
 async def proxy(request: Request, path: str) -> Response:
-    """/results/* 요청을 A4 API로 그대로 넘긴다. 결과 이미지는 A4 API의 results/에 있다."""
+    """/results/*·/products*·/storage 요청을 A4 API로 그대로 넘긴다 (쿼리 문자열 포함). 이미지는 A4 API 쪽에 있다."""
     content_type = request.headers.get("content-type")
+    if request.url.query:
+        path = f"{path}?{request.url.query}"
     try:
         upstream = await http.request(request.method, path, content=await request.body(),
                                       headers={"Content-Type": content_type} if content_type else {})
@@ -213,3 +222,33 @@ async def result(request: Request, result_id: str) -> Response:
 @app.get("/results/{result_id}/overlay")
 async def result_overlay(request: Request, result_id: str) -> Response:
     return await proxy(request, f"/results/{result_id}/overlay")
+
+
+@app.get("/products")
+async def products(request: Request) -> Response:
+    return await proxy(request, "/products")
+
+
+@app.get("/products/{product_id}")
+async def product(request: Request, product_id: str) -> Response:
+    return await proxy(request, f"/products/{quote(product_id)}")
+
+
+@app.put("/products/{product_id}/feedback")
+async def product_feedback(request: Request, product_id: str) -> Response:
+    return await proxy(request, f"/products/{quote(product_id)}/feedback")
+
+
+@app.get("/products/{product_id}/frames")
+async def product_frames(request: Request, product_id: str) -> Response:
+    return await proxy(request, f"/products/{quote(product_id)}/frames")
+
+
+@app.get("/products/{product_id}/frames/{seq}.jpg")
+async def product_frame_image(request: Request, product_id: str, seq: str) -> Response:
+    return await proxy(request, f"/products/{quote(product_id)}/frames/{quote(seq)}.jpg")
+
+
+@app.get("/storage")
+async def storage(request: Request) -> Response:
+    return await proxy(request, "/storage")
