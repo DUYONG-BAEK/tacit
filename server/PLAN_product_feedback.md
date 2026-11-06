@@ -25,7 +25,7 @@
 | D6 | 피드백 값 | 버튼 3개: **맞음**(`CORRECT`), **틀림**(`WRONG`), **확인필요**(`UNSURE`). 서버가 정하는 값 2개: **미입력**(`NOT_ENTERED` — 수동 모드 제품의 초기값), **피드백 없음**(`NONE` — 자동 모드 제품의 초기값). 버튼을 누르기 전에 다음 제품이 끝나면 앱은 새 결과로 넘어가고, 이전 제품은 미입력으로 남는다 |
 | D7 | 피드백 수정 | 이력(M-05)에서 **누구나** 어느 제품의 피드백이든 맞음·틀림·확인필요로 바꿀 수 있다. 인증은 없다. 바꿀 때마다 변경 기록을 남긴다 |
 | D8 | 학습 라벨 | 최신 피드백으로 정한다. 맞음 → 제품 판정 그대로, 틀림 → 반대, 확인필요·미입력·피드백 없음 → 학습에서 제외. 기록과 이미지는 지우지 않는다 |
-| D9 | 프레임 저장 | 결함 프레임만 1초에 1장 저장하던 방식에서 **받은 영상 전부**를 저장하는 방식으로 바꾼다. 작업자·작업장이 찍히는 것은 문제없음으로 확인됐다. 저장 형식은 §6 |
+| D9 | 프레임 저장 | 결함 프레임만 1초에 1장 저장하던 방식에서 **제품이 보인 프레임 전부를 사진(JPEG)으로** 저장하는 방식으로 바꾼다. 영상 파일로는 저장하지 않는다. 작업자·작업장이 찍히는 것은 문제없음으로 확인됐다. 세부는 §6 |
 | D10 | 자동 삭제 없음 | 프레임·오버레이·로그를 자동으로 지우지 않는다. 디스크 사용량은 모바일 앱에서 본다 (`GET /storage`, §4.7) |
 | D11 | 영상 경로는 WebRTC 유지, 손실 압축 3번 → 2번 | 게이트웨이의 JPEG 재압축을 없애고 디코딩한 원본 픽셀을 API로 넘긴다. 남는 압축은 HMD JPEG와 폰 VP8이고, 둘 다 압축 정도를 낮춘다 (§7) |
 | D12 | 게이트웨이 프레임 간격 버그 수정 | 실측 초당 7.2장의 원인으로 보이는 간격 제한을 없앤다 (§7.2) |
@@ -37,7 +37,7 @@
 
 ```
 HMD ─MJPEG(JPEG q95)─▶ 폰 ─WebRTC VP8─▶ 게이트웨이 ─원본 I420─▶ 판정 API ─▶ DB·저장소
-                                            │ (VP8 그대로 저장, §6)
+                                                                     │ (제품 프레임 사진 저장, §6)
 폰 ◀── 데이터 채널: searching · inspect(프레임마다) · product_end(제품마다) ──┘
 폰 ─BLE─▶ HMD: LIVE(결함 원) · FACES(면 칩) · RESULT(제품 결과)
 폰 ─HTTP─▶ PUT /products/{id}/feedback · GET /products · GET /storage
@@ -168,8 +168,8 @@ GET /products/{product_id}/frames?offset=0&limit=100
 
 ### 4.6 `GET /products/{product_id}/frames/{seq}.jpg` — 프레임 한 장
 
-- 저장소(§6)에서 그 프레임을 꺼내 JPEG로 준다. `?overlay=1`이면 결함 상자를 그려서 준다 (`detect.draw`와 같은 그리기).
-- 저장소에서 꺼내는 시간이 있으므로 이력 화면은 목록을 먼저 띄우고 이미지를 차례로 받는다.
+- 저장된 사진 파일(§6)을 그대로 준다. `?overlay=1`이면 결함 상자를 그려서 준다 (`detect.draw`와 같은 그리기).
+- 이력 화면은 목록을 먼저 띄우고 이미지를 차례로 받는다.
 
 ### 4.7 `GET /storage` — 디스크 사용량
 
@@ -179,7 +179,7 @@ GET /products/{product_id}/frames?offset=0&limit=100
   "disk_total_bytes": 2000000000000,
   "disk_used_bytes": 812000000000,
   "disk_free_bytes": 1188000000000,
-  "data_bytes": { "video": 640000000000, "results": 21000000000, "frames": 3000000000, "logs": 900000000 },
+  "data_bytes": { "product_frames": 640000000000, "results": 21000000000, "frames": 3000000000, "logs": 900000000 },
   "per_day_bytes": [ { "date": "2026-11-05", "bytes": 61000000000 } ]
 }
 ```
@@ -203,7 +203,6 @@ GET /products/{product_id}/frames?offset=0&limit=100
 
 ```sql
 ALTER TABLE sessions ADD COLUMN IF NOT EXISTS feedback_mode text NOT NULL DEFAULT 'auto';  -- manual | auto
-ALTER TABLE sessions ADD COLUMN IF NOT EXISTS video_path text;   -- §6 세션 영상 파일
 
 CREATE TABLE IF NOT EXISTS products (
   product_id     text PRIMARY KEY,
@@ -234,7 +233,7 @@ CREATE TABLE IF NOT EXISTS frames (            -- 처리한 프레임 한 장 = 
   seq          int NOT NULL,
   product_id   text NOT NULL REFERENCES products,
   ts           timestamptz NOT NULL,
-  video_pts    bigint,                          -- §6 저장 영상 안의 위치
+  file         text,                            -- §6 사진 파일 경로 (<날짜>/<session_id>/<seq 6자리>.jpg). 저장 실패면 NULL
   decision     text NOT NULL,                   -- OK | NG | REVIEW
   score        double precision NOT NULL,
   defect_label text,
@@ -263,26 +262,16 @@ CREATE TABLE IF NOT EXISTS feedback_log (
 
 ---
 
-## 6. 영상 저장 (D9·D10)
+## 6. 프레임 사진 저장 (D9·D10)
 
-**권장: 폰이 보낸 VP8 영상을 게이트웨이에서 다시 압축하지 않고 그대로 파일로 저장한다 (방식 C).** 이 방식이 안 되면 방식 B로 간다. 어느 쪽으로 할지는 1단계 시험으로 정한다 (§11, §12).
-
-| 방식 | 저장 내용 | 시간당 용량 (스테이션 1개, 추정) | 추가 손실 | 비고 |
-|---|---|---|---|---|
-| A. 프레임마다 JPEG | 처리한 프레임마다 JPEG q95 | 약 18GB | 1번 (저장용) | 가장 단순. 용량이 가장 크다 |
-| B. 제품 영상 H.265 | 처리한 프레임을 고화질 H.265로 묶음 (CRF 18 출발값) | 약 2~5GB | 1번 (저장용) | 연속 프레임이 비슷해 JPEG보다 몇 배 작다. GPU 인코더(NVENC) 또는 CPU(libx265) |
-| **C. 받은 VP8 그대로** | 게이트웨이가 받은 VP8 프레임을 IVF 파일로 이어 붙임 (세션당 1파일) | VP8 비트레이트 그대로: 12Mbps면 약 5.4GB | **없음** | 모델이 본 것과 똑같은 영상이 남는다. 다시 압축하는 비용도 없다 |
-
-방식 C 세부:
-- aiortc는 디코딩 전의 VP8 프레임을 공개 API로 내주지 않는다. 디코더(`aiortc.codecs`의 VP8 디코더)를 감싸 **디코딩하기 전 바이트를 파일에도 쓰게** 해야 한다. 내부 구조에 기대는 방법이므로 aiortc 버전을 고정하고, 1단계에서 동작을 먼저 확인한다.
-- IVF는 32바이트 파일 머리말 + 프레임마다 12바이트 머리말(크기, pts)인 단순한 형식이다. ffmpeg·PyAV로 바로 읽힌다.
-- 세션 하나를 파일 하나로 둔다. 제품마다 파일을 나누면 제품 시작마다 키프레임이 있어야 해서 복잡해진다. 제품은 `frames.video_pts`로 범위를 찾는다.
-- 게이트웨이는 API로 넘기는 프레임마다 그 pts를 함께 보낸다 (§7.1 머리말). API는 `frames.video_pts`에 넣는다.
-- 프레임 한 장 조회(§4.6)는 그 앞 키프레임부터 디코딩한다. 서버 자원이 충분하다고 보므로 그대로 하고, 느리면 디코딩한 프레임을 캐시한다.
-- 제품이 없는 시간의 영상도 남는다. PD가 제품을 놓친 프레임을 나중에 찾는 데 쓸 수 있다.
-
-방식 B 세부 (C가 안 될 때):
-- API가 처리한 프레임(원본 픽셀)을 세션 영상 파일에 이어서 압축한다. 처리가 밀려 건너뛴 프레임은 남지 않는다. 지금 실측(처리 약 14장/초 > 입력 10장/초)이면 실제로는 거의 전부 남는다.
+- **무엇을**: 제품이 보인 프레임(PD 통과, `inspect`를 보낸 프레임) 전부. 제품이 안 보인 프레임은 저장하지 않는다.
+- **어떻게**: 프레임마다 JPEG 한 장. `product_frames/<날짜>/<session_id>/<seq 6자리>.jpg`. 경로는 `frames.file`에 넣는다.
+- **화질**: 게이트웨이가 원본 픽셀(I420)을 넘기므로(§7.1) API가 JPEG로 압축한다. 품질 `FRAME_JPEG_QUALITY` **95** (출발값). 저장할 때 한 번 손실이 생기지만 품질 95에서는 작다.
+- **순서**: 지금 결함 프레임 저장과 같다 — `inspect`를 먼저 보내고 압축·파일 쓰기·DB 행은 뒤에서(스레드) 한다. 실패해도 판정은 계속하고 `file`만 NULL로 남긴다.
+- **건너뛴 프레임**: 처리가 밀려 API가 건너뛴 프레임은 남지 않는다. 지금 실측(처리 약 14장/초 > 입력 10장/초)이면 실제로는 거의 전부 남는다.
+- **용량 (추정)**: 1920×1440 JPEG 품질 95가 한 장 약 0.5MB라면 초당 10장, 제품을 계속 비출 때 스테이션 하나당 시간당 약 18GB. 실제 양은 `GET /storage`로 본다.
+- **용량을 줄이고 싶으면** (지금은 하지 않음): 품질을 90으로 낮추면 한 장이 대략 30~40% 작아진다 (추정). 실측 용량을 보고 정한다 (§12 Q1).
+- 결함 프레임 저장(`results`, 1초에 1장, 오버레이)은 그대로 둔다. 실시간 확대 보기용이다.
 
 ---
 
@@ -291,7 +280,7 @@ CREATE TABLE IF NOT EXISTS feedback_log (
 ### 7.1 게이트웨이 → API: 원본 픽셀 전달
 
 - 게이트웨이는 `to_jpeg` 대신 디코딩한 프레임을 **I420(yuv420p) 그대로** `/ws` 바이너리 메시지로 보낸다.
-- 메시지 형식: `b"I420"` (4바이트) + `width` uint16 LE + `height` uint16 LE + `pts` int64 LE + `rx_at` int64 LE (epoch ms) + Y·U·V 평면.
+- 메시지 형식: `b"I420"` (4바이트) + `width` uint16 LE + `height` uint16 LE + `rx_at` int64 LE (epoch ms) + Y·U·V 평면.
 - 크기: 1920×1440은 약 4.1MB, 4K는 약 12.4MB. uvicorn WebSocket 기본 최대(16MB) 안이다. 게이트웨이와 API가 같은 서버라 대역폭 부담은 없다.
 - API `read_image`는 앞 4바이트가 `I420`이면 위 형식으로, 아니면 지금처럼 이미지 파일(JPEG 등)로 읽는다. 테스트용 `stream_client.py`·직접 연결은 JPEG를 계속 쓸 수 있다.
 
@@ -353,8 +342,8 @@ CREATE TABLE IF NOT EXISTS feedback_log (
 
 | 단계 | 내용 | 확인 |
 |---|---|---|
-| 1 | 게이트웨이: 간격 제한 삭제(§7.2), I420 전달(§7.1), VP8 그대로 저장 시험(§6 C) | 초당 처리 장수, 저장 IVF가 ffmpeg로 재생되는지와 pts 대응. 지연 물리 측정으로 기준값 확보 |
-| 2 | API: 제품 구간·확정·면 진행(`stream.py`), `product_end`, DB(§5), 전체 영상 저장(§6 C 또는 B) | 작성 환경 시험: 지금 앱 `AiFlowTest`의 구간·확정 사례를 서버 시험으로 옮겨 같은 결과 |
+| 1 | 게이트웨이: 간격 제한 삭제(§7.2), I420 전달(§7.1) | 초당 처리 장수. 지연 물리 측정으로 기준값 확보 |
+| 2 | API: 제품 구간·확정·면 진행(`stream.py`), `product_end`, DB(§5), 제품 프레임 사진 저장(§6) | 작성 환경 시험: 지금 앱 `AiFlowTest`의 구간·확정 사례를 서버 시험으로 옮겨 같은 결과 |
 | 3 | API: 피드백·이력·프레임·저장소 API(§4), 게이트웨이 중계 | 피드백 변경 기록, 페이지 넘김, 프레임 JPEG |
 | 4 | 모바일: §8 | 단위 시험 갱신, 실기기 수동/자동 모드 |
 | 5 | HMD: §9, §7.4 | 면 칩·결과 표시, 핫스팟 대역폭 |
@@ -366,7 +355,7 @@ CREATE TABLE IF NOT EXISTS feedback_log (
 
 | # | 내용 | 제안 |
 |---|---|---|
-| Q1 | 영상 저장 방식 C 또는 B (§6) | C. 1단계 시험에서 aiortc 디코더 감싸기가 안 되면 B |
+| Q1 | 프레임 사진 JPEG 품질 (§6) | 95로 시작해 `GET /storage` 실측 용량을 보고 정한다 |
 | Q2 | 출발값: `FACE_MIN_FRAMES` 3, VP8 12Mbps, HMD JPEG q95·초당 12장, `RESULT_SHOW_MS` 2000, 디스크 경고 10% | 실기기에서 보고 조정 |
 
 ---
