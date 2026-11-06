@@ -1,0 +1,9 @@
+# torch / torchvision은 베이스 이미지(pytorch/pytorch:2.10.0-cuda13.0)에 포함 — 여기에 넣지 않는다
+ultralytics==8.4.117    # PD·QI (YOLO). 두 모델을 학습한 버전. opencv-python(cv2)도 이것이 설치한다
+numpy
+pillow
+fastapi
+uvicorn
+python-multipart        # /predict UploadFile
+websockets              # /ws, stream_client.py
+psycopg[binary,pool]    # PostgreSQL (db.py)

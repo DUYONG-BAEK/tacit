@@ -1,0 +1,6 @@
+aiortc                  # WebRTC (영상 디코딩용 PyAV/FFmpeg 포함)
+fastapi
+uvicorn
+websockets              # A4 API /ws 클라이언트
+httpx                   # A4 API /results/* 프록시
+opencv-python-headless  # 프레임 JPEG 인코딩
