@@ -6,6 +6,8 @@ FROM pytorch/pytorch:2.10.0-cuda13.0-cudnn9-devel
 # fonts-nanum: 결과 오버레이의 한글 결함 이름 (detect.FONT_PATH).
 # libgl1, libglib2.0-0: ultralytics가 설치하는 opencv-python이 import 시 요구한다.
 ENV TZ=Asia/Seoul
+# apt 미러: gpudev가 쓰는 KT DNS가 archive.ubuntu.com을 접속 안 되는 IP 하나(91.189.90.11)로만 알려 준다 (2026-11-09 확인)
+RUN sed -i 's|http://archive.ubuntu.com/ubuntu|http://mirror.kakao.com/ubuntu|g' /etc/apt/sources.list.d/ubuntu.sources
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     tzdata fonts-nanum libgl1 libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
