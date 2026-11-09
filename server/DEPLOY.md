@@ -325,26 +325,39 @@ export A4_DB_PASSWORD=$(docker inspect a4-db --format '{{range .Config.Env}}{{pr
 
 2026-11-03 코드(프레임 단위)로 돌고 있는 서버에 이번 코드를 올린다. `a4-db`와 데이터·비밀번호는 그대로 쓰고, 새 테이블은 API가 기동하며 만든다. **`product_frames/` 폴더를 새로 붙여야 한다** — 빠뜨리면 사진이 컨테이너 안에 쌓였다가 컨테이너를 다시 만들 때 사라지고, `/storage`의 디스크 값도 컨테이너 기준이 된다.
 
+**블록마다 따로 붙여 넣고, 기대한 결과가 나왔을 때만 다음 블록으로 간다.** 한 번에 붙여 넣으면 빌드가 실패해도 다음 줄이 그대로 실행돼 옛 이미지로 다시 뜬다 (2026-11-09 gpudev에서 실제로 그랬다).
+
 ```bash
-cd /home/admin/odServer   # 프로젝트 폴더 ($PWD)
-
 # 1. 지금 코드·문서 보관 — 서비스는 계속 돈다
+cd /home/admin/odServer   # 프로젝트 폴더 ($PWD)
 mkdir -p archive_frame_mode && cp -a api gateway DEPLOY.md A4_WEBRTC_API.md archive_frame_mode/ && ls archive_frame_mode
+#   기대: api gateway DEPLOY.md A4_WEBRTC_API.md
+```
 
-# 2. 새 코드·문서 복사 → 빌드. 빌드가 실패하면 여기서 멈춘다 (서비스 그대로)
+```bash
+# 2. 새 코드·문서 복사
 cp -a /tmp/new/api/. api/
 cp -a /tmp/new/gateway/. gateway/
 cp /tmp/new/DEPLOY.md /tmp/new/A4_WEBRTC_API.md /tmp/new/PLAN_product_feedback.md .
 grep -c "class Products" api/stream.py; grep -c "def to_i420" gateway/gateway.py
 #   기대: 1 / 1
-docker build -t a4-api api/ --no-cache
-docker build -t a4-gateway gateway/ --no-cache
+```
 
-# 3. 사진 폴더 — API 컨테이너가 쓰므로 미리 만든다
-mkdir -p product_frames
+```bash
+# 3. 빌드 — 서비스는 계속 돈다. BUILD OK가 안 나오면 여기서 멈춘다
+#    --no-cache를 쓰지 않는다: Dockerfile·requirements.txt가 그대로라 apt·pip 층은 캐시를 쓰고 코드(COPY)만 새로 들어간다.
+#    gpudev는 컨테이너 안에서 archive.ubuntu.com:80에 닿지 않아(2026-11-09) apt를 다시 돌리면 빌드가 실패한다.
+docker build -t a4-api api/ && docker build -t a4-gateway gateway/ && echo "BUILD OK"
+docker run --rm --entrypoint grep a4-api -c "class Products" stream.py
+docker run --rm --entrypoint grep a4-gateway -c "def to_i420" gateway.py
+#   기대: BUILD OK, 1, 1 — 0이면 이미지가 옛 코드다
+```
 
-# 4. DB 덤프 — 여기서부터 서비스 중단
+```bash
+# 4. 사진 폴더, DB 덤프 — 여기서부터 서비스 중단
+mkdir -p product_frames archive_frame_mode
 docker exec a4-db pg_dump -U a4 a4 > archive_frame_mode/a4_db.sql && ls -l archive_frame_mode/a4_db.sql
+#   기대: 파일 크기가 0보다 크다
 docker rm -f a4-gateway a4-api
 
 # 5. API 다시 띄우기 — 비밀번호를 a4-db 설정에서 읽는다. EMPTY면 여기서 멈춘다 (비면 DB 접속 실패로 재시작만 반복)
@@ -365,6 +378,9 @@ timeout 180 sh -c 'until curl -sf -o /dev/null localhost:8000/docs; do sleep 2; 
 docker logs a4-api 2>&1 | grep -E '"event": "(startup|db_ready)"' | tail -n 2
 #   기대: startup 다음 db_ready (db_ready가 없으면 비밀번호·DB 확인)
 
+```
+
+```bash
 # 6. 게이트웨이 다시 띄우기 — 여기서 서비스 재개
 docker run -d --name a4-gateway --network host --restart unless-stopped \
   -v $PWD/logs/a4-gateway:/app/logs \
@@ -372,6 +388,9 @@ docker run -d --name a4-gateway --network host --restart unless-stopped \
   a4-gateway
 until curl -sf -o /dev/null localhost:8080/docs; do sleep 1; done; echo "gateway ready"
 
+```
+
+```bash
 # 7. 새 테이블·마운트 확인
 docker exec a4-db psql -U a4 -d a4 -c '\dt'
 #   기대: alerts, decisions, feedback_log, frames, products, results, sessions, stations
@@ -708,7 +727,9 @@ rm -f trunc.jpg bomb.png black.jpg
 코드는 빌드할 때 이미지에 복사된다. `docker restart`는 옛 이미지를 계속 쓰므로 **재빌드 후 컨테이너를 새로 만든다.** `a4-db`는 그대로 둔다.
 
 ```bash
-docker build -t a4-api api/ --no-cache
+docker build -t a4-api api/ && echo "BUILD OK"
+docker run --rm --entrypoint grep a4-api -c "class Products" stream.py
+#   기대: BUILD OK, 1 — 안 나오면 여기서 멈춘다 (아래를 실행하면 옛 이미지로 다시 뜬다). --no-cache는 쓰지 않는다 (§5.B 3)
 export A4_DB_PASSWORD=$(docker inspect a4-db --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^POSTGRES_PASSWORD=//p')
 [ -n "$A4_DB_PASSWORD" ] && echo "password set" || echo "EMPTY — 여기서 멈춘다"
 docker rm -f a4-api
@@ -731,7 +752,8 @@ docker logs a4-api 2>&1 | grep -E '"event": "(startup|db_ready)"' | tail -n 2
 - 게이트웨이를 바꿨으면:
 
 ```bash
-docker build -t a4-gateway gateway/ --no-cache
+docker build -t a4-gateway gateway/ && echo "BUILD OK"
+#   BUILD OK가 안 나오면 여기서 멈춘다
 docker rm -f a4-gateway
 docker run -d --name a4-gateway --network host --restart unless-stopped \
   -v $PWD/logs/a4-gateway:/app/logs \
