@@ -150,7 +150,7 @@ class InspectionService : LifecycleService() {
             engine.send(e)
         }
         val settings = DevSettings(this)
-        // 엣지 종류에 따라 모의 엣지(WebSocket 중계) 또는 실제 AI 서버(WebRTC, 설계서 §9)
+        // 엣지 종류에 따라 모의 엣지(WebSocket 중계) 또는 실제 AI 서버(WebRTC, 설계서 §3)
         val offer: (Long, Long, ByteArray, String, Boolean) -> Unit
         val edgeRun: suspend () -> Unit
         val edgeStatus: StateFlow<StreamRelay.Status>

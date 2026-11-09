@@ -22,7 +22,7 @@ import java.io.ByteArrayInputStream
 import java.nio.ByteBuffer
 
 /**
- * C2 StreamRelay 단위 시험 — 설계서 §6 T2. 장비·망 없이 노트북에서 돈다.
+ * C2 StreamRelay 단위 시험 — 설계서 부록 F T2. 장비·망 없이 노트북에서 돈다.
  * 엣지는 가짜 [Transport], 시간은 coroutines-test 가상 시간.
  */
 @OptIn(ExperimentalCoroutinesApi::class)

@@ -24,7 +24,7 @@ class MjpegReader(private val input: InputStream) {
     class Part(val headers: Map<String, String>, val body: ByteArray) {
         val hmdSeq: Long get() = headers["x-seq"]?.toLongOrNull() ?: 0
         val capturedAt: Long get() = headers["x-captured-at"]?.toLongOrNull() ?: 0
-        /** "hevc" | "jpeg" — HMD 가 보낸 Content-Type 으로 구분(설계서 §8) */
+        /** "hevc" | "jpeg" — HMD 가 보낸 Content-Type 으로 구분(설계서 §4) */
         val codec: String get() = if (headers["content-type"]?.contains("hevc") == true) "hevc" else "jpeg"
         val key: Boolean get() = headers["x-key"]?.let { it == "1" } ?: true
     }

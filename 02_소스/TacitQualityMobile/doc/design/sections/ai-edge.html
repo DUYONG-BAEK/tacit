@@ -1,57 +1,73 @@
 <div class="section-head">
-  <h3>9. 실제 엣지(AI 서버) 연동 — WebRTC · 프레임 단위 판정</h3>
-  <span class="status confirmed">2026-11-03 규격 반영 (2026-11-05) — 개발 서버 실장비 연동 확인</span>
+  <h3>3. AI 서버 연동 — 판정 · 메시지 · 화면</h3>
+  <span class="status confirmed">2026-11-06 규격 · 2026-11-09 개발 서버 배포·실측</span>
 </div>
 
-<p><strong>범위:</strong> 우리 역할은 <strong>HMD 영상을 폰을 거쳐 AI 서버까지 보내고</strong>, 서버가 돌려준 판정을 HMD·폰에 표시하고 기록하는 것까지.
-판정은 AI 서버가 한다(제품 탐지 PD → 불량 탐지 QI). 근거 문서: 「제품 불량 판정 — 모바일 앱 연동 API」 2026-11-03 규격,
-앱 수정 계획 개정 2판. 구성은 <strong>HMD → 폰 → AI 서버</strong> (PC 없음, 모의 AI 서버 자동 전환은 2026-11-04 삭제).</p>
+<p><strong>원칙:</strong> 계산과 판정은 모두 AI 서버가 한다. 폰은 영상을 넘기고, 서버가 보낸 값을 HMD·폰 화면에 그대로 보이고, 작업자 피드백을 서버로 전한다.
+규격은 <code>server/A4_WEBRTC_API.md</code>(앱 연동), 판정 규칙·설정값은 <code>server/DEPLOY.md</code> §3.</p>
 
-<div class="warn-box"><strong>2026-11-03 규격 변경:</strong> 서버는 제품 하나를 모아 한 번 판정하던 방식(<code>hold → captured → result</code>)을 버리고,
-<strong>제품이 보이는 프레임마다 <code>inspect</code></strong>(초당 최대 10번)를 보낸다. 사람의 최종 판정(<code>POST …/decision</code>)·연속 알림(<code>alert</code>)은 없어졌다.
-앱은 "제품 1개 = 판정 화면 1장" 구조를 버리고 아래처럼 바꿨다.</div>
-
-<h4>경로</h4>
-<pre style="background:#f8fafc;border:1px solid var(--line);border-radius:10px;padding:12px;font-size:12px">HMD 카메라 4:3 1920×1440 ─MJPEG(HTTP)─▶ 폰: JPEG 풀기 → WebRTC 영상 트랙(VP8) ─▶ AI 서버 :8080 (POST /offer, 스테이션 ST-02)
-                                                ◀── 데이터 채널(JSON): searching · inspect(프레임 판정·제품 상자·결함 상자·result_id)
-폰 AiFlow ─┬─ 결함 프레임 ─BLE LIVE(응답 없는 쓰기)─▶ HMD 판정 글자 · 결함 원
-           ├─ 결함 확정(최근 5장 중 2장) ─▶ 진동 3회(제품당 1회)
-           ├─ 제품 구간 끝(1초 무소식·끊김) ─▶ 상태기계 ─▶ 이력 1건(원판정·결함 종류·결함 프레임 result_id)
-           └─ M-07: HMD 와 같은 화면(글자·결함 원) · 최근 결함 확대 / M-05: 결함 프레임 다시 보기(GET /results/{id}/overlay)</pre>
-
-<h4>규칙</h4>
+<h4>판정 규칙 (서버)</h4>
 <table class="col-table">
-  <tr><th style="width:22%">항목</th><th>규칙</th></tr>
-  <tr><td>실시간 표시</td><td>NG 빨강 · REVIEW 노랑 · OK 표시 없음. 마지막 결함 뒤 0.5초 유지 후 표시하는 쪽(HMD·M-07)이 스스로 지운다. searching·끊김이면 즉시</td></tr>
-  <tr><td>제품 구간</td><td>첫 <code>inspect</code>에서 시작, 마지막 <code>inspect</code> 뒤 <strong>1초</strong> 무소식이거나 연결이 끊기면 끝. searching 한 장은 구간을 끝내지 않는다</td></tr>
-  <tr><td>결함 확정</td><td>구간 안 최근 5장 중 2장 이상 NG·REVIEW → 확정(NG 가 있으면 NG, 없으면 REVIEW, 나중에 NG 로 올림). 확정 순간 진동 3회, 구간당 1회</td></tr>
-  <tr><td>이력</td><td>구간 1건. 합격/불합격(OK=합격, NG·REVIEW=불합격)과 따로 원판정 · 결함 종류 · 최고 점수 · 기준값 · inspect 수 · 결함 프레임 수 · 구간 안 모든 result_id(점수 높은 순, JSON 배열)</td></tr>
-  <tr><td>HMD LIVE 쪽지</td><td><code>{"cmd":"LIVE","d":"NG","l":"칩찍힘","b":[[x1,y1,x2,y2]]}</code> · 지우기 <code>{"cmd":"LIVE","d":null}</code>(표시 중일 때만). 상자는 영상 기준 0~1000, 겹친 상자는 합침, 480B 이내. OK 프레임은 보내지 않음. M-01 "HMD 결함 원 끄기"면 <code>b</code> 없이 글자만</td></tr>
-  <tr><td>HMD 화면</td><td>대기 화면은 HMD 안에서 화면 ID <code>IDLE</code>로 분리(덧그림 없음). 조준 화면(H-01) 가운데 큰 글자 = LIVE(유지 중) &gt; 진행 안내(HINT: 제품을 비춰 주세요 · 검사 중) &gt; 기본. 판정 화면 H-02·H-03·확인 타이머는 쓰지 않는다</td></tr>
-  <tr><td>HMD 화각</td><td>분석 영상 <strong>4:3(1920×1440 목표)</strong>, 미리보기 <code>FIT_CENTER</code>(좌우 검은 띠), 줌 최소. 16:9 는 4:3 센서 위아래를 잘라 기본 카메라 앱보다 약 1.33배 확대돼 보였다(2026-11-05). 결함 원은 영상 비율로 같은 맞춤</td></tr>
-  <tr><td>M-07 HMD 화면 따라 그리기</td><td>폰이 보낸 SHOW 화면·HINT·LIVE·OVERLAY 로 HMD 와 같은 글자·색·위치(853×480dp 기준 비율)를 영상 위에 그린다(<code>hmd/HudMirror</code>). HMD 의 Screens·LiveHold 와 같은 규칙이어야 한다</td></tr>
-  <tr><td>재연결</td><td>간격 1 → 2 → 4 → 5초, 이후 5초(규격 §5.3). 한 번의 시도는 10초 안에 CONNECTED, 시도 중 새 시도 없음. 닫힌 PeerConnection 의 늦은 콜백은 세대 번호로 무시. <code>422·403</code>은 설정 오류(재시도 안 함)</td></tr>
-  <tr><td>확대 보기</td><td>결함 프레임 오버레이를 잘라 크게: 겹친 상자 합침, 정사각 한 변 = max(짧은 변 20%, 상자 긴 변 3배), 핀치 확대·이동. 오버레이 404 는 0.5초 뒤, 503 은 1초 뒤 한 번 더</td></tr>
-  <tr><td>통신 로그</td><td>상단 바 "로그" → 모바일 ↔ AI 서버 / 모바일 ↔ HMD 탭. 5초마다 받은·보낸 프레임 수, 서버 메시지 수. HMD 는 BLE HELLO 로 카메라 상태(정상 · 꺼짐 · 열기 대기 · 시작 실패 등)를 알린다</td></tr>
-  <tr><td>DB</td><td>Room v2 · 개발 중이라 스키마가 바뀌면 이력·전송 큐를 지우고 다시 만든다(fallbackToDestructiveMigration). 실사용 전 명시적 마이그레이션으로</td></tr>
+  <tr><th style="width:18%">단계</th><th>규칙</th></tr>
+  <tr><td>제품 탐지 (PD)</td><td>프레임마다 전체를 640으로 줄여 PD. 상자가 하나라도 있으면(엣지·상면·하면비닐 중, 신뢰도 0.4 이상) 그 프레임을 QI로. 없으면 <code>searching</code>. 크기·위치 조건은 없다</td></tr>
+  <tr><td>불량 탐지 (QI)</td><td>같은 프레임 <strong>전체</strong>를 640 타일(간격 512)로 덮어 추론 → 결함 상자의 중심이 PD 상자 안인 것만 남긴다(배경 오탐 제거)</td></tr>
+  <tr><td>프레임 판정</td><td>점수 = 남은 결함의 최대 신뢰도. 기준값 T = 0.4(임시) → T×1.1 초과 NG, T×0.9 미만 OK, 사이는 REVIEW(애매)</td></tr>
+  <tr><td>제품 구간</td><td>첫 제품 프레임에서 시작, 마지막 제품 프레임 뒤 <strong>1초</strong> 동안 제품 프레임이 없거나 연결이 끊기면 끝. <code>searching</code> 한 장은 끝내지 않는다</td></tr>
+  <tr><td>결함 확정 · 제품 판정</td><td>구간 안 최근 <strong>5장 중 2장</strong> 이상 NG·REVIEW면 확정(NG가 있으면 NG, 나중에 NG로 올라갈 수 있다). 확정 없음 → PASS, 있음 → FAIL(REVIEW 확정도 FAIL)</td></tr>
+  <tr><td>면 진행</td><td>PD 라벨별로 그 제품에서 잡힌 프레임 수. <strong>5장</strong> 이상이면 그 면을 본 것(2026-11-09 3 → 5, 확정 창과 맞춤). 모두 보면 <code>complete</code> — 판정·구간에는 영향 없음</td></tr>
+  <tr><td>저장</td><td>제품 프레임 <strong>전부</strong> 사진(JPEG 90) · 결함 프레임은 연결마다 1초에 1장 오버레이(<code>result_id</code>) · 연결마다 설정값·통계(<code>sessions.config</code>·<code>stats</code>)</td></tr>
+</table>
+
+<h4>메시지 → 화면</h4>
+<table class="col-table">
+  <tr><th style="width:16%">서버 메시지</th><th style="width:40%">HMD (BLE 쪽지)</th><th>폰 (M-07)</th></tr>
+  <tr><td><code>searching</code> · 연결됨</td><td><code>HINT</code> "제품을 비춰 주세요". 결함 표시 중이면 <code>LIVE</code> 지우기</td><td>같은 글자(HMD 화면 따라 그리기)</td></tr>
+  <tr><td><code>inspect</code> OK</td><td><code>HINT</code> "검사 중" (바뀔 때만)</td><td>같은 글자</td></tr>
+  <tr><td><code>inspect</code> NG·REVIEW</td><td><code>LIVE</code> <code>{"cmd":"LIVE","d":"NG","l":"칩찍힘","b":[[x1,y1,x2,y2]]}</code> — 상자는 영상 기준 0~1000, 겹친 상자 합침, 480B 이내. 최신 1개만 응답 없는 쓰기. ✕ 불합격(빨강)·? 애매(노랑) + 결함 원(지름 40dp 이상), 마지막 결함 뒤 0.5초 유지. M-01 "결함 원 끄기"면 글자만</td><td>같은 글자·원 · <code>result_id</code>가 오면 "최근 결함 프레임" 확대 작은 창</td></tr>
+  <tr><td><code>inspect</code> 면 바뀜</td><td><code>FACES</code> <code>{"cmd":"FACES","s":["상면"],"all":["상면","엣지","하면비닐"],"c":false}</code> → 조준 화면 아래 <code>■ 상면 □ 엣지 □ 하면비닐</code>, 모두 보면 "✓ 검사 완료". 면 이름은 서버 값(하드코딩 안 함)</td><td>같은 칩 줄</td></tr>
+  <tr><td><code>product_end</code></td><td><code>RESULT</code> <code>{"cmd":"RESULT","d":"FAIL","l":"칩찍힘"}</code> → "✓ 합격"·"✕ 불합격 · 칩찍힘" 2초. 큰 글자 우선순위 RESULT &gt; LIVE &gt; HINT</td><td>결과 카드(판정 · 결함 종류 · 프레임/결함 장수 · 면 · 대표 결함 확대). 수동 모드면 <strong>맞음·틀림·확인필요</strong>. 불합격이면 진동 3회</td></tr>
+</table>
+
+<h4>폰 규칙</h4>
+<table class="col-table">
+  <tr><th style="width:20%">항목</th><th>규칙</th></tr>
+  <tr><td>영상 송출</td><td>HMD JPEG를 받는 대로 I420으로 넣는다(쉬는 간격 없음 · 최신 1장만 담는 통로, 밀린 프레임은 버림). 2026-11-09 전에는 "넣은 뒤 100ms 쉼"이라 서버 도착이 초당 6.9장이었다</td></tr>
+  <tr><td>해상도</td><td>대역폭이 모자라도 해상도를 낮추지 않는다(<code>maintain-resolution</code>, VP8 4~12Mbps) — QI가 640 타일로 보므로 해상도가 곧 검출력</td></tr>
+  <tr><td>연결 · 재연결</td><td>연결 성공 = <code>searching</code>으로 본다. 생존 신호 없음 — <code>disconnected</code>·<code>failed</code>·<code>closed</code>면 새 <code>POST /offer</code>. 간격 1 → 2 → 4 → 5초, 한 번의 시도는 10초 마감. <code>422</code>·<code>403</code>은 설정 오류로 띄우고 다시 시도하지 않는다. 끊긴 동안 HMD에 "⚠ 서버 지연 · 검사 계속" 띠</td></tr>
+  <tr><td>끊긴 사이 끝난 제품</td><td>서버는 <code>disconnect</code>로 기록하고 메시지는 보내지 않는다 → 다시 붙으면 <code>GET /products?station=…&amp;limit=1</code>로 받아 결과 카드로 띄운다</td></tr>
+  <tr><td>피드백</td><td>수동 모드: 결과 카드에서 <code>PUT /products/{id}/feedback</code>(source=live). 누르기 전에 다음 제품이 끝나면 카드가 바뀌고 이전 제품은 미입력으로 남는다. 자동 모드: 피드백 없음. 모드는 연결 때 서버에 알리므로 검사 중에는 못 바꾼다</td></tr>
+  <tr><td>M-05 이력</td><td>원본은 서버(<code>GET /products</code>, 최신 순 · 50개씩 · 전체/미입력/확인필요/불합격 필터). 상세: 프레임 사진 전부 넘겨 보기(결함 프레임은 상자를 그린 사진), 결함 확대, 피드백 수정(source=history, 누구나 · 변경 기록)</td></tr>
+  <tr><td>M-06 관리</td><td>서버 디스크(<code>GET /storage</code>: 남은 공간 · 종류별 · 날짜별). 서버는 사진을 자동으로 지우지 않는다</td></tr>
+  <tr><td>결함 확대 보기</td><td>오버레이를 잘라 크게: 겹친 상자 합침, 정사각 한 변 = max(짧은 변 20%, 상자 긴 변 3배), 핀치 확대·이동. 오버레이 <code>404</code>는 0.5초 뒤, <code>503</code>은 1초 뒤 한 번 더</td></tr>
+  <tr><td>HMD 연결</td><td>BLE PING 1초 · SHOW는 순번·ACK(200ms). ACK가 없으면 BLE를 다시 연결하고, 붙으면 지금 화면을 다시 보낸다. HMD는 3초 무소식이면 스스로 수동 판정 화면(H-09). 교대 마감 때는 대기 화면을 보낸 뒤 끊어 장애로 보지 않게 한다</td></tr>
+  <tr><td>통신 로그</td><td>상단 바 "로그" → 모바일 ↔ AI 서버 / 모바일 ↔ HMD. 5초마다 "HMD 영상 n장 받음 · 서버로 n장 보냄 · 서버 메시지 수 · 보냄 해상도·fps·제한 사유", HMD 카메라 상태(HELLO). 복사·지우기</td></tr>
+</table>
+
+<h4>실측 (개발 서버, 2026-11-09, 1920×1440)</h4>
+<table class="col-table">
+  <tr><th style="width:22%">항목</th><th>값</th></tr>
+  <tr><td>서버 1장 처리</td><td>decode 2ms(I420) + PD 11ms + QI 24ms = <strong>약 37ms</strong> → 서버만으로는 초당 약 27장. 밀림 0</td></tr>
+  <tr><td>서버 도착</td><td>초당 6.9장(6.0~7.3) — 원인은 폰 송출 간격 → 받는 대로 송출로 바꿈(초당 약 12장 기대, 확인 전)</td></tr>
+  <tr><td>제품이 잡힌 프레임</td><td>도착 프레임의 약 70%</td></tr>
 </table>
 
 <h4>코드 위치</h4>
 <table class="col-table">
   <tr><th style="width:18%">위치</th><th>파일</th></tr>
-  <tr><td>모바일 ai/</td><td><code>AiMessages</code>(규격 해석) · <code>AiFlow</code>(구간·확정·LIVE·진동) · <code>Reconnect</code>(재연결 정책) · <code>AiEdgeLink</code>(WebRTC) · <code>AiResultsApi</code> · <code>DefectCrop</code>·<code>DefectLoader</code>(확대 보기)</td></tr>
-  <tr><td>모바일 hmd/</td><td><code>ShowWire</code>(SHOW·HINT·LIVE 쪽지) · <code>GattBleLink</code>(BLE, 응답 없는 쓰기, HELLO) · <code>HudMirror</code>(M-07 따라 그리기)</td></tr>
-  <tr><td>모바일 화면</td><td><code>M07LiveView</code> · <code>M05InspectionHistory</code> · <code>DefectViewer</code> · <code>CommLogView</code>(통신 로그) · <code>M01ShiftPrep</code></td></tr>
-  <tr><td>HMD</td><td><code>protocol/Wire</code>(LIVE 해석·HELLO) · <code>hud/LiveHold</code>(0.5초 유지·큰 글자·원 좌표) · <code>hud/MarkerView</code> · <code>hud/HudController</code> · <code>MainActivity</code>(카메라 4:3·카메라 상태)</td></tr>
+  <tr><td>모바일 ai/</td><td><code>AiMessages</code>(규격 해석) · <code>AiFlow</code>(LIVE · 면 · 안내 · 제품 결과 넘기기) · <code>AiEdgeLink</code>(WebRTC · 송출) · <code>Reconnect</code> · <code>AiResultsApi</code>(조회·피드백) · <code>Feedback</code> · <code>DefectCrop</code>·<code>DefectLoader</code></td></tr>
+  <tr><td>모바일 hmd/</td><td><code>ShowWire</code>(SHOW · HINT · LIVE · FACES · RESULT) · <code>GattBleLink</code>(BLE · HELLO) · <code>HmdRenderer</code>(순번 · ACK) · <code>HudMirror</code>(M-07 따라 그리기 — HMD <code>Screens</code>·<code>LiveHold</code>와 같은 규칙)</td></tr>
+  <tr><td>모바일 화면</td><td><code>M01ShiftPrep</code> · <code>M07LiveView</code> · <code>M05InspectionHistory</code> · <code>ProductViews</code> · <code>DefectViewer</code> · <code>M06AdminDashboard</code> · <code>CommLogView</code></td></tr>
+  <tr><td>HMD</td><td><code>protocol/Wire</code> · <code>hud/HudController</code> · <code>hud/LiveHold</code>(0.5초 유지 · 결과 2초 · 큰 글자 · 면 칩) · <code>hud/MarkerView</code> · <code>MainActivity</code>(카메라 4:3 · 카메라 상태)</td></tr>
+  <tr><td>서버</td><td><code>api/stream.py</code>(판정 · 제품 구간 · 면) · <code>api/detect.py</code>(PD · QI · 기준값) · <code>api/api.py</code>(<code>/ws</code> · 조회 · 저장 · <code>CONFIG</code>) · <code>api/db.py</code> · <code>gateway/gateway.py</code></td></tr>
 </table>
 
 <h4>시험</h4>
 <ul class="checklist">
-  <li class="done">단위(JVM): 규격 예시 해석 · 재연결 간격·마감 · 구간·확정·진동 · LIVE 480B·상자 합치기 · 확대 영역 · 재요청 · HMD 유지·우선순위·4:3 좌표 · 따라 그리기 — 70건 통과</li>
-  <li class="done">실장비: 개발 서버 연결(offer → CONNECTED 0.2초) · HMD 영상 수신(HMD 카메라 권한 허용 후)</li>
-  <li>실장비: 제품 1개 = 이력 1건 · 진동 1회 · HMD 결함 원 위치 · M-07 화면 일치 · 4:3 화각이 기본 카메라 앱과 같은지</li>
-  <li>5단계 해상도 비교 · 6단계 지연 실측(계획서) — 앱 기능 수정 뒤 진행 여부 결정</li>
+  <li class="done">단위(JVM, 2026-11-06): 모바일 52건 · HMD 17건</li>
+  <li class="done">서버(작성 환경): 제품 단위·피드백 API 42건 + 게이트웨이 종단(2026-11-06), 면 5장 · <code>sessions.config</code>·<code>stats</code>(실제 PostgreSQL 16, 2026-11-09)</li>
+  <li class="done">개발 서버 배포 · 앱 연결 로그로 처리 속도·도착 속도·<code>product_end</code>·면 기록 확인 (2026-11-09)</li>
+  <li>받는 대로 송출 뒤 도착 초당 12장 · 폰 화면 결과 카드·피드백·이력 종단 · HMD 결함 원 위치 · 해상도별 검출률 · 구간별 지연</li>
 </ul>
 
-<div class="warn-box"><strong>주의:</strong> 판정 모델은 가모델이다(결함 위치·종류가 자주 틀림). 지금 목표는 <strong>연동과 시나리오 흐름 확인</strong>이며,
-PD·QI 임곗값은 서버가 정한다 — 앱은 서버 판정을 그대로 쓰고, 임곗값을 바꾸려면 서버 관리자에게 요청한다.</div>
+<div class="warn-box"><strong>주의:</strong> 판정 모델은 가모델이다(결함 위치·종류가 자주 틀림). 지금 목표는 <strong>연동과 시나리오 흐름 확인</strong>이다.
+PD·QI 임곗값은 서버가 정한다 — 앱은 서버 판정을 그대로 쓰고, 바꾸려면 서버 관리자에게 요청한다.</div>

@@ -5,7 +5,7 @@
 
 HMD(RealWear Navigator 520) 영상을 받아 AI 판정 서버로 보내고, 서버가 돌려주는 프레임 판정·제품 판정을
 HMD(BLE)와 폰 화면에 표시하며, 작업자 피드백을 서버로 보내는 안드로이드 앱이다. 판정·기록은 서버가 한다.
-Kotlin · Jetpack Compose · Room · WebRTC. 설계·작업 기록은 `doc/`(설계서 9장, 작업일지 마지막 항목).
+Kotlin · Jetpack Compose · Room · WebRTC. 설계·작업 기록은 `doc/`(설계서 1~3장, 작업일지 마지막 항목).
 
 ## 동작 요약 (AI 서버 2026-11-06 규격 — 제품 단위 판정은 서버)
 

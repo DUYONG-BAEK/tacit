@@ -94,7 +94,7 @@ dependencies {
     implementation(libs.kotlinx.coroutines)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.okhttp)              // C2 엣지 WebSocket
-    implementation(libs.webrtc)              // 실제 AI 엣지 WebRTC (설계서 §9)
+    implementation(libs.webrtc)              // 실제 AI 엣지 WebRTC (설계서 §3)
     debugImplementation(libs.androidx.compose.tooling)
 
     // C5 LocalStore — Room(로컬 이력 + 전송 큐). 강제 종료 후 복구가 목적.

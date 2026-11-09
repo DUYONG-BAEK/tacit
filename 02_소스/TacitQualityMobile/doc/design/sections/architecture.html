@@ -1,36 +1,71 @@
 <div class="section-head">
   <h3>2. 구성 · 데이터 경로</h3>
-  <span class="status confirmed">확정</span>
+  <span class="status confirmed">현재 기준 (2026-11-09)</span>
 </div>
 
 <h4>데이터 경로</h4>
 <pre style="background:#f8fafc;border:1px solid var(--line);border-radius:10px;padding:14px;font-size:12px;line-height:1.6;overflow-x:auto">
- ┌──────── HMD (RealWear 520) ────────┐        ┌────────────── 폰 (TacitQualityMobile) ──────────────┐        ┌──── 로컬 PC (TacitQEdgeServer) ────┐
- │ CameraX → JPEG → MjpegServer :8080 │ ─HTTP─▶│ HmdVideoSource ─▶ StreamRelay(큐 900) ─▶ Transport   │ ─WS──▶ │ /v1/stream  수신·통계·저장         │
- │   + X-Seq · X-Captured-At 헤더     │ MJPEG  │   (MJPEG 파싱)     (메타 부착·건강검사)  (WebSocket) │ binary │   └▶ 가짜 판정기                    │
- └────────────────────────────────────┘        │                                          ▲          │        │ GET /  대시보드(실시간 영상·통계)   │
-          ▲ BLE (C1, 이번 범위 밖)              │ InspectionEngine ◀─ Event.JudgeResult ─ EdgeMessages│ ◀─WS── │   JUDGE · PATTERN · HB (JSON 텍스트)│
-          └──────── SHOW 쪽지 ◀── HmdRenderer ◀┘ (상태기계 C3)                                     │  text  └────────────────────────────────────┘
+[HMD · RealWear 520]
+  CameraX 4:3 1920×1440 → JPEG 품질 95 → MjpegServer :8080
+  BleServer(GATT) → HUD 화면 (대기 · 조준 · 수동 판정)
+      │  ▲
+      │  │  BLE 쪽지  폰 → HMD: SHOW · PING(1초) · HINT · LIVE · FACES · RESULT  /  HMD → 폰: ACK · HELLO(영상 주소 · 카메라 상태)
+      ▼  │  MJPEG 영상  HMD → 폰: 초당 12장 (폰 핫스팟)
+[폰 · TacitQualityMobile]
+  HmdVideoSource → AiEdgeLink (받는 대로 송출, WebRTC VP8 4~12Mbps)
+  AiFlow (서버 메시지 → 화면, 판정하지 않음) → GattBleLink(HMD) · M-07 영상 화면
+  M-05 이력 · M-06 디스크 · 결과 카드 피드백 (HTTP)
+      │  ▲
+      │  │  데이터 채널  서버 → 폰: searching · inspect · product_end  /  HTTP: /results* · /products* · /storage
+      ▼  │  WebRTC 영상  폰 → 서버 (사내 Wi-Fi, POST /offer: station_id · feedback_mode)
+[AI 서버 · gpudev]
+  a4-gateway :8080  WebRTC 수신 · 중계 · HTTP 프록시 (분석 안 함)
+      └─ 원본 I420 (+ rx_at) → a4-api :8000 /ws   PD → QI → 프레임 판정 → 제품 구간 · 확정 · 면 (GPU)
+                                └─ a4-db (PostgreSQL 17) · product_frames/ 사진 · results/ 오버레이 · logs/
 </pre>
+
+<h4>통신 구간</h4>
+<table class="col-table">
+  <tr><th style="width:16%">구간</th><th style="width:22%">방식</th><th>내용</th></tr>
+  <tr><td>HMD → 폰 영상</td><td>MJPEG over HTTP <code>http://&lt;HMD-IP&gt;:8080</code></td><td>4:3 1920×1440(목표, 카메라가 고름) · JPEG 품질 95 · 초당 12장. HMD IP는 BLE HELLO로 폰이 자동으로 받는다. 끊기면 폰이 5초마다 다시 붙는다</td></tr>
+  <tr><td>폰 → HMD 화면</td><td>BLE GATT (HMD = 서버, 폰 = 클라이언트)</td><td>SERVICE <code>9e7a1000-…</code>, DOWN <code>9e7a1001-…</code>(폰 → HMD 쓰기), UP <code>9e7a1002-…</code>(ACK notify · HELLO read).
+      쪽지: <code>SHOW</code>(화면, 순번·ACK) · <code>PING</code>(1초) · <code>HINT</code>(진행 안내) · <code>LIVE</code>(실시간 결함, 응답 없는 쓰기·최신 1개만) · <code>FACES</code>(면 진행) · <code>RESULT</code>(제품 결과)</td></tr>
+  <tr><td>폰 → 서버 영상</td><td>WebRTC (<code>POST /offer</code>, ICE 서버 없음)</td><td>HMD JPEG를 받는 대로 I420으로 넣는다(쉬는 간격 없음, 상한 = HMD 초당 12장). VP8 4~12Mbps, <code>maintain-resolution</code>. 연결 때 <code>station_id</code>(ST-02)·<code>feedback_mode</code>(manual·auto)</td></tr>
+  <tr><td>서버 → 폰 결과</td><td>WebRTC 데이터 채널 (JSON)</td><td><code>searching</code>(바뀔 때만) · <code>inspect</code>(제품 프레임마다) · <code>product_end</code>(제품마다 한 번). 3장</td></tr>
+  <tr><td>폰 ↔ 서버 조회</td><td>HTTP <code>:8080</code> (게이트웨이가 API로 프록시)</td><td>결함 오버레이 · 제품 이력·상세·프레임 사진 · 피드백 <code>PUT</code> · 디스크 사용량</td></tr>
+  <tr><td>게이트웨이 → API</td><td>WebSocket <code>/ws</code></td><td>디코딩한 원본 프레임(I420 + 수신 시각 <code>rx_at</code>). 다시 압축하지 않는다. 시험용으로 앱이 JPEG를 <code>/ws</code>에 직접 보내는 경로(<code>:8000</code>)도 같은 메시지</td></tr>
+</table>
 
 <h4>구성 요소</h4>
 <table class="col-table">
-  <tr><th style="width:22%">위치</th><th style="width:26%">요소</th><th>역할</th></tr>
-  <tr><td>HMD</td><td><code>MjpegServer</code> (기존)</td><td>프레임마다 <code>X-Seq</code>·<code>X-Captured-At</code> 파트 헤더 추가. 브라우저 호환은 그대로</td></tr>
-  <tr><td rowspan="4">폰</td><td><code>relay/HmdVideoSource</code></td><td>HMD MJPEG HTTP 수신 · multipart 파싱 → 프레임(바이트+메타)</td></tr>
-  <tr><td><code>relay/StreamRelay</code> (C2)</td><td>큐(900프레임/64MB) · 송신 루프 · 건강검사(3초) · 재연결(5초 고정) · 이벤트 발행</td></tr>
-  <tr><td><code>relay/Transport</code> · <code>WebSocketTransport</code></td><td>개발가이드 §5 인터페이스. E2에서 <code>WebRtcTransport</code>로 교체</td></tr>
-  <tr><td><code>relay/EdgeMessages</code></td><td>엣지 JSON(JUDGE·PATTERN·HB) → <code>Event</code> 변환</td></tr>
-  <tr><td rowspan="3">로컬 PC</td><td><code>edge/server.py</code></td><td>aiohttp 한 포트(<strong>8765</strong>)에 WebSocket + 대시보드 HTTP</td></tr>
-  <tr><td><code>edge/fake_judge.py</code></td><td>N초마다 부품 1개 판정(합격/불합격/REVIEW 확률) + 대시보드 버튼으로 강제 판정</td></tr>
-  <tr><td><code>tools/fake_mobile.py</code></td><td>폰 없이 엣지 시험 — 이미지 파일/웹캠을 같은 규격으로 송신</td></tr>
+  <tr><th style="width:12%">위치</th><th style="width:26%">요소</th><th>역할</th></tr>
+  <tr><td rowspan="4">HMD</td><td><code>MainActivity</code> · <code>MjpegServer</code></td><td>CameraX(Preview + ImageAnalysis, 구형 카메라 HAL이라 Preview를 함께 묶음) → JPEG → MJPEG 송출. 부팅 때 뒤에서 대기(<code>BootReceiver</code>), 폰 쪽지가 오면 앞으로 나와 카메라를 연다</td></tr>
+  <tr><td><code>link/BleServer</code></td><td>GATT 서버 · 광고. HELLO에 영상 주소와 카메라 상태</td></tr>
+  <tr><td><code>hud/HudController</code> · <code>ShowGate</code> · <code>LiveHold</code> · <code>MarkerView</code></td><td>쪽지 → 화면. 순번 검사·ACK, 큰 글자 우선순위 RESULT &gt; LIVE &gt; HINT, 결함 원 0.5초 유지, 3초 무소식 → 수동 판정 화면(H-09)</td></tr>
+  <tr><td><code>hud/Screens</code></td><td>화면 틀 — 대기(IDLE) · 조준(H-01) · 수동 판정(H-09) 등</td></tr>
+  <tr><td rowspan="6">폰</td><td><code>service/InspectionService</code></td><td>포그라운드 서비스(화면 꺼져도 교대 내내). WakeLock·WifiLock. 영상·BLE·서버 연결을 묶는다</td></tr>
+  <tr><td><code>relay/HmdVideoSource</code> · <code>ai/AiEdgeLink</code></td><td>HMD MJPEG 수신 → WebRTC 송출 · 재연결 · 통계</td></tr>
+  <tr><td><code>ai/AiFlow</code> · <code>AiMessages</code></td><td>서버 메시지 해석 → LIVE · FACES · HINT · 제품 결과 넘기기 (판정하지 않음)</td></tr>
+  <tr><td><code>hmd/GattBleLink</code> · <code>ShowWire</code> · <code>HudMirror</code></td><td>BLE 클라이언트 · 쪽지 규격 · M-07에 HMD 화면 따라 그리기</td></tr>
+  <tr><td><code>ui/screen/*</code></td><td>M-01 검사 · M-07 영상 · M-05 이력 · M-06 관리 · 통신 로그 (M-02~M-04는 예시)</td></tr>
+  <tr><td><code>core/StateMachine</code> · <code>store/*</code></td><td>상태 기계(교대·장애 띠·HMD 화면 지시) · Room(상태 기계 기록·전송 큐). 이력 화면은 서버를 본다</td></tr>
+  <tr><td rowspan="3">AI 서버</td><td><code>a4-gateway</code> (<code>server/gateway</code>)</td><td>WebRTC 수신·중계·HTTP 프록시. 분석하지 않는다. <code>--network host</code> :8080</td></tr>
+  <tr><td><code>a4-api</code> (<code>server/api</code>)</td><td>PD·QI 추론(GPU 1장), 프레임·제품 판정(<code>stream.py</code>), 사진·DB 기록, 조회 API. :8000</td></tr>
+  <tr><td><code>a4-db</code></td><td>PostgreSQL 17 — 세션(설정값·통계) · 제품 · 프레임 · 결함 프레임 · 피드백 기록</td></tr>
 </table>
 
-<h4>네트워크 (시험 구성)</h4>
+<h4>네트워크</h4>
 <ul class="checklist">
-  <li>HMD · 폰 · PC를 <strong>같은 망</strong>에 둔다 — 사무실 Wi-Fi(<code>21snail5</code>) 또는 폰 핫스팟에 PC 접속.
-      (현재 PC는 <code>172.20.10.2</code> = 아이폰 핫스팟 대역)</li>
-  <li>PC <strong>Windows 방화벽</strong>에 TCP 8765 인바운드 허용 필요 (최초 1회, 사용자가 직접)</li>
-  <li>주소 설정: 폰 M-01에 개발용 "연결 설정" — HMD IP, 엣지 주소(<code>ws://&lt;PC-IP&gt;:8765/v1/stream</code>). 값은 기기에 저장.
-      HMD IP는 C1 이후 BLE HELLO로 자동화</li>
+  <li>HMD는 <strong>폰 핫스팟</strong>, 폰과 서버는 <strong>사내 Wi-Fi</strong>(<code>192.168.1.0/24</code>, 개발 서버 <code>192.168.1.11</code>). 폰은 두 망에 동시에 붙는다</li>
+  <li>STUN/TURN이 없어 LTE 등 다른 망에서는 WebRTC가 안 된다. USB <code>adb reverse</code>로도 안 된다(TCP만 전달)</li>
+  <li>평문 HTTP·WS — 안드로이드 cleartext 예외 설정 필요</li>
 </ul>
+
+<h4>기록 위치</h4>
+<table class="col-table">
+  <tr><th style="width:16%">위치</th><th>내용</th></tr>
+  <tr><td>서버 DB</td><td><code>sessions</code>(연결 · 모드 · <code>config</code> 판정 설정값 · <code>stats</code> 연결 통계) · <code>products</code>(제품 판정 · 면 · 피드백) · <code>frames</code>(제품 프레임마다 판정 · PD 상자 · 결함 · 사진 경로) · <code>results</code>(결함 프레임, 1초 1장) · <code>feedback_log</code>(피드백 변경)</td></tr>
+  <tr><td>서버 파일</td><td><code>product_frames/</code> 제품 프레임 전부(JPEG 90, 자동 삭제 없음) · <code>results/</code> 결함 오버레이 · <code>logs/</code> 이벤트 로그(jsonl)</td></tr>
+  <tr><td>폰</td><td>Room <code>inspection</code>·<code>outbox</code>(개발 중 — 스키마가 바뀌면 지우고 다시 만든다) · 통신 로그(메모리, 탭마다 최근 300줄, 복사 가능)</td></tr>
+  <tr><td>HMD</td><td>기록 없음</td></tr>
+</table>

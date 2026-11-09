@@ -14,7 +14,7 @@ import kotlinx.serialization.json.longOrNull
 
 /**
  * AI 서버 → 폰 메시지 — 「제품 불량 판정 — 모바일 앱 연동 API」 2026-11-03 규격 §3 + 2026-11-06 제품 단위 판정
- * (`server/PLAN_product_feedback.md` §3·§4). `state` 필드로 구분, 모르는 필드는 무시. 설계서 §9.
+ * (`server/PLAN_product_feedback.md` §3·§4). `state` 필드로 구분, 모르는 필드는 무시. 설계서 §3.
  */
 sealed interface AiMsg {
     /** 제품이 안 보임. reason: no_product · (없음 — WebSocket 연결 직후) */

@@ -17,7 +17,7 @@ import android.view.TextureView
 
 /**
  * Camera2 직접 촬영 — 출력 2개: 화면 미리보기(TextureView) + 인코더 입력 표면. 녹화용 표준 구성(TEMPLATE_RECORD).
- * 설계서 §8. CameraX 는 이 조합(미리보기 + 임의 표면)을 직접 열 수 없어 Camera2 를 쓴다.
+ * 설계서 §4. CameraX 는 이 조합(미리보기 + 임의 표면)을 직접 열 수 없어 Camera2 를 쓴다.
  *
  * RealWear 520 함정(hmd-app 메모): 구형 HAL 은 미리보기 표면이 있어야 시작되고, SurfaceView 는 안 되며 TextureView 는 된다.
  * 세션 구성이 거부되면 [onError] — 호출자가 MJPEG 예비 모드로 되돌린다.

@@ -30,7 +30,7 @@ data class SegmentSummary(
 )
 
 /**
- * AI 서버 메시지 → 실시간 표시 · 면 진행 · 제품 결과. 설계서 §9, `server/PLAN_product_feedback.md`.
+ * AI 서버 메시지 → 실시간 표시 · 면 진행 · 제품 결과. 설계서 §3, `server/PLAN_product_feedback.md`.
  * 안드로이드·WebRTC 를 모른다(단위 시험 대상).
  *
  * 2026-11-06: 제품 구간·결함 확정·제품 판정은 **서버가 한다**(product_end). 앱은 받은 것을 그대로 보이고 넘긴다.

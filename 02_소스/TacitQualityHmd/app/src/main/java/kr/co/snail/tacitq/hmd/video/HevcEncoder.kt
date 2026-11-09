@@ -10,7 +10,7 @@ import android.util.Log
 import android.view.Surface
 
 /**
- * 하드웨어 H.265(HEVC) 인코더 — 설계서 §8 (E2). 카메라가 [inputSurface] 에 그리면 압축된 프레임이 [onFrame] 으로 나온다.
+ * 하드웨어 H.265(HEVC) 인코더 — 설계서 §4 (E2). 카메라가 [inputSurface] 에 그리면 압축된 프레임이 [onFrame] 으로 나온다.
  *
  *  - 키프레임 1초마다. 키프레임 앞에 코덱 설정(VPS/SPS/PPS)을 붙여, 아무 때나 붙은 수신자도 1초 안에 화면을 복원한다.
  *  - 출력은 Annex-B(시작 부호 00 00 00 01) 접근 단위 — 폰은 손대지 않고 엣지로 넘긴다.

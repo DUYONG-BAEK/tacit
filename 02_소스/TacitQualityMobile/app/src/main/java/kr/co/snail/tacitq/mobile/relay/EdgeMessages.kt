@@ -7,7 +7,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
 /**
- * 엣지 ↔ 폰 텍스트 메시지 — 설계서 §3 ③④. 필드명은 snake_case 로 고정.
+ * 엣지 ↔ 폰 텍스트 메시지 — 설계서 부록 C ③④. 필드명은 snake_case 로 고정.
  */
 sealed interface EdgeMsg {
     @Serializable

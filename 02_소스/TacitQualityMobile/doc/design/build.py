@@ -7,15 +7,17 @@ import os
 
 # (섹션ID, 사이드바 제목) 순서대로 — 위에서 아래 순서가 화면 순서
 SECTIONS = [
-    ("overview",     "1. 개요 · 범위"),
+    ("overview", "1. 개요 · 범위"),
     ("architecture", "2. 구성 · 데이터 경로"),
-    ("protocol",     "3. 전송 규격 (WebSocket)"),
-    ("mobile",       "4. 모바일 C2 StreamRelay"),
-    ("edge",         "5. 모의 엣지 서버 (Python)"),
-    ("test-plan",    "6. 시험 계획 · 완료 기준"),
-    ("issues",       "7. 열린 문제 · 결정 필요"),
-    ("e2-hevc",      "8. E2 — H.265 1080p 전환"),
-    ("ai-edge",      "9. 실제 엣지(AI 서버) 연동"),
+    ("ai-edge", "3. AI 서버 연동 — 판정 · 메시지 · 화면"),
+    ("e2-hevc", "4. E2 — H.265 1080p 전환 (보류)"),
+    ("e1-overview", "부록 A. E1 개요 · 범위"),
+    ("e1-architecture", "부록 B. E1 구성 · 데이터 경로"),
+    ("protocol", "부록 C. E1 전송 규격 (WebSocket)"),
+    ("mobile", "부록 D. E1 모바일 C2 StreamRelay"),
+    ("edge", "부록 E. E1 모의 엣지 서버 (Python)"),
+    ("test-plan", "부록 F. E1 시험 계획 · 완료 기준"),
+    ("issues", "부록 G. E1 열린 문제 · 결정 필요"),
 ]
 
 BASE_DIR   = os.path.dirname(os.path.abspath(__file__))

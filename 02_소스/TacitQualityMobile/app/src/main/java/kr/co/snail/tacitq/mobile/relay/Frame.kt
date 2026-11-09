@@ -6,7 +6,7 @@ import kotlinx.serialization.json.Json
 import java.nio.ByteBuffer
 
 /**
- * 중계할 프레임 한 장 — HMD 가 준 원본(JPEG 또는 H.265 접근 단위) + 폰이 붙인 메타. 설계서 §3 ② · §8.
+ * 중계할 프레임 한 장 — HMD 가 준 원본(JPEG 또는 H.265 접근 단위) + 폰이 붙인 메타. 설계서 부록 C ② · §4.
  * 영상은 절대 손대지 않는다(재압축·리사이즈 금지 — 개발가이드 §5).
  */
 class Frame(

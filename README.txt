@@ -19,7 +19,8 @@ HMD(RealWear Navigator 520) 카메라 영상을 모바일(Android)이 받아 AI 
 
 [폴더]
 01_문서
- - 설계서.html: 9장이 AI 서버(WebRTC, 프레임 단위 판정) 연동
+ - 설계서.html: 1~4장이 지금 시스템(1 개요 · 2 구성 · 3 AI 서버 연동 · 4 H.265 보류),
+   부록 A~G는 2026-10 E1(모의 엣지) 기록 (2026-11-09 재편 — 옛 9장 = 3장, 옛 8장 = 4장)
  - 작업일지.html: 단계별 작업과 시험 결과 (마지막 항목: 2026-11-09 실서버 실측 · 송출 간격 · 면 기준)
  - TacitQ_*.pptx: 10월 현황 자료 (11-03 규격 변경 전 내용)
    두 html 은 02_소스/TacitQualityMobile/doc 의 build.py 로 만든 사본입니다 (sections/*.html 을 고친 뒤 build)

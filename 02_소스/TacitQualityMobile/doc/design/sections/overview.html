@@ -1,36 +1,42 @@
 <div class="section-head">
   <h3>1. 개요 · 범위</h3>
-  <span class="status confirmed">확정</span>
+  <span class="status confirmed">현재 기준 (2026-11-09)</span>
 </div>
 
-<p><strong>목표:</strong> HMD 카메라 영상을 폰이 받아 <strong>엣지 서버로 실시간 중계</strong>하고,
-엣지가 돌려준 판정을 폰 상태기계(C3)에 넣는 길을 완성한다. 엣지는 당분간 <strong>개발자 PC(로컬)</strong>에서 도는 모의 서버로 시험한다.</p>
+<p><strong>목표:</strong> 작업자가 HMD(RealWear Navigator 520)를 쓰고 제품을 손에 든 채 돌려 보면, AI 서버가 <strong>프레임마다</strong> 결함을 찾아
+HMD 화면과 폰 화면에 바로 표시하고, 제품 하나가 끝날 때마다 <strong>합격·불합격을 판정해 기록</strong>한다.
+작업자는 수동 모드에서 제품마다 판정이 맞았는지 피드백을 넣고, 이 피드백이 학습 라벨이 된다.</p>
 
-<h4>단계 구분</h4>
+<h4>역할 분담</h4>
 <table class="col-table">
-  <tr><th style="width:18%">단계</th><th>영상 형식 · 전송</th><th style="width:28%">상태</th></tr>
-  <tr><td><strong>이번 (E1)</strong></td><td>HMD <strong>MJPEG</strong>(JPEG 프레임 연속, 640×480 · 약 14fps) → 폰 → <strong>WebSocket</strong> → 로컬 PC 엣지</td><td>이 설계서 범위</td></tr>
-  <tr><td>다음 (E2)</td><td>HMD <strong>H.265</strong> 1080p 인코딩 → 전송을 <strong>WebRTC</strong>로 교체 (MA-04)</td><td>Transport 인터페이스만 갈아끼움</td></tr>
+  <tr><th style="width:16%">기기</th><th>하는 일</th><th style="width:26%">하지 않는 일</th></tr>
+  <tr><td><strong>HMD</strong></td><td>카메라 영상 송출(MJPEG 4:3 1920×1440, 초당 12장) · 폰이 BLE로 보낸 화면 표시(판정 글자 · 결함 원 · 면 칩 · 제품 결과) · 폰이 3초 동안 아무 쪽지도 보내지 않으면 스스로 "수동 판정" 화면</td><td>판정 · 기록</td></tr>
+  <tr><td><strong>모바일</strong></td><td>HMD 영상을 받는 대로 AI 서버로 중계(WebRTC) · 서버 메시지를 HMD(BLE)와 폰 화면에 표시 · 작업자 피드백을 서버로 전달 · 서버 이력·사진·디스크 조회 · 통신 로그</td><td><strong>계산·판정</strong> — 서버 값을 그대로 쓴다. PD·QI 임곗값도 서버가 정한다</td></tr>
+  <tr><td><strong>AI 서버(엣지)</strong></td><td>PD(제품 탐지) → QI(불량 탐지) 프레임 판정 · 제품 구간 · 결함 확정 · 제품 판정 · 면 진행 · 사진·DB 기록 · 이력·피드백·디스크 API</td><td>영상 표시 · 학습(모델은 서버 밖에서 학습해 .pt만 가져온다)</td></tr>
 </table>
 
-<div class="note-box">
-  <strong>MJPEG도 실시간 영상이다.</strong> JPEG 사진을 초당 약 14장 연달아 흘려보내는 방식이라 지연은 짧고,
-  H.265 대비 단점은 <em>용량</em>뿐이다(640×480에선 부담 없음). 엣지 AI는 어차피 프레임을 한 장씩 풀어 판정하므로
-  E1 시험에는 오히려 다루기 쉽다.
-</div>
+<h4>작업자 사용 흐름</h4>
+<table class="col-table">
+  <tr><th style="width:5%">#</th><th style="width:22%">작업자</th><th>시스템</th></tr>
+  <tr><td>1</td><td>HMD 전원을 켠다</td><td>HMD 앱이 뒤에서 떠 BLE 광고 (화면은 홈 그대로)</td></tr>
+  <tr><td>2</td><td>폰 핫스팟을 켜고 사내 Wi-Fi에도 연결</td><td>HMD는 핫스팟, 서버는 사내 Wi-Fi로</td></tr>
+  <tr><td>3</td><td>폰 M-01에서 모드(수동·자동) 확인 → <strong>검사 시작</strong></td><td>폰이 BLE로 HMD를 찾아 붙고(HMD 영상 주소를 HELLO로 받음), HMD 영상과 AI 서버 연결을 연다. HMD 앱이 앞으로 나와 카메라를 켜고, 폰은 M-07 영상 화면으로 넘어간다</td></tr>
+  <tr><td>4</td><td>제품을 들고 <strong>멈추지 않고 천천히</strong> 돌려 본다</td><td>HMD 가운데 "검사 중" · 결함 프레임이면 ✕ 불합격(빨강)·? 애매(노랑) + 결함 위치 원 · 아래 면 칩 줄(■ 상면 □ 엣지 □ 하면비닐)</td></tr>
+  <tr><td>5</td><td>제품을 내려놓는다</td><td>1초 뒤 서버가 제품을 끝내고 판정 → HMD에 "✓ 합격"·"✕ 불합격 · 결함 종류" 2초, 폰에 결과 카드, 불합격이면 폰 진동 3회</td></tr>
+  <tr><td>6</td><td>(수동 모드) 폰에서 <strong>맞음·틀림·확인필요</strong></td><td>서버에 피드백 저장. 누르지 않고 다음 제품으로 가면 "미입력"으로 남는다</td></tr>
+  <tr><td>7</td><td>M-01에서 <strong>교대 마감</strong></td><td>HMD에 대기 화면을 보낸 뒤 연결을 끊는다(HMD는 장애로 보지 않음)</td></tr>
+  <tr><td>8</td><td>M-05 이력에서 미입력·확인필요를 정리</td><td>서버 기록을 조회, 프레임 사진 넘겨 보기·결함 확대, 피드백 수정(변경 기록이 남음). M-06에서 서버 디스크</td></tr>
+</table>
 
-<h4>이번 범위 (E1)</h4>
+<h4>범위 밖 (지금)</h4>
 <ul class="checklist">
-  <li><strong>HMD</strong>: MJPEG 각 프레임에 순번·촬영시각 헤더 추가 (작은 변경)</li>
-  <li><strong>모바일</strong>: C2 <code>StreamRelay</code> — HMD MJPEG 수신 → 메타데이터 부착 → WebSocket으로 엣지 송신,
-      엣지 판정 수신 → <code>Event.JudgeResult</code> → 상태기계</li>
-  <li><strong>모바일</strong>: M-01 "검사 시작"이 <code>InspectionService</code>를 띄우고 교대를 시작하도록 배선 (빈 껍데기 <code>RelayService</code> 정리)</li>
-  <li><strong>엣지(신규)</strong>: <code>TacitQEdgeServer</code> (Python) — 영상 수신 · 브라우저 실시간 보기 · 통계 · <strong>가짜 판정 회신</strong></li>
+  <li>인증·HTTPS (같은 사내망 전제, 피드백은 누구나 수정 가능)</li>
+  <li>사람의 최종 판정 절차(끄덕임·가로젓기·트레이) — 서버 규격에서 없어졌다. 코드는 호출만 끊어 두었다(HMD 수동 판정 화면의 제스처 안내도 표시만)</li>
+  <li>H.265 전송 — 구현했으나 기본값 보류 (4장)</li>
+  <li>해상도별 검출률 비교, HMD → 폰 → 서버 → HMD 구간별 지연 실측</li>
+  <li>M-01 점검 6항목, M-02~M-04, M-06 지표 — 화면 예시 데이터</li>
 </ul>
 
-<h4>범위 밖</h4>
-<ul class="checklist">
-  <li>실제 AI 추론(게이팅·면 분할·앙상블) — 모의 엣지는 가짜 판정</li>
-  <li>판정이 <strong>HMD 화면</strong>까지 가는 것 — 폰의 실제 BLE 연결(C1 <code>BleLink</code>)이 필요. 이번엔 폰 로그·알림으로 확인, C1에서 연결</li>
-  <li>HMD 로컬 링버퍼·소급 판정(UPLOAD_REQ), Wi-Fi Direct</li>
-</ul>
+<div class="note-box"><strong>문서 구성 (v2.0, 2026-11-09):</strong> 1~4장이 지금 시스템, 부록 A~G는 2026-10 E1 단계(모의 엣지) 설계 기록이다.
+옛 번호 → 새 번호: 1·2장 → 부록 A·B, 3~7장 → 부록 C~G, 8장 → 4장, 9장 → 3장. 작업일지·옛 발표 자료의 "설계서 §9"는 지금의 3장이다.
+<br><strong>근거 문서:</strong> 앱 연동 규격 <code>server/A4_WEBRTC_API.md</code> · 서버 구성·배포 <code>server/DEPLOY.md</code> · 결정 기록 <code>server/PLAN_product_feedback.md</code>(2026-11-06)·<code>PLAN_realtime_inspect.md</code>(2026-11-03)</div>

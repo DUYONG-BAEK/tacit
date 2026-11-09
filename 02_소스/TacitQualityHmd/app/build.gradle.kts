@@ -15,7 +15,7 @@ android {
         versionCode = 2
         versionName = "0.2.0"
         ndk { abiFilters += "arm64-v8a" }
-        buildConfigField("String", "VIDEO_MODE", "\"mjpeg\"")  // 2026-10-07 사용자 요청으로 MJPEG 720p 복귀. H.265: "hevc" (설계서 §8)
+        buildConfigField("String", "VIDEO_MODE", "\"mjpeg\"")  // 2026-10-07 사용자 요청으로 MJPEG 720p 복귀. H.265: "hevc" (설계서 §4)
     }
 
     buildTypes {

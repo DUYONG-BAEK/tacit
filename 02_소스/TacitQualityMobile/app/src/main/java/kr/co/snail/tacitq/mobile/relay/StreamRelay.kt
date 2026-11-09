@@ -13,7 +13,7 @@ import kr.co.snail.tacitq.mobile.model.Verdict
 
 /**
  * C2 StreamRelay — HMD 영상을 손대지 않고 엣지로 넘기고, 엣지 판정을 상태기계로 되돌린다.
- * 개발가이드 §5 · 설계서(doc/design) §3·§4.
+ * 개발가이드 §5 · 설계서(doc/design) 부록 C·D.
  *
  *  - **큐**: 최대 [maxFrames]장 · [maxBytes]. 엣지가 느리면 여기 쌓는다. 90% 넘으면 [Event.RelayOverflow].
  *    가득 차면 새 프레임을 버리되 순번(seq)은 소비해 엣지가 누락을 셀 수 있게 한다. **몰래 화질을 낮추지 않는다.**

@@ -7,7 +7,7 @@ import kr.co.snail.tacitq.mobile.ai.FeedbackMode
 
 /**
  * 개발용 연결 설정 — HMD 영상 주소 · 엣지 종류 · 엣지 주소. 기기에 저장한다.
- * 엣지 종류: [EDGE_MOCK] 모의 엣지(WebSocket) / [EDGE_AI] 실제 AI 서버(WebRTC, 설계서 §9).
+ * 엣지 종류: [EDGE_MOCK] 모의 엣지(WebSocket) / [EDGE_AI] 실제 AI 서버(WebRTC, 설계서 §3).
  */
 class DevSettings(private val context: Context) {
     private val prefs = context.getSharedPreferences("dev_connection", Context.MODE_PRIVATE)

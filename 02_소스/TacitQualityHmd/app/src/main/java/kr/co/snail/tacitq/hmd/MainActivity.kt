@@ -44,7 +44,7 @@ import java.util.concurrent.Executors
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
-    /** "hevc"(기본, 설계서 §8 E2) | "mjpeg"(예비) — adb: am start ... --es video mjpeg */
+    /** "hevc"(기본, 설계서 §4 E2) | "mjpeg"(예비) — adb: am start ... --es video mjpeg */
     private val videoMode by lazy { intent.getStringExtra(EXTRA_VIDEO) ?: BuildConfig.VIDEO_MODE }
     /**
      * MJPEG 해상도 — 4:3(센서 비율). 2026-11-05: 16:9(1920×1080)는 4:3 센서의 위아래를 잘라 기본 카메라 앱보다

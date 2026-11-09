@@ -12,7 +12,7 @@ import kotlin.concurrent.thread
 
 /**
  * 프레임 송출 서버 — 외부 라이브러리 없이 ServerSocket 으로 `multipart/x-mixed-replace` 스트림을 내보낸다.
- * 이름은 1단계(MJPEG) 때 그대로 — 지금은 [contentType] 에 따라 JPEG 또는 H.265 프레임을 보낸다(설계서 §8).
+ * 이름은 1단계(MJPEG) 때 그대로 — 지금은 [contentType] 에 따라 JPEG 또는 H.265 프레임을 보낸다(설계서 §4).
  *
  * 파트마다 `X-Seq`·`X-Captured-At`·`X-Key` 헤더. 폰 중계기(C2)가 그대로 엣지로 넘긴다.
  * **수신자마다 큐**를 둬서 프레임을 빠짐없이 순서대로 보낸다 — H.265 는 한 장만 빠져도 다음 키프레임까지 화면이 깨진다.

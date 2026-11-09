@@ -49,7 +49,7 @@ import kotlin.coroutines.suspendCoroutine
 
 /**
  * 실제 AI 엣지 연결 — HMD JPEG 를 WebRTC 영상 트랙으로 AI 서버에 보내고, 데이터 채널 메시지를 [AiFlow] 로 넘긴다.
- * 설계서 §9 · 「제품 불량 판정 — 모바일 앱 연동 API」 2026-11-03 규격 §5 + 2026-11-06 제품 단위(`server/PLAN_product_feedback.md`).
+ * 설계서 §3 · 「제품 불량 판정 — 모바일 앱 연동 API」 2026-11-03 규격 §5 + 2026-11-06 제품 단위(`server/PLAN_product_feedback.md`).
  * 모의 엣지용 [StreamRelay] 자리를 그대로 대신한다(같은 offer · status).
  *
  *  - 영상: HMD JPEG 가 오는 대로 I420 으로 바꿔 넣는다(쉬는 간격 없음 — HMD 송출 초당 12장이 상한). 변환이 밀리면 최신 1장만 남긴다.
@@ -120,7 +120,7 @@ class AiEdgeLink(
     @Suppress("UNUSED_PARAMETER")
     fun offer(hmdSeq: Long, capturedAt: Long, data: ByteArray, codec: String = "jpeg", key: Boolean = true) {
         received++
-        if (codec == "jpeg") latest.trySend(data)    // H.265 는 1차 범위 밖(설계서 §9) — HMD 기본값이 MJPEG
+        if (codec == "jpeg") latest.trySend(data)    // H.265 는 1차 범위 밖(설계서 §3) — HMD 기본값이 MJPEG
     }
 
     /** 취소될 때까지 연결·재연결·영상 넣기를 돌린다. */
