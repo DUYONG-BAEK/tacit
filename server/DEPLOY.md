@@ -422,7 +422,7 @@ docker inspect a4-api --format '{{range .Mounts}}{{.Destination}} {{end}}'
 
 ### 5.C 전부 지우고 다시 설치 — 한 번에 (데이터 영구 삭제)
 
-아래 블록 **전체를 한 번에 붙여 넣는다.** 명령은 처음 설치 ①~⑦과 같고 (설명은 거기), 하나의 `bash -euo pipefail`로 돌아 **오류나 `[멈춤]`이 나면 그 자리에서 멈춘다.** ②에서 멈추면 아무것도 지우지 않은 채 옛 서비스가 그대로 돈다. ③에서 10초 기다리는 동안 Ctrl+C면 전체가 취소된다.
+아래 블록 **전체를 한 번에 붙여 넣는다.** 붙여 넣으면 먼저 DB 비밀번호(영문·숫자)를 묻고, 입력하면 나머지가 끝까지 혼자 돈다. 명령은 처음 설치 ①~⑦과 같고 (설명은 거기), 하나의 `bash -euo pipefail`로 돌아 **오류나 `[멈춤]`이 나면 그 자리에서 멈춘다.** ②에서 멈추면 아무것도 지우지 않은 채 옛 서비스가 그대로 돈다. ③에서 10초 기다리는 동안 Ctrl+C면 전체가 취소된다.
 
 - 준비: 새 코드 묶음(저장소 `server/` 폴더)을 `/tmp/new`에, 모델은 `models/`에.
 - **DB·사진·오버레이·로그를 보관하지 않고 지운다** (지우는 것·남는 것은 처음 설치 ③). 데이터를 남기려면 먼저 §6.5 DB 덤프.
@@ -432,6 +432,9 @@ docker inspect a4-api --format '{{range .Mounts}}{{.Destination}} {{end}}'
 cd /home/admin/odServer && bash -euo pipefail <<'REDEPLOY'
 # ── 처음 설치 ①~⑦과 같은 명령 (DEPLOY.md §5.C). ③이 전부 지운다. 오류가 나면 그 자리에서 멈춘다 ──
 echo; echo '══ ① 준비'
+read -rsp "새 DB 비밀번호 (영문·숫자): " A4_DB_PASSWORD < /dev/tty; echo
+[[ "$A4_DB_PASSWORD" =~ ^[A-Za-z0-9]+$ ]] && echo "password set" \
+  || { echo "[멈춤] 비밀번호가 비었거나 영문·숫자가 아닌 문자가 있다 — @ : / 등은 DATABASE_URL 을 깨뜨린다. 첫 블록(read)부터 다시"; false; }
 cd /home/admin/odServer   # 프로젝트 폴더 ($PWD)
 #   새 코드 묶음(저장소의 server/ 폴더 — api/ gateway/ DEPLOY.md A4_WEBRTC_API.md PLAN_*.md)을 /tmp/new 에 풀어 둔다
 ls /tmp/new/api/api.py /tmp/new/gateway/gateway.py /tmp/new/DEPLOY.md >/dev/null && echo "새 코드 OK" || { echo "[멈춤] /tmp/new 에 새 코드가 없다"; false; }
@@ -466,9 +469,8 @@ rm -rf db product_frames results frames logs stream_out webrtc_out
 mkdir -p db product_frames results frames logs/a4-api logs/a4-gateway
 docker ps -a --format '{{.Names}}' | grep '^a4-' || echo "a4- 컨테이너 없음 — OK"
 echo; echo '══ ④ DB'
-#   비밀번호는 만들어서 a4-db 설정에만 둔다 (화면에 찍지 않는다). 16진수만 — @ : / 같은 문자는 DATABASE_URL 을 깨뜨린다.
-#   입력받지 않는다 — §5.C 처럼 한 번에 붙여 넣으면 다음 줄이 비밀번호로 들어간다. 새 셸에서는 ⑤ 첫 줄이 a4-db 설정에서 읽는다
-A4_DB_PASSWORD=$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')
+#   비밀번호는 ①의 첫 블록에서 입력한 값 (a4-db 설정에 들어간다). 새 셸이면 ①의 첫 블록(read)을 다시 실행한다
+[ -n "$A4_DB_PASSWORD" ] && echo "password set" || { echo "[멈춤] 비밀번호가 없다 — ①의 첫 블록(read)부터"; false; }
 docker network create a4-net
 docker run -d --name a4-db --network a4-net --restart unless-stopped \
   -e POSTGRES_USER=a4 -e POSTGRES_PASSWORD="$A4_DB_PASSWORD" -e POSTGRES_DB=a4 -e TZ=Asia/Seoul \
@@ -535,10 +537,10 @@ REDEPLOY
 
 | 단계 | 하는 일 | 기존 서비스 |
 |---|---|---|
-| ① 준비 | 새 코드로 교체, 모델 확인 | 계속 돈다 |
+| ① 준비 | DB 비밀번호 입력, 새 코드로 교체, 모델 확인 | 계속 돈다 |
 | ② 빌드 | 두 이미지 캐시 없이 빌드, 이미지 안 코드 확인 | 계속 돈다 (실패하면 여기서 멈추고 기존 서비스 유지) |
 | ③ 내리기·지우기 | 컨테이너·네트워크 삭제, 데이터 영구 삭제 | **여기서 중단** |
-| ④ DB | 새 `a4-db` (비밀번호 자동 생성) |  |
+| ④ DB | 새 `a4-db` (①에서 입력한 비밀번호) |  |
 | ⑤ API | `a4-api` 기동 (GPU 0) |  |
 | ⑥ 스테이션 등록 | ST-01, ST-02 |  |
 | ⑦ 게이트웨이·설치 확인 | `a4-gateway` 기동, 테이블·마운트·조회 확인, 옛 이미지 정리 | 재개 |
@@ -554,6 +556,12 @@ REDEPLOY
 ### ① 준비
 
 ```bash
+read -rsp "새 DB 비밀번호 (영문·숫자): " A4_DB_PASSWORD < /dev/tty; echo
+```
+
+```bash
+[[ "$A4_DB_PASSWORD" =~ ^[A-Za-z0-9]+$ ]] && echo "password set" \
+  || { echo "[멈춤] 비밀번호가 비었거나 영문·숫자가 아닌 문자가 있다 — @ : / 등은 DATABASE_URL 을 깨뜨린다. 첫 블록(read)부터 다시"; false; }
 cd /home/admin/odServer   # 프로젝트 폴더 ($PWD)
 #   새 코드 묶음(저장소의 server/ 폴더 — api/ gateway/ DEPLOY.md A4_WEBRTC_API.md PLAN_*.md)을 /tmp/new 에 풀어 둔다
 ls /tmp/new/api/api.py /tmp/new/gateway/gateway.py /tmp/new/DEPLOY.md >/dev/null && echo "새 코드 OK" || { echo "[멈춤] /tmp/new 에 새 코드가 없다"; false; }
@@ -569,6 +577,8 @@ for m in $(grep -o 'yolo_[a-z_]*_[0-9]*\.pt' api/detect.py | sort -u); do
 done
 ```
 
+- 첫 블록은 비밀번호 입력만 한다 — 입력은 터미널에서 직접 받는다(`< /dev/tty`). 이 블록을 따로 붙여 넣고 입력한 뒤 다음 블록으로 간다. §5.C에서는 붙여 넣자마자 이것을 묻고, 입력하면 나머지가 끝까지 혼자 돈다.
+- 비밀번호는 영문·숫자로 정한다 — @ : / 같은 문자는 DATABASE_URL을 깨뜨린다. 화면에 찍히지 않고, `a4-db` 설정에 들어간다.
 - `/tmp/new`에는 저장소 `server/` 폴더를 그대로 둔다. `models/`·`samples/`·`videos/`는 프로젝트 폴더에 있는 것을 쓴다 — `/tmp/new/models`는 복사하지 않는다.
 - ⑧ 시험에 쓸 자료: `samples/`에 제품 사진 몇 장(.jpg), `videos/`에 제품을 찍은 영상. 없으면 ⑧ 전에 넣는다.
 
@@ -610,9 +620,8 @@ docker ps -a --format '{{.Names}}' | grep '^a4-' || echo "a4- 컨테이너 없�
 ### ④ DB
 
 ```bash
-#   비밀번호는 만들어서 a4-db 설정에만 둔다 (화면에 찍지 않는다). 16진수만 — @ : / 같은 문자는 DATABASE_URL 을 깨뜨린다.
-#   입력받지 않는다 — §5.C 처럼 한 번에 붙여 넣으면 다음 줄이 비밀번호로 들어간다. 새 셸에서는 ⑤ 첫 줄이 a4-db 설정에서 읽는다
-A4_DB_PASSWORD=$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')
+#   비밀번호는 ①의 첫 블록에서 입력한 값 (a4-db 설정에 들어간다). 새 셸이면 ①의 첫 블록(read)을 다시 실행한다
+[ -n "$A4_DB_PASSWORD" ] && echo "password set" || { echo "[멈춤] 비밀번호가 없다 — ①의 첫 블록(read)부터"; false; }
 docker network create a4-net
 docker run -d --name a4-db --network a4-net --restart unless-stopped \
   -e POSTGRES_USER=a4 -e POSTGRES_PASSWORD="$A4_DB_PASSWORD" -e POSTGRES_DB=a4 -e TZ=Asia/Seoul \
@@ -627,7 +636,7 @@ done
   || { docker logs --tail 20 a4-db; echo "[멈춤] DB 가 2분 안에 준비되지 않았다"; false; }
 ```
 
-- 비밀번호를 볼 일이 있으면: `docker inspect a4-db --format '{{range .Config.Env}}{{println .}}{{end}}' | grep POSTGRES_PASSWORD` (화면·기록에 남는다).
+- 새 셸에서 비밀번호가 필요하면(⑤ 이후) ⑤ 첫 줄처럼 `a4-db` 설정에서 읽는다. 직접 보려면: `docker inspect a4-db --format '{{range .Config.Env}}{{println .}}{{end}}' | grep POSTGRES_PASSWORD` (화면·기록에 남는다).
 
 ### ⑤ API
 
