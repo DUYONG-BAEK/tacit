@@ -446,10 +446,10 @@ for m in $(grep -o 'yolo_[a-z_]*_[0-9]*\.pt' api/detect.py | sort -u); do
   ls -l "models/$m" || { echo "[멈춤] models/$m 없음"; false; }
 done
 echo; echo '══ ② 빌드'
-#   --no-cache 를 쓰지 않는다 — Dockerfile·requirements.txt 가 그대로면 apt·pip 층은 캐시를 쓰고 코드(COPY)만 새로 들어간다.
-#   (gpudev 는 컨테이너 안에서 apt 저장소 접속이 막힌 적이 있다 — 2026-11-09). 새 코드가 들어갔는지는 아래 비교로 본다
-docker build -t a4-api api/
-docker build -t a4-gateway gateway/
+#   --no-cache: 캐시 없이 처음부터 빌드한다 (apt·pip 패키지도 새로 받는다).
+#   a4-api 의 apt 는 mirror.kakao.com 을 쓴다 — gpudev DNS 가 archive.ubuntu.com 을 접속 안 되는 주소로 알려 주기 때문 (2026-11-09, Dockerfile)
+docker build --no-cache -t a4-api api/
+docker build --no-cache -t a4-gateway gateway/
 diff <(docker run --rm --entrypoint sh a4-api -c 'sha256sum *.py') <(cd api && sha256sum *.py) \
   && diff <(docker run --rm --entrypoint sh a4-gateway -c 'sha256sum *.py') <(cd gateway && sha256sum *.py) \
   && echo "BUILD OK — 이미지 안 코드 = 새 코드" \
@@ -536,7 +536,7 @@ REDEPLOY
 | 단계 | 하는 일 | 기존 서비스 |
 |---|---|---|
 | ① 준비 | 새 코드로 교체, 모델 확인 | 계속 돈다 |
-| ② 빌드 | 두 이미지 빌드, 이미지 안 코드 확인 | 계속 돈다 (실패하면 여기서 멈추고 기존 서비스 유지) |
+| ② 빌드 | 두 이미지 캐시 없이 빌드, 이미지 안 코드 확인 | 계속 돈다 (실패하면 여기서 멈추고 기존 서비스 유지) |
 | ③ 내리기·지우기 | 컨테이너·네트워크 삭제, 데이터 영구 삭제 | **여기서 중단** |
 | ④ DB | 새 `a4-db` (비밀번호 자동 생성) |  |
 | ⑤ API | `a4-api` 기동 (GPU 0) |  |
@@ -575,10 +575,10 @@ done
 ### ② 빌드
 
 ```bash
-#   --no-cache 를 쓰지 않는다 — Dockerfile·requirements.txt 가 그대로면 apt·pip 층은 캐시를 쓰고 코드(COPY)만 새로 들어간다.
-#   (gpudev 는 컨테이너 안에서 apt 저장소 접속이 막힌 적이 있다 — 2026-11-09). 새 코드가 들어갔는지는 아래 비교로 본다
-docker build -t a4-api api/
-docker build -t a4-gateway gateway/
+#   --no-cache: 캐시 없이 처음부터 빌드한다 (apt·pip 패키지도 새로 받는다).
+#   a4-api 의 apt 는 mirror.kakao.com 을 쓴다 — gpudev DNS 가 archive.ubuntu.com 을 접속 안 되는 주소로 알려 주기 때문 (2026-11-09, Dockerfile)
+docker build --no-cache -t a4-api api/
+docker build --no-cache -t a4-gateway gateway/
 diff <(docker run --rm --entrypoint sh a4-api -c 'sha256sum *.py') <(cd api && sha256sum *.py) \
   && diff <(docker run --rm --entrypoint sh a4-gateway -c 'sha256sum *.py') <(cd gateway && sha256sum *.py) \
   && echo "BUILD OK — 이미지 안 코드 = 새 코드" \
@@ -853,9 +853,9 @@ rm -f trunc.jpg bomb.png black.jpg
 코드는 빌드할 때 이미지에 복사된다. `docker restart`는 옛 이미지를 계속 쓰므로 **재빌드 후 컨테이너를 새로 만든다.** `a4-db`는 그대로 둔다.
 
 ```bash
-docker build -t a4-api api/ && echo "BUILD OK"
+docker build --no-cache -t a4-api api/ && echo "BUILD OK"
 docker run --rm --entrypoint grep a4-api -c "class Products" stream.py
-#   기대: BUILD OK, 1 — 안 나오면 여기서 멈춘다 (아래를 실행하면 옛 이미지로 다시 뜬다). --no-cache는 쓰지 않는다 (§5.B 3)
+#   기대: BUILD OK, 1 — 안 나오면 여기서 멈춘다 (아래를 실행하면 옛 이미지로 다시 뜬다)
 export A4_DB_PASSWORD=$(docker inspect a4-db --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^POSTGRES_PASSWORD=//p')
 [ -n "$A4_DB_PASSWORD" ] && echo "password set" || echo "EMPTY — 여기서 멈춘다"
 docker rm -f a4-api
@@ -878,7 +878,7 @@ docker logs a4-api 2>&1 | grep -E '"event": "(startup|db_ready)"' | tail -n 2
 - 게이트웨이를 바꿨으면:
 
 ```bash
-docker build -t a4-gateway gateway/ && echo "BUILD OK"
+docker build --no-cache -t a4-gateway gateway/ && echo "BUILD OK"
 #   BUILD OK가 안 나오면 여기서 멈춘다
 docker rm -f a4-gateway
 docker run -d --name a4-gateway --network host --restart unless-stopped \
