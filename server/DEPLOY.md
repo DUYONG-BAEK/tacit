@@ -347,19 +347,41 @@ mkdir -p product_frames
 docker exec a4-db pg_dump -U a4 a4 > archive_frame_mode/a4_db.sql && ls -l archive_frame_mode/a4_db.sql
 docker rm -f a4-gateway a4-api
 
-# 5. 비밀번호를 읽고 §5 ⑤의 docker run(product_frames 마운트가 더해졌다) → startup·db_ready, 이어서 §5 ⑦
+# 5. API 다시 띄우기 — 비밀번호를 a4-db 설정에서 읽는다. EMPTY면 여기서 멈춘다 (비면 DB 접속 실패로 재시작만 반복)
 export A4_DB_PASSWORD=$(docker inspect a4-db --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^POSTGRES_PASSWORD=//p')
 [ -n "$A4_DB_PASSWORD" ] && echo "password set" || echo "EMPTY — 여기서 멈춘다"
+docker run -d --name a4-api --gpus '"device=0"' -p 8000:8000 --restart unless-stopped \
+  --network a4-net \
+  -e DATABASE_URL="postgresql://a4:$A4_DB_PASSWORD@a4-db:5432/a4" \
+  -v $PWD/models:/app/models:ro \
+  -v $PWD/logs/a4-api:/app/logs \
+  -v $PWD/frames:/app/frames \
+  -v $PWD/product_frames:/app/product_frames \
+  -v $PWD/results:/app/results \
+  --log-opt max-size=50m --log-opt max-file=3 \
+  a4-api
+timeout 180 sh -c 'until curl -sf -o /dev/null localhost:8000/docs; do sleep 2; done' \
+  && echo "API ready" || docker logs --tail 30 a4-api
+docker logs a4-api 2>&1 | grep -E '"event": "(startup|db_ready)"' | tail -n 2
+#   기대: startup 다음 db_ready (db_ready가 없으면 비밀번호·DB 확인)
 
-# 6. 새 테이블·마운트 확인
+# 6. 게이트웨이 다시 띄우기 — 여기서 서비스 재개
+docker run -d --name a4-gateway --network host --restart unless-stopped \
+  -v $PWD/logs/a4-gateway:/app/logs \
+  --log-opt max-size=50m --log-opt max-file=3 \
+  a4-gateway
+until curl -sf -o /dev/null localhost:8080/docs; do sleep 1; done; echo "gateway ready"
+
+# 7. 새 테이블·마운트 확인
 docker exec a4-db psql -U a4 -d a4 -c '\dt'
 #   기대: alerts, decisions, feedback_log, frames, products, results, sessions, stations
 docker inspect a4-api --format '{{range .Mounts}}{{.Destination}} {{end}}'
 #   기대: /app/product_frames 가 들어 있다
 ```
 
-- 7. §5 ⑧ 확인에 더해: 앱(또는 `webrtc_client.py --mode manual`)으로 제품을 비췄다 치우면 `product_end`가 오는지, `GET :8080/products?station=ST-02&limit=1`에 그 제품이 보이는지, `product_frames/<오늘>/`에 사진이 쌓이는지, `GET :8080/storage`가 200인지.
-- 8. `A4_WEBRTC_API.md` 머리말을 배포 날짜와 확인 결과로 고치고, 앱 개발자에게 알린다.
+- 8. §5 ⑧ 확인에 더해: 앱(또는 `webrtc_client.py --mode manual`)으로 제품을 비췄다 치우면 `product_end`가 오는지, `GET :8080/products?station=ST-02&limit=1`에 그 제품이 보이는지, `product_frames/<오늘>/`에 사진이 쌓이는지, `GET :8080/storage`가 200인지.
+- 9. `A4_WEBRTC_API.md` 머리말을 배포 날짜와 확인 결과로 고치고, 앱 개발자에게 알린다.
+- 5·6의 명령은 §5 ⑤·⑦과 같다 (한쪽을 고치면 다른 쪽도 고친다). 스테이션(§5 ⑥)은 DB에 그대로 있으므로 다시 등록하지 않는다.
 - **되돌리기**: `archive_frame_mode/`의 `api`·`gateway`를 제자리로 복사해 다시 빌드하고, 옛 명령(`product_frames` 마운트 없이)으로 띄운다. 새 테이블은 옛 코드가 쓰지 않으므로 그대로 둬도 된다.
 
 ### 처음 설치 — 이상탐지를 내리고 PD·QI로 다시 올리기 (①~⑧)
@@ -690,10 +712,35 @@ docker build -t a4-api api/ --no-cache
 export A4_DB_PASSWORD=$(docker inspect a4-db --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^POSTGRES_PASSWORD=//p')
 [ -n "$A4_DB_PASSWORD" ] && echo "password set" || echo "EMPTY — 여기서 멈춘다"
 docker rm -f a4-api
-# §5 ⑤의 docker run 명령 그대로, 이어서 startup·db_ready 확인
+docker run -d --name a4-api --gpus '"device=0"' -p 8000:8000 --restart unless-stopped \
+  --network a4-net \
+  -e DATABASE_URL="postgresql://a4:$A4_DB_PASSWORD@a4-db:5432/a4" \
+  -v $PWD/models:/app/models:ro \
+  -v $PWD/logs/a4-api:/app/logs \
+  -v $PWD/frames:/app/frames \
+  -v $PWD/product_frames:/app/product_frames \
+  -v $PWD/results:/app/results \
+  --log-opt max-size=50m --log-opt max-file=3 \
+  a4-api
+timeout 180 sh -c 'until curl -sf -o /dev/null localhost:8000/docs; do sleep 2; done' \
+  && echo "API ready" || docker logs --tail 30 a4-api
+docker logs a4-api 2>&1 | grep -E '"event": "(startup|db_ready)"' | tail -n 2
+#   기대: startup 다음 db_ready
 ```
 
-- 게이트웨이를 바꿨으면 `docker build -t a4-gateway gateway/ --no-cache && docker rm -f a4-gateway` 후 §5 ⑦.
+- 게이트웨이를 바꿨으면:
+
+```bash
+docker build -t a4-gateway gateway/ --no-cache
+docker rm -f a4-gateway
+docker run -d --name a4-gateway --network host --restart unless-stopped \
+  -v $PWD/logs/a4-gateway:/app/logs \
+  --log-opt max-size=50m --log-opt max-file=3 \
+  a4-gateway
+until curl -sf -o /dev/null localhost:8080/docs; do sleep 1; done; echo "gateway ready"
+```
+
+- 위 `docker run` 명령은 §5 ⑤·⑦·§5.B와 같다 (한쪽을 고치면 다른 쪽도 고친다).
 - **응답 필드나 `/ws` 연결 방식을 바꾸면 API와 게이트웨이를 같이 재배포한다.**
 
 ### 6.2 모델 교체
