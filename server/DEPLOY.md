@@ -1,6 +1,6 @@
 # 제품 불량 판정 서버 — 구성·배포·운영
 
-기준: 2026-11-06 코드 (제품 단위 판정·작업자 피드백·제품 프레임 사진 저장). **이번 변경은 실서버 미확인** — 작성 환경에서 가짜 모델로만 확인했다 (§8). gpudev는 2026-11-03 코드(프레임 단위)로 돈다 — 올리는 절차는 §5.B.
+기준: 2026-11-06 코드 (제품 단위 판정·작업자 피드백·제품 프레임 사진 저장). gpudev에 **2026-11-09 배포**했고, 앱(ST-02) 연결의 로그로 처리 속도를 실측했다 (§8). 같은 날 면 기준을 3 → 5장으로 바꿨다 (`stream.FACE_MIN_FRAMES`, §3.4) — 올리려면 §6.1로 API를 다시 빌드한다.
 
 이상탐지(DINOv2 + memory bank) 서버를 내리고, **PD(제품 탐지) → QI(불량 탐지)** 두 YOLO 모델로 다시 올린다. 이 문서가 서버의 기준 문서다.
 
@@ -116,7 +116,7 @@ archive_product_mode/            제품 단위 단계의 코드·문서·DB 덤�
 
 - **제품 상자 안의 결함만** 남긴다: 결함 상자의 **중심**이 어느 PD 상자 안(경계 포함)에 있으면 남기고, 아니면(배경) 버린다 (`detect.filter_in_products`).
 - **score** = 남은 결함의 최대 conf. 결함이 없으면 0.
-- **decision**: 기준값 `T = detect.QI_CONF`(임시 0.25)에 대해 `score > T × 1.1` → `NG`, `score < T × 0.9` → `OK`, 그 사이 → `REVIEW`.
+- **decision**: 기준값 `T = detect.QI_CONF`(임시 0.4)에 대해 `score > T × 1.1` → `NG`, `score < T × 0.9` → `OK`, 그 사이 → `REVIEW`.
 - QI 추론 하한은 `T × 0.9`로 자동 계산한다. 그보다 낮은 결함은 판정을 OK에서 바꾸지 못하므로 받지 않는다. 그래서 **OK ⇔ `detections == []`** 이고, NG·REVIEW면 `detections`가 1개 이상이다.
 - `defect_label` = 가장 확실한 결함 이름(`detections[0].label`), OK면 `null`.
 - 프레임 사이에서 상자를 합치지 않는다. 깜빡임(결함이 잡혔다 안 잡혔다)은 앱이 표시를 약 0.5초 유지해 처리한다 (`A4_WEBRTC_API.md` §3.4). 프레임을 모아 제품 하나로 판정하는 것은 아래 §3.4의 제품 구간이 한다.
@@ -132,7 +132,7 @@ archive_product_mode/            제품 단위 단계의 코드·문서·DB 덤�
 
 - **제품 구간** (`stream.Products`, 2026-11-06 — 옛 앱 규칙을 옮김): 첫 제품 프레임에서 시작, 마지막 제품 프레임 뒤 `SEGMENT_END_S`(1초) 동안 제품 프레임이 없거나 연결이 끊기면 끝. `searching` 한 장은 끝내지 않는다. 프레임이 오지 않아도 `TICK_S`(0.2초)마다 끝을 검사한다. 한 번에 제품 하나를 든다고 본다 (추적기 없음).
 - **결함 확정·제품 판정**: 구간 안 최근 `CONFIRM_WINDOW`(5)장 중 `CONFIRM_HITS`(2)장 이상이 NG·REVIEW면 확정 (안에 NG가 있으면 NG, 없으면 REVIEW, 나중에 NG로 올라갈 수 있다). 확정이 없으면 `PASS`, 있으면 `FAIL`. 끝나면 `product_end`를 보낸다 (연결이 끊겨 끝나면 보내지 못하고 기록만 한다).
-- **면 진행**: PD 라벨(엣지·상면·하면비닐)별로 그 제품에서 잡힌 프레임 수. `FACE_MIN_FRAMES`(3)장 이상이면 그 면을 본 것, 모두 보면 `complete`. 구간을 끝내지는 않는다. `inspect`·`product_end`에 실린다.
+- **면 진행**: PD 라벨(엣지·상면·하면비닐)별로 그 제품에서 잡힌 프레임 수. `FACE_MIN_FRAMES`(5)장 이상이면 그 면을 본 것 (2026-11-09 3 → 5, 결함 확정 창 5장과 맞춤), 모두 보면 `complete`. 구간을 끝내지는 않는다. `inspect`·`product_end`에 실린다.
 - **피드백 모드**: `/ws?mode=manual|auto`(게이트웨이는 `/offer`의 `feedback_mode`를 넘긴다). 제품의 피드백 초기값이 수동이면 `NOT_ENTERED`(미입력), 자동이면 `NONE`(피드백 없음). 사람은 `PUT /products/{id}/feedback`으로 `CORRECT`·`WRONG`·`UNSURE`를 넣고 바꾼다 (누구나, 변경 기록 `feedback_log`).
 - **저장**: 제품 프레임은 **전부** 사진(§4.2)과 `frames` 행을 남긴다. 결함 프레임(NG·REVIEW)은 그와 별도로 **연결마다 1초에 최대 1장** 오버레이와 `results` 행을 남기고, 그 프레임의 `inspect`에만 `result_id`·`overlay_url`이 붙는다 (나머지는 `null`).
 - 순서: `inspect`를 **먼저 보내고** 사진·오버레이·DB 행은 뒤에서 쓴다. 기록은 연결마다 한 줄로 차례대로 한다 (`products` → `results` → `frames` 외래 키 순서). 그래서 `inspect`를 받자마자 오버레이를 요청하면 `404`일 수 있다 (앱은 0.5초 뒤 한 번 더).
@@ -143,8 +143,8 @@ archive_product_mode/            제품 단위 단계의 코드·문서·DB 덤�
 
 | 파일 | 이름 | 값 | 뜻 |
 |---|---|---|---|
-| `api/detect.py` | `QI_CONF` | 0.25 (임시) | 판정 기준값 T. REVIEW 구간과 QI 추론 하한이 따라 움직인다 |
-| | `PD_CONF` | 0.25 | PD 상자로 인정하는 conf (Ultralytics 기본값) |
+| `api/detect.py` | `QI_CONF` | 0.4 (임시) | 판정 기준값 T. REVIEW 구간과 QI 추론 하한이 따라 움직인다 |
+| | `PD_CONF` | 0.4 | PD 상자로 인정하는 conf (Ultralytics 기본값 0.25보다 높게) |
 | | `TILE`, `STEP` | 640, 512 | QI 타일 크기·간격 (학습 격자) |
 | | `NMS_IOU` | 0.5 | 타일 중복 정리 |
 | | `PD_MODEL`, `QI_MODEL` | 파일명 | `models/` 안의 모델 파일 |
@@ -152,13 +152,13 @@ archive_product_mode/            제품 단위 단계의 코드·문서·DB 덤�
 | `api/stream.py` | `REVIEW_MARGIN` | 0.1 | REVIEW 폭 (T 대비) |
 | | `SEGMENT_END_S` | 1.0 | 마지막 제품 프레임 뒤 이만큼 없으면 제품 끝 |
 | | `CONFIRM_WINDOW`, `CONFIRM_HITS` | 5, 2 | 결함 확정: 최근 5장 중 2장 |
-| | `FACE_MIN_FRAMES` | 3 | 면을 "봄"으로 치는 프레임 수 |
+| | `FACE_MIN_FRAMES` | 5 | 면을 "봄"으로 치는 프레임 수 (2026-11-09 3 → 5) |
 | `api/api.py` | `SAVE_INTERVAL_S` | 1.0 | 결함 프레임(오버레이·`results`) 저장 간격 (연결마다) |
 | | `FRAME_JPEG_QUALITY` | 90 | 제품 프레임 사진 JPEG 품질 (I420 원본을 받았을 때. JPEG를 받으면 그대로 저장) |
 | | `TICK_S` | 0.2 | 프레임이 없을 때 제품 끝 검사 간격 |
 | | `STORAGE_SCAN_S` | 300 | `/storage` 용량 계산 간격 |
 
-- 게이트웨이의 `FORWARD_FPS`(초당 10장 간격 제한)는 2026-11-06에 없앴다. 도착 간격이 조금만 흔들려도 다음 장을 버리므로 2026-11-05 실측 초당 약 7장의 원인으로 봤다. 앱이 초당 10장 이하로 보내고 API가 가장 최근 프레임만 처리한다.
+- 게이트웨이의 `FORWARD_FPS`(초당 10장 간격 제한)는 2026-11-06에 없앴다. 도착 간격이 조금만 흔들려도 다음 장을 버리므로 2026-11-05 실측 초당 약 7장의 원인으로 봤다. 그러나 없앤 뒤에도 2026-11-09 서버 도착이 초당 6.9장이었다 — 원인은 앱이 프레임을 넣은 뒤 100ms를 쉬어 주기가 100ms + 변환 시간이 된 것이다. 2026-11-09부터 앱은 HMD 프레임을 받는 대로 보낸다 (초당 약 12장, HMD 송출 속도가 상한). API는 가장 최근 프레임만 처리한다.
 
 - 설정값은 코드에 있다. **바꾸면 이미지를 다시 빌드하고 컨테이너를 새로 만든다** (§6.1).
 - 환경변수 `CONSECUTIVE_N`(연속 판정 알림)은 없어졌다. `docker run`에서 넘기지 않았으므로 명령은 바뀌지 않는다.
@@ -217,7 +217,7 @@ archive_product_mode/            제품 단위 단계의 코드·문서·DB 덤�
 ### 4.2 프레임·결과 저장
 
 - `product_frames/<날짜>/<session_id>/<seq 6자리>.jpg` (2026-11-06부터): **제품이 보인 프레임 전부**. 게이트웨이 경유(I420 원본)는 `FRAME_JPEG_QUALITY`(90)로 압축하고, JPEG를 받은 연결(테스트·직접 연결)은 받은 바이트 그대로 쓴다. 경로는 `frames.file`·`results.frames_dir`에 남는다. 제품이 안 보인 프레임은 저장하지 않는다.
-- 양: 1920×1440 품질 90이 한 장 약 0.3~0.5MB면, 제품을 계속 비출 때 스테이션 하나당 시간당 약 11~18GB (추정). 실제 양은 `GET /storage`·앱 M-06에서 본다.
+- 양: 1920×1440 품질 90이 한 장 약 0.3~0.5MB면, 앱이 초당 12장을 보내고 제품을 계속 비출 때 스테이션 하나당 시간당 약 13~22GB (추정, PD가 놓친 프레임은 저장하지 않으므로 실제는 그보다 적다). 실제 양은 `GET /storage`·앱 M-06에서 본다.
 - `frames/<날짜>/<result_id>.jpg`: 2026-11-06 전에 저장한 결함 프레임의 원본 (받은 바이트 그대로 — 게이트웨이가 만든 JPEG quality 95). 새 코드는 쓰지 않는다.
 - `results/<날짜>/<result_id>/overlay.jpg`: 그 프레임 위에 결함 상자. 테두리와 글자는 상자 **바깥쪽**에 그린다 (결함이 수십 px로 작아 안쪽에 그리면 가린다). 조회 엔드포인트가 이 파일을 돌려준다.
 - `result_id` = `[direct_]<세션 12자리>-<seq 6자리>`. 게이트웨이를 거치지 않은 연결(테스트)은 `direct_`가 붙는다.
@@ -533,7 +533,7 @@ timeout 180 sh -c 'until curl -sf -o /dev/null localhost:8000/docs; do sleep 2; 
   && echo "API ready" || docker logs --tail 30 a4-api
 docker logs a4-api 2>&1 | grep -E '"event": "(startup|db_ready)"' | tail -n 2
 #   기대: startup (checkpoint "yolo_product_detection_model_…pt@…|yolo_quality_inspection_model_…pt@…",
-#         pd_classes 3개, qi_classes 18개, pd_conf 0.25, qi_conf 0.25) 다음 db_ready
+#         pd_classes 3개, qi_classes 18개, pd_conf 0.4, qi_conf 0.4) 다음 db_ready
 docker exec a4-db psql -U a4 -d a4 -c '\dt'
 #   기대: alerts, decisions, results, sessions, stations
 docker exec a4-db psql -U a4 -d a4 -c '\d results' | grep -E 'detections|frame_size|mask_path|is_anomalous'
@@ -577,14 +577,14 @@ IMG=$(ls samples/*.jpg | head -1); echo "$IMG"
 curl -s -F "file=@$IMG" localhost:8000/predict | python3 -c "
 import sys, json; r = json.load(sys.stdin)
 print(len(r['products']), r['decision'], r['defect_label'], [(d['label'], round(d['conf'], 2)) for d in r['detections']], round(r['score'], 3), r['threshold'])"
-#   기대: 제품 상자 개수 ≥ 1, decision, defect_label, 제품 상자 안의 결함 목록, 점수, 0.25 (가모델이라 결함 결과 자체는 맞지 않을 수 있다)
+#   기대: 제품 상자 개수 ≥ 1, decision, defect_label, 제품 상자 안의 결함 목록, 점수, 0.4 (가모델이라 결함 결과 자체는 맞지 않을 수 있다)
 #   KeyError가 나면 422(제품 없음)다 — PD가 그 사진에서 제품을 못 찾은 것이니 다른 사진으로 바꾼다
 for i in 1 2 3; do curl -s -o /dev/null -F "file=@$IMG" localhost:8000/predict; done
 grep '"event": "predict"' logs/a4-api/$D.jsonl | tail -n 3 | python3 -c "
 import sys, json
 for l in sys.stdin: r = json.loads(l); print(r['image_size'], r['ms'])"
 #   ms.pd = 프레임 1장 PD 시간, ms.qi = 사진 1장 QI 시간 (타일 수에 비례: 1080p 8타일, 4K 32타일).
-#   /ws는 프레임마다 decode + pd + qi를 차례로 한다 — 합이 100ms를 넘으면 초당 10장을 처리하지 못한다 (아래 처리 속도)
+#   /ws는 프레임마다 decode + pd + qi를 차례로 한다 — 합이 약 83ms를 넘으면 앱이 보내는 초당 12장을 처리하지 못한다 (아래 처리 속도)
 ```
 
 **API — 예외·동시 요청**
@@ -666,7 +666,7 @@ grep '"event": "ws_close"' logs/a4-api/$D.jsonl | tail -n 1 | python3 -c "
 import sys, json; c = json.loads(sys.stdin.read())
 print('fps', round(c['processed'] / c['duration_s'], 1), '밀림', c['frames'] - c['processed'] - c['skipped_frames'], 'ms_avg', c['ms_avg'])"
 #   기록: 영상 해상도별(4K 테스트 영상, 가능하면 1080p 영상) fps·밀림·ms_avg.
-#   ms_avg.decode + pd + qi가 100ms를 넘으면 제품을 비추는 동안 초당 10장을 처리하지 못한다 — 1080p에서 그렇다면 §8 처리 속도
+#   ms_avg.decode + pd + qi가 약 83ms를 넘으면 제품을 비추는 동안 초당 12장을 처리하지 못한다 — 1080p에서 그렇다면 §8 처리 속도
 #   inspect가 한 번도 안 나오면 PD가 영상에서 제품을 못 찾는 것이다
 ```
 
@@ -842,14 +842,21 @@ cat /proc/sys/net/ipv4/ip_local_port_range
 
 ## 8. 알려진 제약과 확인하지 않은 것
 
+**확인한 것 — 실서버 (gpudev, 2026-11-09)** — 11-06 코드 배포 뒤 앱(ST-02, 1920×1440) 연결의 `a4-api` 로그 (GPU NVIDIA RTX PRO 4500 Blackwell):
+
+- 프레임 1장 처리 (`ws_close.ms_avg`, 305장): decode **2ms**(I420 원본 — 11-05 JPEG 때 34ms) + PD 11ms + QI 24ms = **약 37ms** → 서버만으로는 초당 약 27장. 밀림 0 (받은 프레임을 모두 처리).
+- 결함 저장 프레임 1장 (`inspect_saved.ms`, 1920×1440 115장): 합 중앙 68ms · 90% 75ms · 최대 114ms (11-05~11-09 합산 — 대부분 11-05의 JPEG 전달이라 decode가 크다).
+- **서버 도착 속도** (`inspect_saved`의 `seq` 간격): 중앙 초당 **6.9장** (6.0~7.3) — 앱이 넣은 뒤 100ms를 쉬던 것이 원인 (§3.5). 제품이 잡힌 프레임은 초당 약 5장 (PD가 도착 프레임의 약 70%에서 제품을 잡음).
+- `product_end` 기록과 면 진행 (`faces`) 확인.
+
 **확인한 것 — 제품 단위·피드백 (작성 환경, 2026-11-06)** — 이번에는 실제 FastAPI·websockets·aiortc·psycopg(PostgreSQL 16)를 설치해 돌렸다. PD·QI만 색으로 상자를 찾는 가짜 YOLO다. `/ws`·HTTP 42건 + WebRTC 게이트웨이 종단:
 
-- 제품 구간(1초 무소식·프레임이 끊긴 뒤 tick·연결 끊김), 확정(NG 3장 → FAIL/NG, REVIEW만 → FAIL/REVIEW), 면 진행(3장째부터 `faces_seen`, 세 면 → `complete`), `product_end` 필드·순서(앞 제품 끝이 다음 제품 첫 `inspect`보다 먼저), 피드백 초기값(manual `NOT_ENTERED`·auto `NONE`).
+- 제품 구간(1초 무소식·프레임이 끊긴 뒤 tick·연결 끊김), 확정(NG 3장 → FAIL/NG, REVIEW만 → FAIL/REVIEW), 면 진행(3장째부터 `faces_seen`, 세 면 → `complete` — 2026-11-09 5장으로 바꾼 뒤 4장째 미확인·5장째 확인을 가짜 `detect`로 다시 확인), `product_end` 필드·순서(앞 제품 끝이 다음 제품 첫 `inspect`보다 먼저), 피드백 초기값(manual `NOT_ENTERED`·auto `NONE`).
 - 저장: 제품 프레임마다 사진·`frames` 행, JPEG 입력은 받은 바이트 그대로, I420 입력은 JPEG로, 결함 프레임 1초에 1장 `results`·오버레이, `best_result_id`, 끊김 제품 `disconnect` 기록.
 - API: 피드백 입력·같은 값 무기록·수정·변경 기록·`NONE` 입력 422·없는 제품 404, 목록(최신 순·`before` 페이지·feedback/decision/날짜 필터·잘못된 필터 422), 상세, 프레임 목록·사진·`overlay=1`·없는 프레임 404, `/storage`, `/ws?mode=bad` 4422.
 - 게이트웨이: `webrtc_client.py --mode manual`로 동영상(10fps, 90장) → 제품 2개(FAIL·PASS) `product_end`, 제품 프레임 40장 모두 `inspect`(간격 제한 삭제로 버린 장 없음), `/products*`·`PUT`·`/storage` 중계, 잘못된 `feedback_mode` 422.
 
-**확인하지 않은 것 (2026-11-06)**: 실제 YOLO·GPU, 실서버(gpudev) 배포, 실제 모바일·HMD 앱 연결(앱의 안드로이드 코드는 이 환경에서 빌드하지 못했다), I420 전달·JPEG 품질 90에서의 처리 속도와 디스크 증가량.
+**확인하지 않은 것 (2026-11-06 → 2026-11-09 현재)**: 실서버 배포·실제 YOLO·GPU·I420 처리 속도는 위 "실서버 (gpudev, 2026-11-09)"에서 확인했다. 남은 것: 앱이 초당 12장을 보낼 때의 도착 속도·VP8 화질, 디스크 증가량, 폰 화면에서의 피드백·이력 종단.
 
 **확인한 것 — 프레임 단위 (작성 환경, 2026-11-03)** — torch·ultralytics·FastAPI·websockets·psycopg·aiortc를 설치할 수 없어 PD·QI를 색으로 상자를 찾는 가짜 모델로, FastAPI·websockets·aiortc·httpx를 대역으로 바꾸고 실제 `api.py`·`stream.py`·`detect.py`·`db.py`·`stream_client.py`·`gateway.py`·`webrtc_client.py`를 돌렸다. SQL은 psql을 거쳐 실제 PostgreSQL 16에서 실행했다 (드라이버만 대역). 125개 확인 통과.
 
@@ -871,7 +878,7 @@ cat /proc/sys/net/ipv4/ip_local_port_range
 
 **알려진 제약**
 
-- **처리 속도**: 프레임마다 디코딩 → PD → QI가 차례로 돈다. 4K 사진 실측 합계 약 175ms(decode 100 + PD 10 + QI 63) → 제품을 비추는 동안 약 5.7fps. 1080p는 측정 전. 10fps에 못 미치면 처리가 밀린 프레임을 건너뛴다 (`inspect`가 덜 온다). 1080p에서도 부족하면 (a) 다음 프레임 PD를 이전 프레임 QI와 겹쳐 돌리기, (b) QI를 PD 상자와 겹치는 타일에만 돌리기 순으로 검토한다 (`PLAN_realtime_inspect.md` §9 R1).
+- **처리 속도**: 프레임마다 디코딩 → PD → QI가 차례로 돈다. 4K 사진 실측 합계 약 175ms(decode 100 + PD 10 + QI 63) → 제품을 비추는 동안 약 5.7fps. 1920×1440(I420)은 2026-11-09 실측 약 37ms로 여유가 있다. 앱이 보내는 장수에 못 미치면 처리가 밀린 프레임을 건너뛴다 (`inspect`가 덜 온다). 부족해지면(4K, GPU 한 장에 스테이션 여럿 등) (a) 다음 프레임 PD를 이전 프레임 QI와 겹쳐 돌리기, (b) QI를 PD 상자와 겹치는 타일에만 돌리기 순으로 검토한다 (`PLAN_realtime_inspect.md` §9 R1).
 - **가모델**: 판정·결함 종류가 자주 틀린다. QI val(122장, conf 0.1)에서 결함이 없는 24장 중 14장에 검출이 나왔다. 프레임마다 판정하므로 오탐이 앱 화면에 그대로 보이고, 결함 프레임 저장(1초에 1장)도 계속될 수 있다 (§4.2 디스크). 제품 상자 제한으로 배경 오탐은 줄지만 제품 위 오탐은 남는다.
 - **제품 상자 제한**: PD 상자가 제품을 덜 덮으면 가장자리 결함이 버려진다. 실제 영상에서 버려진 결함을 보고 필요하면 "중심" 대신 "겹침"으로 바꾼다 (`PLAN_realtime_inspect.md` §9 R5).
 - **해상도**: QI는 4K 원본의 640 타일로 학습했다. 1080p 운영 프레임에서는 결함이 학습 때의 절반 크기로 보인다 (§3.2).

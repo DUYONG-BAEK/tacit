@@ -26,14 +26,14 @@
    - 게이트웨이는 answer를 만들기 전에 A4 API `/ws`에 먼저 연결해 확인한다.
    - `422`: `station_id`가 없거나 빈 값, `feedback_mode`가 manual·auto가 아님(없으면 auto). `403`: 등록되지 않은 스테이션. `503`: 판정 서버(A4 API 또는 DB)에 연결할 수 없음.
 3. 데이터 채널 메시지는 `/ws`와 같다 (`searching` / `inspect`, `A4_WEBRTC_API.md` §3). 게이트웨이는 고치지 않고 그대로 넘긴다.
-   - `inspect`는 제품이 보이는 프레임마다 온다 (초당 최대 10개). `decision`(OK / NG / REVIEW)과 `detections`(제품 상자 안의 결함)로 표시한다.
+   - `inspect`는 제품이 보이는 프레임마다 온다 (앱이 보내는 만큼 — 지금 초당 약 12개). `decision`(OK / NG / REVIEW)과 `detections`(제품 상자 안의 결함)로 표시한다.
    - 메시지에 이미지는 없다. 서버가 저장한 결함 프레임의 `inspect`에만 `result_id`·`overlay_url`이 붙고, 이미지는 `GET http://<서버>:8080<overlay_url>`로 받는다.
 4. 연결 하나가 `/ws` 세션 하나다. 연결을 유지한 채 제품을 바꿔 가며 비춘다.
 5. **장애 시 게이트웨이가 연결을 닫는다.** A4 API 쪽 연결이 끊기거나 중계 중 예외가 나면 WebRTC 연결이 닫힌다. 앱은 연결 상태(`disconnected` 기준 권장)로 감지하고 새 `POST /offer`로 재연결한다 (새 세션). 끊긴 동안의 프레임은 판정되지 않고, 끊기기 전에 받은 `result_id`의 이미지는 그대로 조회할 수 있다.
 
 `/results/*`(조회 2개)와 `/products`·`/products/<id>`·`PUT /products/<id>/feedback`·`/products/<id>/frames`·`/products/<id>/frames/<seq>.jpg`·`/storage`는 게이트웨이가 A4 API로 쿼리 문자열까지 그대로 넘긴다. 이미지는 A4 API가 `results/`에 저장한 파일이고, 게이트웨이 메모리에는 두지 않는다. 사람의 최종 판정(`POST /results/<id>/decision`)은 없어졌다 — `404`.
 
-영상 해상도·코덱은 정하지 않는다. 게이트웨이는 받은 프레임을 거르지 않고 모두 원본(I420)으로 넘긴다: `b"I420"` + 가로·세로(uint16 LE) + `rx_at`(int64 LE, 게이트웨이가 받은 시각 epoch ms) + Y·U·V 평면. 앱이 초당 10장 이하로 보내고, A4 API가 가장 최근 프레임만 처리한다. 4K 원본도 약 12MB로 uvicorn WebSocket 기본 한도(16MB) 안이다.
+영상 해상도·코덱은 정하지 않는다. 게이트웨이는 받은 프레임을 거르지 않고 모두 원본(I420)으로 넘긴다: `b"I420"` + 가로·세로(uint16 LE) + `rx_at`(int64 LE, 게이트웨이가 받은 시각 epoch ms) + Y·U·V 평면. 앱은 HMD 프레임을 받는 대로(초당 약 12장) 보내고, A4 API가 가장 최근 프레임만 처리한다. 4K 원본도 약 12MB로 uvicorn WebSocket 기본 한도(16MB) 안이다.
 
 ## 실행 (프로젝트 폴더 `$PWD`에서)
 
@@ -110,7 +110,7 @@ firewall-cmd --reload
 
 - 연결(`POST /offer`)마다 6자리 연결 ID(peer)를 만들어 모든 줄에 붙인다. 같은 ID가 A4 API 로그의 `client`로 남으므로, 두 로그를 이 ID로 맞춰 본다.
 - `docker logs -f a4-gateway`에는 기존 형식으로 찍힌다: `[peer <ID>] offer from <IP>`, `[peer <ID>] connected`, `[a4 <ID>] {...}`, `[peer <ID>] track ended`, `[peer <ID>] relay summary {...}`. A4 API 쪽 끊김이나 중계 중 예외는 `[forward <ID>] ...`로 남고, 이어서 WebRTC 연결이 닫힌다. 데이터 채널이 아직 열리지 않아 앱에 못 보낸 메시지는 `(데이터 채널 닫힘 — 앱에 못 보냄)`이 붙는다.
-- **`decision`이 OK인 `inspect`는 한 줄씩 남기지 않는다.** 제품을 비추는 동안 초당 최대 10개라, 기기 1대가 한 시간 비추면 약 36,000줄이 된다. 대신 연결이 끝날 때 `relay_summary` 한 줄에 개수를 남긴다. `searching`과 NG·REVIEW `inspect`는 지금처럼 한 줄씩 남긴다.
+- **`decision`이 OK인 `inspect`는 한 줄씩 남기지 않는다.** 제품을 비추는 동안 초당 10여 개라, 기기 1대가 한 시간 비추면 약 40,000줄이 된다. 대신 연결이 끝날 때 `relay_summary` 한 줄에 개수를 남긴다. `searching`과 NG·REVIEW `inspect`는 지금처럼 한 줄씩 남긴다.
 - 같은 내용이 `$PWD/logs/a4-gateway/<날짜>.jsonl`에 한 줄씩(JSON) 남는다. 날짜 단위로 새 파일에 쓰고, **지우지 않는다.** 날짜와 시각은 컨테이너 시간대를 따르며, Dockerfile에 `TZ=Asia/Seoul`(한국 시간)과 `tzdata` 설치를 명시해 두었다.
 
 | event | 필드 |

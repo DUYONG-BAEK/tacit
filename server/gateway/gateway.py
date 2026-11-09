@@ -6,7 +6,7 @@
     앱 ── /results/*, /products*, /storage ──▶ gateway ──▶ A4 API   (그대로 넘긴다)
 
 프레임은 다시 압축하지 않는다 (PLAN_product_feedback.md §7.1): b"I420" + width·height(uint16 LE) + rx_at(int64 LE,
-게이트웨이가 받은 시각 epoch ms) + Y·U·V 평면. 앱이 초당 10장 이하로 보내고 A4 API가 가장 최근 프레임만 처리하므로
+게이트웨이가 받은 시각 epoch ms) + Y·U·V 평면. 앱은 HMD 프레임을 받는 대로(초당 약 12장) 보내고 A4 API가 가장 최근 프레임만 처리하므로
 게이트웨이는 프레임을 거르지 않는다.
 
 연결 절차 (앱):
@@ -25,7 +25,7 @@
 
 로그: 연결마다 ID(peer)를 만들어 모든 출력에 붙이고, /ws에 ?client=<ID>로 넘겨 A4 API 로그와 맞춘다.
 출력(print)과 같은 내용을 logs/<날짜>.jsonl에도 남긴다. 날짜가 바뀌면 새 파일에 쓰고, 지우지 않는다.
-decision이 OK인 inspect는 초당 최대 10개라 한 줄씩 남기지 않고, 연결이 끝날 때 개수만
+decision이 OK인 inspect는 초당 10여 개라 한 줄씩 남기지 않고, 연결이 끝날 때 개수만
 relay_summary 한 줄로 남긴다.
 """
 
@@ -148,7 +148,7 @@ async def forward(track, ws, pc: RTCPeerConnection, channel: asyncio.Future, pee
         while True:
             frame = await track.recv()
             rx_at = round(time.time() * 1000)
-            # 거르지 않는다 — 앱이 초당 10장 이하로 보내고, A4 API가 가장 최근 프레임만 처리한다.
+            # 거르지 않는다 — 앱이 HMD 프레임을 받는 대로(초당 약 12장) 보내고, A4 API가 가장 최근 프레임만 처리한다.
             # (옛 1/FORWARD_FPS 간격 제한은 도착 간격이 조금만 흔들려도 다음 장을 버린다 — 2026-11-05 실측 초당 약 7장의 원인으로 본다)
             await ws.send(await asyncio.to_thread(to_i420, frame, rx_at))
     except MediaStreamError:

@@ -1,7 +1,7 @@
 # 품질검사 지원 APP — 모바일 모듈
 
 > **대외비 — 외부 공개 금지**
-> 제조암묵지기반 AI모델개발사업 (RS-2026-25590666) · ㈜스네일 · 2026-11-06 기준
+> 제조암묵지기반 AI모델개발사업 (RS-2026-25590666) · ㈜스네일 · 2026-11-09 기준
 
 HMD(RealWear Navigator 520) 영상을 받아 AI 판정 서버로 보내고, 서버가 돌려주는 프레임 판정·제품 판정을
 HMD(BLE)와 폰 화면에 표시하며, 작업자 피드백을 서버로 보내는 안드로이드 앱이다. 판정·기록은 서버가 한다.
@@ -21,10 +21,10 @@ AiFlow ─┬─ 결함 프레임 → BLE LIVE → HMD 판정 글자·결함 원
 | 규칙 | 값 (위치) |
 |---|---|
 | 판정 임곗값 | PD·QI 임곗값은 서버가 정한다. 앱은 서버 판정(`decision`)을 그대로 쓰고 `threshold` 를 하드코딩하지 않는다 |
-| 결함 확정 · 제품 끝 | 5장 중 2장 · 1초 — **서버**가 정한다 (`server/api/stream.py`) |
+| 결함 확정 · 제품 끝 · 면 | 5장 중 2장 · 1초 · 면은 5장 이상이면 봄 — **서버**가 정한다 (`server/api/stream.py`) |
 | 결함 표시 유지 | 0.5초 (`Profile.markHoldMs`) |
 | 모드 | 수동(폰에서 피드백) / 자동(피드백 건너뜀) — M-01, 연결 때 서버로 (`DevSettings.feedbackMode`) |
-| 영상 | VP8 최대 12Mbps (`AiEdgeLink.MAX_BITRATE`) |
+| 영상 | HMD 프레임을 받는 대로 송출(쉬는 간격 없음, HMD 송출 초당 12장이 상한) · VP8 최대 12Mbps (`AiEdgeLink.MAX_BITRATE`) |
 | 재연결 | 1 → 2 → 4 → 5초, 시도 마감 10초 (`ai/Reconnect.kt`) |
 | 판정 | 서버 `product_end.decision` 그대로 (PASS 합격 · FAIL 불합격, 원판정 `ai_decision` 따로) |
 

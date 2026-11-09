@@ -33,7 +33,7 @@ REVIEW_MARGIN = 0.1  # 판정 유보 폭 (threshold 대비). api.QI_MIN_CONF가 
 SEGMENT_END_S = 1.0  # 마지막 제품 프레임 뒤 이만큼 제품 프레임이 없으면 제품 끝
 CONFIRM_WINDOW = 5  # 결함 확정: 최근 CONFIRM_WINDOW장 중
 CONFIRM_HITS = 2  #   CONFIRM_HITS장 이상이 NG·REVIEW면 확정
-FACE_MIN_FRAMES = 3  # 이 장수 이상 잡힌 PD 라벨(면)을 "봄"으로 친다
+FACE_MIN_FRAMES = 5  # 이 장수 이상 잡힌 PD 라벨(면)을 "봄"으로 친다 (2026-11-09: 3 → 5, 결함 확정 창 CONFIRM_WINDOW와 맞춤)
 FEEDBACK_MODES = ("manual", "auto")
 
 

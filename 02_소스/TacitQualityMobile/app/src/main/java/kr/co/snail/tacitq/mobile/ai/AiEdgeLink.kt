@@ -7,6 +7,7 @@ import android.util.Log
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -43,7 +44,6 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
-import java.util.concurrent.atomic.AtomicReference
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
 
@@ -52,7 +52,7 @@ import kotlin.coroutines.suspendCoroutine
  * 설계서 §9 · 「제품 불량 판정 — 모바일 앱 연동 API」 2026-11-03 규격 §5 + 2026-11-06 제품 단위(`server/PLAN_product_feedback.md`).
  * 모의 엣지용 [StreamRelay] 자리를 그대로 대신한다(같은 offer · status).
  *
- *  - 영상: 마지막 JPEG 1장만 들고 있다가 [FRAME_MS] 마다 I420 으로 바꿔 넣는다(밀린 프레임은 버림, 초당 최대 10장).
+ *  - 영상: HMD JPEG 가 오는 대로 I420 으로 바꿔 넣는다(쉬는 간격 없음 — HMD 송출 초당 12장이 상한). 변환이 밀리면 최신 1장만 남긴다.
  *  - 해상도: 대역폭이 모자라도 해상도를 낮추지 않게 MAINTAIN_RESOLUTION (서버는 결함을 640px 타일로 보므로 해상도가 곧 검출력, API §5.5).
  *  - 장애: 생존 신호가 없으므로 연결 상태 disconnected·failed·closed 를 끊김으로 보고 새 POST /offer.
  *    재시도 간격·시도 마감은 [Reconnect](1→2→4→5초, 10초). 422·403 은 설정 오류 — 다시 시도하지 않고 화면에 띄운다.
@@ -84,7 +84,8 @@ class AiEdgeLink(
     // WebRTC 콜백(신호 스레드)에서 pc 를 닫으면 멈추므로, 연결 다루기는 모두 이 한 줄 스레드에서 한다
     private val linkThread = Executors.newSingleThreadExecutor { Thread(it, "AiEdgeLink") }.asCoroutineDispatcher()
 
-    private val latest = AtomicReference<ByteArray?>(null)
+    /** HMD 최신 JPEG 1장 — 변환이 끝나기 전에 새 장이 오면 덮어쓴다(밀린 프레임은 버림) */
+    private val latest = Channel<ByteArray>(Channel.CONFLATED)
     @Volatile private var received = 0L
     @Volatile private var sent = 0L
     @Volatile private var width = 0
@@ -119,7 +120,7 @@ class AiEdgeLink(
     @Suppress("UNUSED_PARAMETER")
     fun offer(hmdSeq: Long, capturedAt: Long, data: ByteArray, codec: String = "jpeg", key: Boolean = true) {
         received++
-        if (codec == "jpeg") latest.set(data)        // H.265 는 1차 범위 밖(설계서 §9) — HMD 기본값이 MJPEG
+        if (codec == "jpeg") latest.trySend(data)    // H.265 는 1차 범위 밖(설계서 §9) — HMD 기본값이 MJPEG
     }
 
     /** 취소될 때까지 연결·재연결·영상 넣기를 돌린다. */
@@ -334,11 +335,13 @@ class AiEdgeLink(
 
     // ── 영상 ─────────────────────────────────────────────
 
-    private suspend fun pumpLoop() = coroutineScope {
-        while (isActive) {
-            val jpeg = latest.getAndSet(null)
-            if (jpeg != null && connected) runCatching { push(jpeg) }.onFailure { CommLog.w(AI, TAG, "프레임 변환 실패: ${it.message}") }
-            delay(FRAME_MS)
+    /**
+     * 새 HMD 프레임이 오면 깨어나 바로 넣는다 — 2026-11-09: "넣은 뒤 100ms 쉼"이라 주기가 100ms + 변환 시간이 돼
+     * 서버 도착이 초당 6.9장이었다. 프레임이 없으면 잠들어 기다린다(바쁜 대기 없음).
+     */
+    private suspend fun pumpLoop() {
+        for (jpeg in latest) {
+            if (connected) runCatching { push(jpeg) }.onFailure { CommLog.w(AI, TAG, "프레임 변환 실패: ${it.message}") }
         }
     }
 
@@ -395,10 +398,9 @@ class AiEdgeLink(
     companion object {
         private const val TAG = "TacitQ.AiEdge"
         const val TICK_MS = 500L
-        const val FRAME_MS = 100L                 // 초당 최대 10장 — 서버도 초당 10프레임까지만 쓴다(API §5.5)
         const val GATHER_MS = 5_000L
         // 2026-11-06: 6→12Mbps(출발값) — 압축을 덜 해 작은 결함을 지키려고(PLAN_product_feedback.md §7.3).
-        // 폰 소프트웨어 VP8 이 1920×1440 초당 10장을 이 비트레이트로 내는지 통신 로그의 "보냄 … fps" 로 확인한다.
+        // 폰 소프트웨어 VP8 이 1920×1440 초당 12장을 이 비트레이트로 내는지 통신 로그의 "보냄 … fps" 로 확인한다.
         const val MAX_BITRATE = 12_000_000
         const val MIN_BITRATE = 4_000_000          // 처음부터 낮은 비트레이트로 시작해 해상도를 깎지 않게
         const val STATS_MS = 5_000L

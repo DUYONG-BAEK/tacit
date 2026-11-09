@@ -1,0 +1,41 @@
+<div class="section-head">
+  <h3>실서버 실측 · 영상 송출 간격 · 면 기준 5장</h3>
+  <span class="date-badge">2026-11-09</span>
+  <span class="status dev">구현 · 서버 로직 시험 완료 · 앱 빌드·실기기 확인 전</span>
+</div>
+
+<p>11-06 코드(제품 단위 판정·피드백)를 개발 서버(gpudev)에 배포한 뒤, 앱(ST-02) 연결의 서버 로그로 프레임 처리 속도를 쟀다.
+서버는 여유가 있는데 서버에 도착하는 프레임이 설계값(초당 10장)보다 적었고, 원인은 폰의 송출 간격이었다.
+근거: <code>server/DEPLOY.md</code> §8 "실서버 (gpudev, 2026-11-09)".</p>
+
+<h4>실측 (1920×1440, 서버 로그)</h4>
+<table class="col-table">
+  <tr><th style="width:22%">항목</th><th>값</th></tr>
+  <tr><td>서버 1장 처리</td><td>decode 2ms(I420 원본 — 11-05 JPEG 때 34ms) + PD 11ms + QI 24ms = <strong>약 37ms</strong> → 서버만으로는 초당 약 27장. 밀림 0</td></tr>
+  <tr><td>서버 도착</td><td><strong>초당 6.9장</strong>(6.0~7.3) — 결함 저장 로그의 <code>seq</code> 간격으로 잼</td></tr>
+  <tr><td>제품이 잡힌 프레임</td><td>초당 약 5장 (PD가 도착 프레임의 약 70%에서 제품을 잡음)</td></tr>
+</table>
+
+<h4>원인과 변경</h4>
+<table class="col-table">
+  <tr><th style="width:18%">위치</th><th>내용</th></tr>
+  <tr><td>모바일 송출</td><td>이전: 최신 JPEG를 넣은 뒤 100ms 쉼 → 주기가 100ms + 변환 시간(약 145ms). 11-06에 게이트웨이 간격 제한을 없앤 뒤에도 초당 약 7장이 그대로였던 이유.
+      이후: HMD 프레임이 오는 대로 바로 변환해 넣는다(<code>AiEdgeLink.pumpLoop</code>, 최신 1장만 담는 통로). 쉬는 간격 없음, 프레임이 없으면 잠들어 기다림.
+      HMD 송출 초당 12장이 상한. 폰은 계산하지 않고 받은 것을 넘기기만 한다</td></tr>
+  <tr><td>서버 면 기준</td><td>한 면(PD 라벨)을 본 것으로 치는 장수 3 → <strong>5장</strong> (<code>stream.FACE_MIN_FRAMES</code>) — 결함 확정 창(최근 5장 중 2장)과 맞춤.
+      판정(합격/불합격)에는 영향 없음. HMD 면 칩·"검사 완료"·DB <code>faces_seen</code>·<code>complete</code>만 바뀐다. 앱은 고칠 것 없음(서버 값을 그대로 씀)</td></tr>
+  <tr><td>QI</td><td>그대로 — PD가 제품을 잡은 프레임 전체를 640 타일로 본다. "PD 상자와 겹치는 타일만 QI"는 서버 여유(37ms)가 있어 보류
+      (다시 볼 때: 4K, GPU 한 장에 스테이션 3개 이상, 더 무거운 QI)</td></tr>
+  <tr><td>문서</td><td>API 규격·배포 문서의 "배포 전" 문구, <code>PD_CONF</code>·<code>QI_CONF</code> 표기 0.25 → 실제 코드 값 0.4, "초당 10장" → 앱이 보내는 만큼(지금 약 12장)</td></tr>
+</table>
+
+<div class="warn-box"><strong>영향:</strong> 서버 도착이 초당 약 7장 → 약 12장이 되면 제품 프레임 사진도 그만큼 늘어난다(추정 시간당 13~22GB/스테이션, 자동 삭제 없음 — M-06에서 본다).
+같은 장수 규칙(확정 5장, 면 5장)이 차지하는 시간은 짧아진다(5장 ≈ 0.4~0.6초).</div>
+
+<h4>시험</h4>
+<ul class="checklist">
+  <li class="done">서버 면 기준(작성 환경, 가짜 <code>detect</code>): 4장째 미확인 · 5장째 확인 · 세 면 모두 5장이면 <code>complete</code> · <code>product_end</code> 정상</li>
+  <li>모바일 빌드 (Android Studio — 작성 환경에서는 빌드하지 못함)</li>
+  <li>실기기: 폰 통신 로그 "보냄 … fps"와 서버 도착 fps가 12 가까이 나오는지, VP8 "제한" 사유(cpu·bandwidth)</li>
+  <li>서버 재배포(DEPLOY §6.1) 뒤 HMD 면 칩이 5장 기준으로 켜지는지</li>
+</ul>
