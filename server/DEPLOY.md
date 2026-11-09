@@ -1,6 +1,6 @@
 # 제품 불량 판정 서버 — 구성·배포·운영
 
-기준: 2026-11-06 코드 (제품 단위 판정·작업자 피드백·제품 프레임 사진 저장). gpudev에 **2026-11-09 배포**했고, 앱(ST-02) 연결의 로그로 처리 속도를 실측했다 (§8). 같은 날 면 기준을 3 → 5장으로 바꿨다 (`stream.FACE_MIN_FRAMES`, §3.4) — 올리려면 §6.1로 API를 다시 빌드한다.
+기준: 2026-11-06 코드 (제품 단위 판정·작업자 피드백·제품 프레임 사진 저장). gpudev에 **2026-11-09 배포**했고, 앱(ST-02) 연결의 로그로 처리 속도를 실측했다 (§8). 같은 날 면 기준을 3 → 5장으로 바꾸고 (`stream.FACE_MIN_FRAMES`, §3.4), DB `sessions`에 연결별 판정 설정값(`config`)·연결 통계(`stats`)를 더했다 (§4.3) — 올리려면 §6.1로 API를 다시 빌드한다 (스키마는 기동 때 열만 더한다).
 
 이상탐지(DINOv2 + memory bank) 서버를 내리고, **PD(제품 탐지) → QI(불량 탐지)** 두 YOLO 모델로 다시 올린다. 이 문서가 서버의 기준 문서다.
 
@@ -192,7 +192,7 @@ archive_product_mode/            제품 단위 단계의 코드·문서·DB 덤�
 | `feedback` | `PUT /products/{id}/feedback` 성공 | product_id, value, source(`live`/`history`), device |
 | `storage_scan`, `storage_scan_error` | `/storage` 용량 계산 (`STORAGE_SCAN_S`마다) | ms, data_bytes / error |
 | `write_error`, `write_timeout` | 연결의 기록 줄에서 예외 · 끊긴 뒤 60초 안에 남은 기록을 못 끝냄 | error / pending |
-| `ws_close` | 연결 종료 | session, source, client, station, mode, duration_s, frames, processed, skipped_frames, product_frames, defect_frames, saved, products, ms_avg(decode/pd/qi), error |
+| `ws_close` | 연결 종료 | session, source, client, station, mode, duration_s, frames, processed, skipped_frames, product_frames, defect_frames, saved, products, ms_avg(decode/pd/qi), error — duration_s부터 error까지는 DB `sessions.stats`에도 같은 값 (2026-11-09) |
 
 **`ws_close` 숫자** (연결 하나):
 
@@ -228,14 +228,14 @@ archive_product_mode/            제품 단위 단계의 코드·문서·DB 덤�
 
 ### 4.3 DB (`a4-db`, PostgreSQL 17)
 
-스키마는 `a4-api` 기동 시 없으면 만든다 (`db.py`의 `SCHEMA`, `CREATE … IF NOT EXISTS`·`ALTER … ADD COLUMN IF NOT EXISTS`). 기록 주체는 `a4-api`뿐이다. 2026-11-06에 `products`·`frames`·`feedback_log` 테이블과 `sessions.feedback_mode`를 더했다 — 옛 테이블·행은 그대로 둔다.
+스키마는 `a4-api` 기동 시 없으면 만든다 (`db.py`의 `SCHEMA`, `CREATE … IF NOT EXISTS`·`ALTER … ADD COLUMN IF NOT EXISTS`). 기록 주체는 `a4-api`뿐이다. 2026-11-06에 `products`·`frames`·`feedback_log` 테이블과 `sessions.feedback_mode`를, 2026-11-09에 `sessions.config`·`sessions.stats`를 더했다 — 옛 테이블·행은 그대로 둔다 (옛 행의 새 열은 NULL).
 
 | 테이블 | 내용 |
 |---|---|
 | `stations` | 등록된 스테이션. SQL로 추가한다 (§5 ⑥) |
-| `sessions` | `/ws` 세션. `feedback_mode`(manual/auto) |
+| `sessions` | `/ws` 세션. `feedback_mode`(manual/auto), `config`(연결할 때의 판정 설정값·모델 — `api.CONFIG`: `checkpoint`, `pd_conf`, `qi_conf`, `face_min_frames` 등 15개), `stats`(닫을 때의 연결 통계 — `ws_close` 로그와 같은 값, §4.1) |
 | `products` | **제품 하나**: 시작 때 넣고 끝날 때 채운다. `decision`(PASS/FAIL), `ai_decision`(OK/NG/REVIEW), `defect_label`, `frames`, `defect_frames`, `faces`, `faces_seen`, `complete`, `best_result_id`, `result_ids`, `threshold`, `checkpoint`, `end_reason`, `feedback`(CORRECT/WRONG/UNSURE/NOT_ENTERED/NONE), `feedback_at`. `ended_at`이 NULL이면 서버가 기록 중 멈춘 제품이다 |
-| `frames` | **제품 프레임 하나**: (`session_id`, `seq`), `product_id`, `ts`, `decision`, `score`, `defect_label`, `products`(PD 상자), `detections`, `frame_size`, `file`(사진 경로), `result_id`. 스테이션 하나당 초당 최대 10행 |
+| `frames` | **제품 프레임 하나**: (`session_id`, `seq`), `product_id`, `ts`, `decision`, `score`, `defect_label`, `products`(PD 상자), `detections`, `frame_size`, `file`(사진 경로), `result_id`. 스테이션 하나당 초당 약 12행 (앱이 보내는 만큼) |
 | `feedback_log` | 피드백 변경 한 줄: `product_id`, `before`, `after`, `source`(live/history), `device`, `changed_at` |
 | `results` | **저장한 결함 프레임 하나** (1초에 1장): `status`(항상 `done`), `decision`(NG·REVIEW), `defect_label`, `score`, `scores`(`[score]`), `threshold`, `detections`, `frame_size`, `checkpoint`, `frames_dir`(사진 경로 — `frames.file`과 같다), `overlay_path`, `attempt`(그 연결의 `seq`), `captured_at` = `result_at` |
 | `decisions`, `alerts` | 제품 단위 때의 사람의 최종 판정·연속 판정 알림. **옛 데이터 보존용** — 새 코드는 쓰지 않는다 |
@@ -277,7 +277,22 @@ SELECT p.product_id, p.decision, p.feedback, count(f.file) AS photos FROM produc
 JOIN frames f USING (product_id) WHERE p.feedback IN ('CORRECT', 'WRONG')
 GROUP BY 1, 2, 3 ORDER BY p.product_id DESC LIMIT 20;"
 ```
-- 모델을 바꾸면 판정 기준도 바뀐다. 기간을 길게 볼 때는 `checkpoint`로 나눠 본다.
+- 모델을 바꾸면 판정 기준도 바뀐다. 기간을 길게 볼 때는 `checkpoint`로 나눠 본다. 설정값(면 기준 등)이 바뀐 기간은 `sessions.config`로 나눈다 (2026-11-09 전 세션은 NULL — 그때 면 기준은 3장).
+
+```bash
+# 설정값별 제품 수 (면 기준·PD/QI 기준값이 바뀐 기간 나누기)
+docker exec a4-db psql -U a4 -d a4 -c "
+SELECT s.config->>'face_min_frames' AS face_min, s.config->>'pd_conf' AS pd_conf, s.config->>'qi_conf' AS qi_conf,
+       min(p.started_at)::date AS first_day, count(*) FROM products p JOIN sessions s USING (session_id)
+GROUP BY 1, 2, 3 ORDER BY first_day;"
+
+# 최근 연결 10개의 통계 (받은 수·처리 수·밀림·제품 프레임·평균 ms)
+docker exec a4-db psql -U a4 -d a4 -c "
+SELECT session_id, station_id, opened_at, stats->>'duration_s' AS sec, stats->>'frames' AS frames,
+       stats->>'processed' AS processed, (stats->>'frames')::int - (stats->>'processed')::int - (stats->>'skipped_frames')::int AS lagged,
+       stats->>'product_frames' AS product_frames, stats->'ms_avg' AS ms_avg, stats->>'error' AS error
+FROM sessions WHERE stats IS NOT NULL ORDER BY opened_at DESC LIMIT 10;"
+```
 
 ---
 
@@ -848,6 +863,11 @@ cat /proc/sys/net/ipv4/ip_local_port_range
 - 결함 저장 프레임 1장 (`inspect_saved.ms`, 1920×1440 115장): 합 중앙 68ms · 90% 75ms · 최대 114ms (11-05~11-09 합산 — 대부분 11-05의 JPEG 전달이라 decode가 크다).
 - **서버 도착 속도** (`inspect_saved`의 `seq` 간격): 중앙 초당 **6.9장** (6.0~7.3) — 앱이 넣은 뒤 100ms를 쉬던 것이 원인 (§3.5). 제품이 잡힌 프레임은 초당 약 5장 (PD가 도착 프레임의 약 70%에서 제품을 잡음).
 - `product_end` 기록과 면 진행 (`faces`) 확인.
+
+**확인한 것 — `sessions.config`·`stats` (작성 환경, 2026-11-09)** — 실제 PostgreSQL 16·psycopg·FastAPI·uvicorn·websockets, YOLO만 가짜:
+
+- 11-06 코드로 만든 DB에 새 코드로 기동 → 두 열이 더해지고 옛 세션 행은 NULL 그대로, 다시 기동해도 문제없음.
+- `/ws` 연결 1회(제품 프레임 6장 + 빈 프레임 1장) → `config`에 15개 값(면 5장·PD/QI 0.4·모델 ID), `stats`가 `ws_close` 로그와 같은 값, `product_end`의 `faces_seen` 5장 기준.
 
 **확인한 것 — 제품 단위·피드백 (작성 환경, 2026-11-06)** — 이번에는 실제 FastAPI·websockets·aiortc·psycopg(PostgreSQL 16)를 설치해 돌렸다. PD·QI만 색으로 상자를 찾는 가짜 YOLO다. `/ws`·HTTP 42건 + WebRTC 게이트웨이 종단:
 

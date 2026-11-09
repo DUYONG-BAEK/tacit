@@ -73,6 +73,7 @@ from ultralytics import YOLO, settings
 
 import db
 import detect
+import stream
 from stream import FEEDBACK_MODES, REVIEW_MARGIN, Products, Searching, initial_feedback, judge
 
 # Ultralytics는 기본값으로 사용 통계(추론 포함)를 외부로 보낸다 — 판정 서버에서는 끈다 (DEPLOY.md §7).
@@ -107,6 +108,18 @@ def model_id(path: Path) -> str:
 
 # 결과마다 남겨, 모델이 바뀌어도 어느 모델의 판정인지 구분한다 (DB results.checkpoint).
 MODEL_ID = f"{model_id(detect.PD_MODEL)}|{model_id(detect.QI_MODEL)}"
+
+# 판정 설정값 — 연결마다 DB sessions.config에 남긴다 (2026-11-09). 값을 바꾼 뒤에도(예: 면 기준 3 → 5장)
+# 옛 제품·프레임 기록이 어느 값으로 계산됐는지 DB만으로 안다. 값이 바뀌면 이미지를 다시 빌드하므로 기동 때 한 번 만든다.
+CONFIG = {
+    "checkpoint": MODEL_ID,
+    "pd_conf": detect.PD_CONF, "pd_imgsz": detect.PD_IMGSZ,
+    "qi_conf": detect.QI_CONF, "qi_min_conf": round(QI_MIN_CONF, 6), "review_margin": REVIEW_MARGIN,
+    "tile": detect.TILE, "step": detect.STEP, "nms_iou": detect.NMS_IOU,
+    "segment_end_s": stream.SEGMENT_END_S, "confirm_window": stream.CONFIRM_WINDOW, "confirm_hits": stream.CONFIRM_HITS,
+    "face_min_frames": stream.FACE_MIN_FRAMES,
+    "save_interval_s": SAVE_INTERVAL_S, "frame_jpeg_quality": FRAME_JPEG_QUALITY,
+}
 
 
 def log_event(event: str, **fields) -> None:
@@ -493,7 +506,7 @@ async def stream_endpoint(ws: WebSocket) -> None:
     counts = {"processed": 0, "skipped_frames": 0, "product_frames": 0, "defect_frames": 0, "saved": 0, "products": 0}
     totals = {"decode": 0, "pd": 0, "qi": 0}  # ms 합계. decode·pd는 processed, qi는 product_frames로 나눈다
     log_event("ws_open", **log_fields, peer=ws.client.host if ws.client else None)
-    await db_call(db.open_session, session_id, station, log_fields["source"], client, mode)
+    await db_call(db.open_session, session_id, station, log_fields["source"], client, mode, CONFIG)
 
     searching = Searching()
     products = Products(f"{'' if client else 'direct_'}{session_id}", mode, list(pd_model.names.values()))
@@ -598,10 +611,11 @@ async def stream_endpoint(ws: WebSocket) -> None:
             await asyncio.wait_for(asyncio.shield(writing), timeout=60)
         except TimeoutError:
             log_event("write_timeout", **log_fields, pending=writes.qsize())
-        await db_call(db.close_session, session_id)
         processed, product_frames = counts["processed"], counts["product_frames"]
         ms_avg = {"decode": round(totals["decode"] / processed) if processed else None,
                   "pd": round(totals["pd"] / processed) if processed else None,
                   "qi": round(totals["qi"] / product_frames) if product_frames else None}
-        log_event("ws_close", **log_fields, duration_s=round(time.monotonic() - opened, 1), frames=latest_seq,
-                  **counts, ms_avg=ms_avg, error=f"{type(error).__name__}: {error}" if error else None)
+        stats = {"duration_s": round(time.monotonic() - opened, 1), "frames": latest_seq, **counts, "ms_avg": ms_avg,
+                 "error": f"{type(error).__name__}: {error}" if error else None}
+        await db_call(db.close_session, session_id, stats)  # 연결 통계를 DB sessions.stats에도 (2026-11-09)
+        log_event("ws_close", **log_fields, **stats)

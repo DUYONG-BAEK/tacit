@@ -18,7 +18,7 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
-# stations·sessions·alerts·results·decisions는 옛 정의 그대로 두고(sessions에 feedback_mode만 추가),
+# stations·sessions·alerts·results·decisions는 옛 정의 그대로 두고(sessions에 feedback_mode·config·stats만 추가),
 # products·frames·feedback_log를 더한다 (PLAN_product_feedback.md §5). results에서 컬럼의 뜻:
 #   attempt     -> 그 연결에서 프레임의 seq
 #   status      -> 항상 done (pending·failed는 옛 행에만 있다)
@@ -69,6 +69,9 @@ CREATE TABLE IF NOT EXISTS results (
   result_at    timestamptz
 );
 ALTER TABLE sessions ADD COLUMN IF NOT EXISTS feedback_mode text NOT NULL DEFAULT 'auto';  -- manual | auto
+-- 2026-11-09: 연결할 때의 판정 설정값·모델 (api.CONFIG), 닫을 때의 연결 통계 (ws_close와 같은 값). 옛 행은 NULL
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS config jsonb;
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS stats jsonb;
 CREATE TABLE IF NOT EXISTS products (
   product_id     text PRIMARY KEY,
   session_id     text NOT NULL REFERENCES sessions,
@@ -157,15 +160,19 @@ def station_exists(station_id: str) -> bool:
 
 
 def open_session(session_id: str, station_id: str | None, source: str, client: str | None,
-                 feedback_mode: str) -> None:
+                 feedback_mode: str, config: dict) -> None:
+    """config: 이 연결에 쓰는 판정 설정값·모델 (api.CONFIG). 설정을 바꾼 뒤에도 옛 기록이 어느 값으로 계산됐는지 안다."""
     with pool.connection() as conn:
-        conn.execute("INSERT INTO sessions (session_id, station_id, source, client, feedback_mode)"
-                     " VALUES (%s, %s, %s, %s, %s)", (session_id, station_id, source, client, feedback_mode))
+        conn.execute("INSERT INTO sessions (session_id, station_id, source, client, feedback_mode, config)"
+                     " VALUES (%s, %s, %s, %s, %s, %s)",
+                     (session_id, station_id, source, client, feedback_mode, Jsonb(config)))
 
 
-def close_session(session_id: str) -> None:
+def close_session(session_id: str, stats: dict) -> None:
+    """stats: 연결 통계 (ws_close 로그와 같은 값 — duration_s, frames, processed, …, ms_avg, error)."""
     with pool.connection() as conn:
-        conn.execute("UPDATE sessions SET closed_at = now() WHERE session_id = %s", (session_id,))
+        conn.execute("UPDATE sessions SET closed_at = now(), stats = %s WHERE session_id = %s",
+                     (Jsonb(stats), session_id))
 
 
 def insert_result(result_id: str, session_id: str, station_id: str | None, seq: int, message: dict,
