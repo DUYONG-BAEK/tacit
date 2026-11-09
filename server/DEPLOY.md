@@ -79,7 +79,7 @@ $PWD/
 ```
 
 - `api/`에 **8개**(숨김 파일 `.dockerignore` 포함, `ls -A api`), `gateway/`에 **5개**가 있어야 한다. 최상위에는 `.py`·`Dockerfile`이 없어야 한다.
-- 이상탐지 코드(`a4_common.py`, `corelib/` 10개, `prepare_a4.py`, `build_a4.py`, `smoke_a4.py`, `bench_a4.py`)는 **없어야 한다** (§5 ①에서 지운다). 남아 있어도 이미지에는 복사되지만 아무도 쓰지 않는다.
+- 이상탐지 코드(`a4_common.py`, `corelib/` 10개, `prepare_a4.py`, `build_a4.py`, `smoke_a4.py`, `bench_a4.py`)는 **없어야 한다** (2026-10 전환 때 지웠다. 처음 설치 ①은 `api/`를 새 코드로 통째로 바꾼다). 남아 있어도 이미지에는 복사되지만 아무도 쓰지 않는다.
 
 **실행하면 생기는 폴더** (호스트 볼륨, 컨테이너를 지워도 남는다)
 
@@ -91,7 +91,7 @@ frames/<날짜>/<result_id>.jpg     옛 결함 프레임 원본 (2026-11-06 전.
 results/<날짜>/<result_id>/overlay.jpg  결과 오버레이 (§4.2)
 db/                               PostgreSQL 데이터 (a4-db). 호스트에서 직접 건드리지 않는다
 stream_out/, webrtc_out/          테스트 클라이언트 출력 (지워도 된다)
-archive_a4_<날짜>/                이상탐지 단계의 코드·데이터·기록 보관 (§5 ①③)
+archive_a4_<날짜>/                이상탐지 단계의 코드·데이터·기록 보관 (2026-10 전환 때)
 archive_product_mode/            제품 단위 단계의 코드·문서·DB 덤프 보관 (§5.A)
 ```
 
@@ -298,7 +298,7 @@ FROM sessions WHERE stats IS NOT NULL ORDER BY opened_at DESC LIMIT 10;"
 
 ## 5. 배포
 
-**서버를 전부 지우고 다시 만들 때는 §5.C 한 묶음을 쓴다** (데이터 영구 삭제). 코드만 바꿀 때는 §6.1. 5.A·5.B는 그때그때의 전환 기록이다.
+**설치는 "처음 설치 ①~⑧"** (단계별, 설명 포함). **전부 지우고 다시 설치할 때는 §5.C** — ①~⑦과 같은 명령을 한 번에 붙여 넣는다 (데이터 영구 삭제). 코드만 바꿀 때는 §6.1. 5.A·5.B는 그때그때의 전환 기록이다.
 
 ### 5.A 제품 단위 → 프레임 단위 전환 (gpudev, 2026-11)
 
@@ -420,93 +420,70 @@ docker inspect a4-api --format '{{range .Mounts}}{{.Destination}} {{end}}'
 - 5·6의 명령은 §5 ⑤·⑦과 같다 (한쪽을 고치면 다른 쪽도 고친다). 스테이션(§5 ⑥)은 DB에 그대로 있으므로 다시 등록하지 않는다.
 - **되돌리기**: `archive_frame_mode/`의 `api`·`gateway`를 제자리로 복사해 다시 빌드하고, 옛 명령(`product_frames` 마운트 없이)으로 띄운다. 새 테이블은 옛 코드가 쓰지 않으므로 그대로 둬도 된다.
 
-### 5.C 전부 지우고 다시 배포 — 한 묶음 (데이터 영구 삭제)
+### 5.C 전부 지우고 다시 설치 — 한 번에 (데이터 영구 삭제)
 
-서버를 처음 상태부터 다시 만든다. 컨테이너 3개(`a4-gateway`·`a4-api`·`a4-db`, 있으면 `a4-api-1`)·네트워크 `a4-net`·이미지 `a4-api`·`a4-gateway`를 지우고 다시 만들며, **DB·사진·오버레이·로그를 보관하지 않고 지운다 — 되돌릴 수 없다.** 데이터를 남기려면 먼저 §6.5로 DB를 덤프하거나, 코드만 바꿀 때는 §6.1을 쓴다.
+아래 블록 **전체를 한 번에 붙여 넣는다.** 명령은 처음 설치 ①~⑦과 같고 (설명은 거기), 하나의 `bash -euo pipefail`로 돌아 **오류나 `[멈춤]`이 나면 그 자리에서 멈춘다.** ②에서 멈추면 아무것도 지우지 않은 채 옛 서비스가 그대로 돈다. ③에서 10초 기다리는 동안 Ctrl+C면 전체가 취소된다.
 
-| 지운다 | 남긴다 |
-|---|---|
-| `db/` (DB 전체 — 제품·프레임·피드백 기록, 스테이션), `product_frames/`, `results/`, `frames/`, `logs/`, `stream_out/`, `webrtc_out/`, `api/`·`gateway/` 코드(새 코드로 바뀐다) | `models/`, `samples/`, `videos/`, 보관 폴더(`archive_*/`), 기반 이미지(pytorch·postgres·python)와 빌드 캐시 |
-
-**준비**: 새 코드 묶음(저장소의 `server/` 폴더 — `api/`·`gateway/`·`DEPLOY.md`·`A4_WEBRTC_API.md`·`PLAN_*.md`)을 `/tmp/new`에 풀고, `models/`에 모델 두 개가 있는지 본다 (파일명은 새 `api/detect.py`가 정한다 — 묶음이 먼저 확인한다).
-
-**아래 블록 전체를 한 번에 붙여 넣는다.** §5.B처럼 블록을 나누지 않아도 된다 — 블록 전체가 하나의 `bash`로 돌아 **오류가 나면 그 자리에서 멈추고 다음 줄을 실행하지 않는다** (`set -euo pipefail`).
-
-- 순서: 확인 → 코드 교체 → **빌드·이미지 안 코드 확인** → 내리기 → 데이터 삭제 → DB → API → 스테이션 → 게이트웨이 → 확인 → 옛 이미지 정리. 빌드가 실패하거나 이미지 안 코드가 새 코드와 다르면 **아무것도 지우지 않은 채** 멈추고 옛 서비스는 그대로 돈다 (`api/`·`gateway/` 폴더만 새 코드로 바뀌어 있다).
-- 1단계에서 지울 것을 보여 주고 10초 기다린다 — 그 사이 Ctrl+C면 취소된다.
-- 블록 안에는 `!`를 붙여 쓰지 않는다 — 대화형 셸에 붙여 넣으면 heredoc 안에서도 `!!` 같은 히스토리 확장이 일어난다 (`[ ! -e` 처럼 뒤에 공백이 오면 괜찮다).
-- DB 비밀번호는 묶음이 만든다(16진수 48자, 화면에 찍지 않는다). 입력받지 않는 것은 한 번에 붙여 넣은 다음 줄이 비밀번호로 들어가기 때문이다. 나중에 필요하면 §5 ④ 아래 명령으로 `a4-db` 설정에서 읽는다.
-- 4단계 이후에 멈췄으면 서비스가 내려간 상태다. 출력의 `[멈춤]` 줄과 `docker logs`로 원인을 고친 뒤 **묶음을 처음부터 다시 실행한다** (다시 지우고 만든다).
-- 끝나면 `REDEPLOY OK`. 이어서 §5 ⑧(사진·영상·WebRTC 시험)과 앱 연결(ST-02)을 확인한다. 두 번째 GPU의 `a4-api-1`은 다시 띄우지 않는다 — 필요하면 §6.4.
-- 묶음 안의 `docker run` 명령은 §5 ④⑤⑦·§5.B·§6.1과 같다 (한쪽을 고치면 다른 쪽도 고친다).
+- 준비: 새 코드 묶음(저장소 `server/` 폴더)을 `/tmp/new`에, 모델은 `models/`에.
+- **DB·사진·오버레이·로그를 보관하지 않고 지운다** (지우는 것·남는 것은 처음 설치 ③). 데이터를 남기려면 먼저 §6.5 DB 덤프.
+- 끝에 `REDEPLOY OK`가 나오면 처음 설치 ⑧로 확인한다. 중간에 멈췄으면 `[멈춤]` 줄과 바로 위 출력으로 원인을 고친 뒤 블록을 처음부터 다시 붙여 넣는다.
 
 ```bash
 cd /home/admin/odServer && bash -euo pipefail <<'REDEPLOY'
-# ── 엣지 서버 전부 지우고 다시 배포 (DEPLOY.md §5.C) — 오류가 나면 그 자리에서 멈춘다 ──
-NEW=/tmp/new        # 새 코드 묶음을 푼 곳 (api/ gateway/ 와 문서)
-step() { echo; echo "== $*"; }
-fail() { echo "[멈춤] $* — 여기서 멈춘다"; exit 1; }
-
-step "0. 확인 — 새 코드 묶음·모델 (아무것도 바꾸지 않는다)"
-for f in api/Dockerfile api/requirements.txt api/api.py api/db.py api/detect.py api/stream.py \
-         gateway/Dockerfile gateway/requirements.txt gateway/gateway.py DEPLOY.md A4_WEBRTC_API.md; do
-  if [ ! -e "$NEW/$f" ]; then fail "$NEW/$f 없음"; fi
-done
-for m in $(grep -o 'yolo_[a-z_]*_[0-9]*\.pt' "$NEW/api/detect.py" | sort -u); do
-  if [ ! -f "models/$m" ]; then fail "models/$m 없음 (새 api/detect.py의 모델 파일명)"; fi
-done
-echo "새 코드·모델 OK"
-
-step "1. 지울 것 — 10초 안에 Ctrl+C 를 누르면 취소된다 (보관하지 않는다)"
-docker ps -a --format '{{.Names}}  {{.Status}}' | grep '^a4-' || echo "(a4- 컨테이너 없음)"
-du -sh db product_frames results frames logs stream_out webrtc_out 2>/dev/null || true
-sleep 10
-
-step "2. 코드 교체 — 서비스는 아직 옛 이미지로 돈다"
+# ── 처음 설치 ①~⑦과 같은 명령 (DEPLOY.md §5.C). ③이 전부 지운다. 오류가 나면 그 자리에서 멈춘다 ──
+echo; echo '══ ① 준비'
+cd /home/admin/odServer   # 프로젝트 폴더 ($PWD)
+#   새 코드 묶음(저장소의 server/ 폴더 — api/ gateway/ DEPLOY.md A4_WEBRTC_API.md PLAN_*.md)을 /tmp/new 에 풀어 둔다
+ls /tmp/new/api/api.py /tmp/new/gateway/gateway.py /tmp/new/DEPLOY.md >/dev/null && echo "새 코드 OK" || { echo "[멈춤] /tmp/new 에 새 코드가 없다"; false; }
 rm -rf api gateway
-cp -a "$NEW/api" "$NEW/gateway" .
-for d in DEPLOY.md A4_WEBRTC_API.md PLAN_product_feedback.md PLAN_realtime_inspect.md; do
-  if [ -e "$NEW/$d" ]; then cp "$NEW/$d" .; fi
+cp -a /tmp/new/api /tmp/new/gateway .
+cp /tmp/new/*.md .
+ls -A api; ls gateway
+#   기대: api 8개 (.dockerignore Dockerfile api.py db.py detect.py requirements.txt stream.py stream_client.py)
+#         gateway 5개 (Dockerfile README.md gateway.py requirements.txt webrtc_client.py)
+#   모델 — 파일명은 api/detect.py 의 PD_MODEL·QI_MODEL. 없으면: mkdir -p models && cp <모델 위치>/<파일명>.pt models/
+for m in $(grep -o 'yolo_[a-z_]*_[0-9]*\.pt' api/detect.py | sort -u); do
+  ls -l "models/$m" || { echo "[멈춤] models/$m 없음"; false; }
 done
-ls -A api gateway
-
-step "3. 빌드 — 실패하면 여기서 멈추고 옛 서비스는 그대로 돈다"
-#   --no-cache를 쓰지 않는다: Dockerfile·requirements.txt가 그대로면 apt·pip 층은 캐시, 코드만 새로 들어간다 (§5.B 3)
+echo; echo '══ ② 빌드'
+#   --no-cache 를 쓰지 않는다 — Dockerfile·requirements.txt 가 그대로면 apt·pip 층은 캐시를 쓰고 코드(COPY)만 새로 들어간다.
+#   (gpudev 는 컨테이너 안에서 apt 저장소 접속이 막힌 적이 있다 — 2026-11-09). 새 코드가 들어갔는지는 아래 비교로 본다
 docker build -t a4-api api/
 docker build -t a4-gateway gateway/
-#   이미지 안 코드가 새 코드와 같은지 (다르면 옛 이미지가 남은 것)
 diff <(docker run --rm --entrypoint sh a4-api -c 'sha256sum *.py') <(cd api && sha256sum *.py) \
-  || fail "a4-api 이미지 코드가 api/ 와 다르다"
-diff <(docker run --rm --entrypoint sh a4-gateway -c 'sha256sum *.py') <(cd gateway && sha256sum *.py) \
-  || fail "a4-gateway 이미지 코드가 gateway/ 와 다르다"
-echo "BUILD OK"
-
-step "4. 내리기 — 여기서부터 서비스 중단"
+  && diff <(docker run --rm --entrypoint sh a4-gateway -c 'sha256sum *.py') <(cd gateway && sha256sum *.py) \
+  && echo "BUILD OK — 이미지 안 코드 = 새 코드" \
+  || { echo "[멈춤] 빌드 실패 또는 이미지 안 코드가 다르다 — 옛 서비스는 그대로 돈다. ③으로 가지 않는다"; false; }
+echo; echo '══ ③ 내리기·지우기'
+#   여기서부터 서비스 중단. 컨테이너·네트워크를 지우고 데이터를 보관하지 않고 지운다 (남기려면 먼저 §6.5 DB 덤프).
+#   처음 설치하는 서버에서는 지울 것이 없어 그냥 지나간다. 지우기 전 10초 — §5.C 로 한 번에 실행할 때는 이때 Ctrl+C 면 전체가 취소된다
+docker ps -a --format '{{.Names}}  {{.Status}}' | grep '^a4-' || echo "(a4- 컨테이너 없음)"
+du -sh db product_frames results frames logs stream_out webrtc_out 2>/dev/null || true
+echo "10초 뒤 위 컨테이너와 데이터를 지운다"; sleep 10
 docker rm -f a4-gateway a4-api a4-api-1 a4-db 2>/dev/null || true
 docker network rm a4-net 2>/dev/null || true
-
-step "5. 데이터 영구 삭제 — DB · 사진 · 오버레이 · 로그 · 테스트 출력"
 rm -rf db product_frames results frames logs stream_out webrtc_out
 mkdir -p db product_frames results frames logs/a4-api logs/a4-gateway
-ls
-
-step "6. DB — 새 비밀번호를 만들어 a4-db 설정에만 둔다 (화면에 찍지 않는다)"
-A4_DB_PASSWORD=$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')   # 16진수만 — DATABASE_URL을 깨뜨리지 않는다
+docker ps -a --format '{{.Names}}' | grep '^a4-' || echo "a4- 컨테이너 없음 — OK"
+echo; echo '══ ④ DB'
+#   비밀번호는 만들어서 a4-db 설정에만 둔다 (화면에 찍지 않는다). 16진수만 — @ : / 같은 문자는 DATABASE_URL 을 깨뜨린다.
+#   입력받지 않는다 — §5.C 처럼 한 번에 붙여 넣으면 다음 줄이 비밀번호로 들어간다. 새 셸에서는 ⑤ 첫 줄이 a4-db 설정에서 읽는다
+A4_DB_PASSWORD=$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')
 docker network create a4-net
 docker run -d --name a4-db --network a4-net --restart unless-stopped \
   -e POSTGRES_USER=a4 -e POSTGRES_PASSWORD="$A4_DB_PASSWORD" -e POSTGRES_DB=a4 -e TZ=Asia/Seoul \
   -v $PWD/db:/var/lib/postgresql/data \
   postgres:17
-#   처음 만들 때는 초기화용 서버가 한 번 떴다 내려간 뒤 진짜 서버가 뜬다 — "ready" 두 번째를 기다린다
+#   처음 만들 때는 초기화용 서버가 한 번 떴다 내려간 뒤 진짜 서버가 뜬다 — "ready" 두 번째를 기다린다 (최대 2분)
 for i in $(seq 120); do
-  if [ "$(docker logs a4-db 2>&1 | grep -c 'ready to accept connections')" -ge 2 ]; then break; fi
+  [ "$(docker logs a4-db 2>&1 | grep -c 'ready to accept connections')" -ge 2 ] && break
   sleep 1
 done
-[ "$(docker logs a4-db 2>&1 | grep -c 'ready to accept connections')" -ge 2 ] \
-  || { docker logs --tail 20 a4-db; fail "DB가 2분 안에 준비되지 않았다"; }
-echo "DB ready"
-
-step "7. API (GPU 0)"
+[ "$(docker logs a4-db 2>&1 | grep -c 'ready to accept connections')" -ge 2 ] && echo "DB ready" \
+  || { docker logs --tail 20 a4-db; echo "[멈춤] DB 가 2분 안에 준비되지 않았다"; false; }
+echo; echo '══ ⑤ API'
+A4_DB_PASSWORD=${A4_DB_PASSWORD:-$(docker inspect a4-db --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^POSTGRES_PASSWORD=//p')}
+[ -n "$A4_DB_PASSWORD" ] && echo "password set" || { echo "[멈춤] DB 비밀번호가 비었다 — ④부터"; false; }
 docker run -d --name a4-api --gpus '"device=0"' -p 8000:8000 --restart unless-stopped \
   --network a4-net \
   -e DATABASE_URL="postgresql://a4:$A4_DB_PASSWORD@a4-db:5432/a4" \
@@ -517,158 +494,146 @@ docker run -d --name a4-api --gpus '"device=0"' -p 8000:8000 --restart unless-st
   -v $PWD/results:/app/results \
   --log-opt max-size=50m --log-opt max-file=3 \
   a4-api
-timeout 180 sh -c 'until curl -sf -o /dev/null localhost:8000/docs; do sleep 2; done' \
-  || { docker logs --tail 30 a4-api; fail "API가 3분 안에 뜨지 않았다 (GPU·모델·DB 확인)"; }
-docker logs a4-api 2>&1 | grep -c '"event": "db_ready"' >/dev/null || fail "API 로그에 db_ready 없음 (DB 접속 확인)"
-docker logs a4-api 2>&1 | grep '"event": "startup"' | tail -n 1
-echo "API ready"
-
-step "8. 스테이션 등록 — ST-01 서버 시험용, ST-02 모바일 앱용"
+timeout 180 sh -c 'until curl -sf -o /dev/null localhost:8000/docs; do sleep 2; done' && echo "API ready" \
+  || { docker logs --tail 30 a4-api; echo "[멈춤] API 가 3분 안에 뜨지 않았다 (GPU·모델·DB 확인)"; false; }
+docker logs a4-api 2>&1 | grep -E '"event": "(startup|db_ready)"' | tail -n 2 || true
+#   기대: startup (checkpoint "yolo_product_detection_model_…pt@…|yolo_quality_inspection_model_…pt@…",
+#         pd_classes 3개, qi_classes 18개, pd_conf 0.4, qi_conf 0.4) 다음 db_ready
+docker logs a4-api 2>&1 | grep -c '"event": "db_ready"' >/dev/null && echo "DB 접속 OK" \
+  || { echo "[멈춤] db_ready 없음 — 비밀번호·DB 확인 (startup 만 반복되면 DB 접속 실패)"; false; }
+echo; echo '══ ⑥ 스테이션 등록'
+#   ST-01: 서버 시험용 (⑧이 쓴다). ST-02: 모바일 앱용 (A4_WEBRTC_API.md §2.1)
 docker exec a4-db psql -U a4 -d a4 -c "INSERT INTO stations (station_id, name) VALUES ('ST-01', '1번 스테이션'), ('ST-02', '2번 스테이션');"
-
-step "9. 게이트웨이 — 여기서 서비스 재개"
+docker exec a4-db psql -U a4 -d a4 -tAc "SELECT string_agg(station_id, ' ' ORDER BY station_id) FROM stations"
+#   기대: ST-01 ST-02
+echo; echo '══ ⑦ 게이트웨이·설치 확인'
 docker run -d --name a4-gateway --network host --restart unless-stopped \
   -v $PWD/logs/a4-gateway:/app/logs \
   --log-opt max-size=50m --log-opt max-file=3 \
   a4-gateway
-timeout 60 sh -c 'until curl -sf -o /dev/null localhost:8080/docs; do sleep 1; done' \
-  || { docker logs --tail 30 a4-gateway; fail "게이트웨이가 1분 안에 뜨지 않았다"; }
-echo "gateway ready"
-
-step "10. 확인"
+timeout 60 sh -c 'until curl -sf -o /dev/null localhost:8080/docs; do sleep 1; done' && echo "gateway ready" \
+  || { docker logs --tail 30 a4-gateway; echo "[멈춤] 게이트웨이가 1분 안에 뜨지 않았다"; false; }
+#   설치 확인
 docker exec a4-db psql -U a4 -d a4 -tAc "SELECT string_agg(table_name, ' ' ORDER BY table_name) FROM information_schema.tables WHERE table_schema = 'public'"
-docker exec a4-db psql -U a4 -d a4 -tAc "SELECT string_agg(station_id, ' ' ORDER BY station_id) FROM stations"
-docker inspect a4-api --format '{{range .Mounts}}{{.Destination}} {{end}}' | grep -c /app/product_frames >/dev/null \
-  || fail "a4-api에 product_frames 마운트 없음"
-curl -sf -o /dev/null "localhost:8080/products?station=ST-02&limit=1" || fail "GET :8080/products 실패 (게이트웨이 → API → DB)"
-curl -sf -o /dev/null localhost:8080/storage || fail "GET :8080/storage 실패"
+#   기대: alerts decisions feedback_log frames products results sessions stations
+docker exec a4-db psql -U a4 -d a4 -tAc "SELECT string_agg(column_name, ' ' ORDER BY column_name) FROM information_schema.columns WHERE table_name = 'sessions' AND column_name IN ('config', 'stats')"
+#   기대: config stats
+docker inspect a4-api --format '{{range .Mounts}}{{.Destination}} {{end}}'
+#   기대: /app/models /app/logs /app/frames /app/product_frames /app/results (순서는 다를 수 있다)
+curl -sf -o /dev/null "localhost:8080/products?station=ST-02&limit=1" && curl -sf -o /dev/null localhost:8080/storage \
+  && echo "조회 OK (게이트웨이 → API → DB)" || { echo "[멈춤] :8080 조회 실패"; false; }
 docker ps --format '{{.Names}}  {{.Status}}' | grep '^a4-'
-
-step "11. 태그가 떨어진 옛 이미지 정리 (pytorch·postgres 기반 이미지와 빌드 캐시는 남긴다)"
-docker image prune -f
-
-echo; echo "REDEPLOY OK"
+#   기대: a4-gateway, a4-api, a4-db 모두 Up
+docker image prune -f   # 태그가 떨어진 옛 이미지 정리 (pytorch·postgres·python 기반 이미지와 빌드 캐시는 남는다)
+echo; echo 'REDEPLOY OK — 이어서 처음 설치 ⑧ 확인'
 REDEPLOY
 ```
 
-- 작성 환경에서 가짜 `docker`·`curl`로 흐름을 확인했다 (2026-11-09): 정상 → `REDEPLOY OK`, 빌드 실패·이미지 코드 불일치 → 3단계에서 멈추고 컨테이너·데이터 그대로, 모델 파일 없음 → 0단계에서 멈춤, API에 `db_ready` 없음 → 7단계에서 멈추고 게이트웨이 띄우지 않음. 실서버(GPU·실제 이미지)에서는 아직 돌려 보지 않았다.
+### 처음 설치 (①~⑧) — 지금 기준 설치 절차
 
-### 처음 설치 — 이상탐지를 내리고 PD·QI로 다시 올리기 (①~⑧)
+처음 설치할 때도, 전부 지우고 다시 설치할 때도 이 절차를 따른다. ①~⑦을 한 번에 실행하는 것이 §5.C다 — **명령이 같다** (한쪽을 고치면 다른 쪽도 글자 하나까지 같게 고친다). 단계마다 블록을 붙여 넣고 `기대`가 나오면 다음으로 간다. 확인이 실패하면 `[멈춤]` 줄이 찍힌다.
 
 | 단계 | 하는 일 | 기존 서비스 |
 |---|---|---|
-| ① 준비 | 기존 코드 보관, 새 코드로 교체, 모델·테스트 자료 배치 | 계속 돈다 |
-| ② 빌드 | 두 이미지 빌드 | 계속 돈다 (빌드가 실패하면 여기서 멈추고 기존 서비스 유지) |
-| ③ 내리기 | DB 덤프, 컨테이너 삭제, 이상탐지 데이터·기록 보관 | **여기서 중단** |
-| ④ DB | 새 `a4-db` (새 비밀번호) | |
-| ⑤ API | `a4-api` 기동 | |
-| ⑥ 스테이션 | ST-01, ST-02 등록 | |
-| ⑦ 게이트웨이 | `a4-gateway` 기동 | 재개 |
-| ⑧ 확인 | 동작·예외·연결 테스트 | |
+| ① 준비 | 새 코드로 교체, 모델 확인 | 계속 돈다 |
+| ② 빌드 | 두 이미지 빌드, 이미지 안 코드 확인 | 계속 돈다 (실패하면 여기서 멈추고 기존 서비스 유지) |
+| ③ 내리기·지우기 | 컨테이너·네트워크 삭제, 데이터 영구 삭제 | **여기서 중단** |
+| ④ DB | 새 `a4-db` (비밀번호 자동 생성) |  |
+| ⑤ API | `a4-api` 기동 (GPU 0) |  |
+| ⑥ 스테이션 등록 | ST-01, ST-02 |  |
+| ⑦ 게이트웨이·설치 확인 | `a4-gateway` 기동, 테이블·마운트·조회 확인, 옛 이미지 정리 | 재개 |
+| ⑧ 확인 | 동작·예외·연결 시험 | |
 
 **전제**
 
 - 호스트: CUDA 13을 지원하는 NVIDIA 드라이버, NVIDIA Container Toolkit (`docker run --gpus`).
-- 빌드에 pip(PyPI)와 apt(Ubuntu/Debian 저장소) 접근이 필요하다. `postgres:17`, `pytorch/pytorch:2.10.0-cuda13.0-cudnn9-devel`, `python:3.12-slim` 이미지를 받을 수 있어야 한다. 이전과 달리 Hugging Face 접근(DINOv2 가중치)은 필요 없다.
+- 빌드에 pip(PyPI)와 apt(Ubuntu/Debian 저장소) 접근이 필요하다 (a4-api는 `mirror.kakao.com`을 쓴다 — Dockerfile). `postgres:17`, `pytorch/pytorch:2.10.0-cuda13.0-cudnn9-devel`, `python:3.12-slim` 이미지를 받을 수 있어야 한다.
 - 서버 시간대와 무관하게 아래 `date`는 `TZ=Asia/Seoul`로 쓴다.
+- 2026-10 이상탐지 → PD·QI 전환 때만 필요했던 단계(옛 코드·데이터를 `archive_a4_<날짜>/`로 보관, `corelib/` 등 이상탐지 코드 삭제)는 이 절차에서 뺐다 — git 이력의 이 문서 이전 판과 `A4_PLAN.md`(보관)에 있다.
 
-### ① 준비 (기존 서비스는 계속 돈다)
+### ① 준비
 
 ```bash
 cd /home/admin/odServer   # 프로젝트 폴더 ($PWD)
-A=archive_a4_$(TZ=Asia/Seoul date +%Y%m%d); mkdir -p $A; echo "보관 폴더: $A"
-
-# 1. 기존 코드 보관 (되돌릴 때 쓴다)
-mkdir -p $A/code && cp -a api gateway $A/code/ && ls $A/code
-
-# 2. 실행 중인 컨테이너가 쓰지 않는 이상탐지 자료를 먼저 보관 폴더로 옮긴다 (지우지 않는다)
-#    db·logs·frames·results·checkpoints는 컨테이너가 붙여 쓰고 있으므로 ③에서 옮긴다
-for d in raw videos data a4_check a4_check_cmp checkpoints_cmp stream_out webrtc_out trunc.jpg bomb.png; do
-  [ -e "$d" ] && mv "$d" "$A/" && echo "보관: $d"
-done
-
-# 3. 이상탐지 코드 삭제
-rm -r api/corelib
-rm api/a4_common.py api/prepare_a4.py api/build_a4.py api/smoke_a4.py api/bench_a4.py
-
-# 4. 새 코드 복사 — 전달받은 묶음을 풀어 api/·gateway/·문서를 덮어쓴다 (예: 묶음을 /tmp/new에 풀었을 때)
-cp -a /tmp/new/api/. api/
-cp -a /tmp/new/gateway/. gateway/
-cp /tmp/new/DEPLOY.md /tmp/new/A4_WEBRTC_API.md /tmp/new/A4_PLAN.md .
+#   새 코드 묶음(저장소의 server/ 폴더 — api/ gateway/ DEPLOY.md A4_WEBRTC_API.md PLAN_*.md)을 /tmp/new 에 풀어 둔다
+ls /tmp/new/api/api.py /tmp/new/gateway/gateway.py /tmp/new/DEPLOY.md >/dev/null && echo "새 코드 OK" || { echo "[멈춤] /tmp/new 에 새 코드가 없다"; false; }
+rm -rf api gateway
+cp -a /tmp/new/api /tmp/new/gateway .
+cp /tmp/new/*.md .
 ls -A api; ls gateway
 #   기대: api 8개 (.dockerignore Dockerfile api.py db.py detect.py requirements.txt stream.py stream_client.py)
 #         gateway 5개 (Dockerfile README.md gateway.py requirements.txt webrtc_client.py)
-grep -c ultralytics api/requirements.txt; grep -c corelib api/Dockerfile
-#   기대: 1 / 0
-
-# 5. 모델 — 파일명은 api/detect.py의 PD_MODEL, QI_MODEL과 같아야 한다
-mkdir -p models && cp <모델 위치>/yolo_product_detection_model_20261020111232.pt <모델 위치>/yolo_quality_inspection_model_20261021091500.pt models/
-ls -l models
-
-# 6. 테스트 자료 — 제품 사진 몇 장(예: QI val 이미지)과 제품을 찍은 영상
-mkdir -p samples videos && cp <제품 사진>.jpg samples/ && cp <제품 영상>.mp4 videos/
-```
-
-### ② 빌드 (기존 서비스는 계속 돈다)
-
-```bash
-docker build -t a4-api api/ --no-cache
-docker build -t a4-gateway gateway/ --no-cache
-#   a4-api: ultralytics 설치가 torch를 다시 받지 않아야 한다 (베이스 이미지의 torch 사용). 빌드 로그에 "Downloading torch-"가 없는지 본다
-docker run --rm a4-api python -c "import ultralytics, cv2, fastapi, psycopg; print(ultralytics.__version__, cv2.__version__)"
-#   기대: 8.4.117 4.x — libGL 관련 ImportError가 나면 Dockerfile의 libgl1 설치가 빠진 것
-docker run --rm a4-api sh -c 'date; ls /usr/share/fonts/truetype/nanum/NanumGothic.ttf; ls /app'
-#   기대: KST 시각, 폰트 파일 경로, /app에 api.py db.py detect.py requirements.txt stream.py stream_client.py (corelib 없음)
-```
-
-### ③ 내리기 — 여기서부터 서비스 중단
-
-```bash
-# 1. 기존 DB 덤프 (컨테이너를 지우기 전에)
-docker exec a4-db pg_dump -U a4 a4 > $A/a4_db.sql && ls -l $A/a4_db.sql
-#   새 셸이면 A를 다시 정한다: A=archive_a4_<①의 날짜>
-
-# 2. 컨테이너 삭제 (게이트웨이 → API → DB). 없는 컨테이너는 "No such container" 경고만 난다
-docker rm -f a4-gateway a4-api a4-api-1 a4-db
-docker ps -a --format '{{.Names}}' | grep '^a4-'
-#   기대: 출력 없음
-
-# 3. 컨테이너가 쓰던 이상탐지 기록을 보관 폴더로 옮긴다 (지우지 않는다)
-for d in db logs frames results checkpoints; do
-  [ -e "$d" ] && mv "$d" "$A/" && echo "보관: $d"
+#   모델 — 파일명은 api/detect.py 의 PD_MODEL·QI_MODEL. 없으면: mkdir -p models && cp <모델 위치>/<파일명>.pt models/
+for m in $(grep -o 'yolo_[a-z_]*_[0-9]*\.pt' api/detect.py | sort -u); do
+  ls -l "models/$m" || { echo "[멈춤] models/$m 없음"; false; }
 done
-ls; ls $A
-#   기대: 최상위에 api gateway models samples videos 와 문서, 보관 폴더만. db/는 반드시 옮겨져 있어야 한다 —
-#         남아 있으면 새 a4-db가 옛 데이터베이스(옛 비밀번호·옛 스키마)를 그대로 읽는다
 ```
 
-- `db/`는 PostgreSQL 사용자 소유라도 같은 디스크 안 이동(`mv`)은 프로젝트 폴더 쓰기 권한만 있으면 된다. `Permission denied`면 `sudo mv`.
-- 옛 이미지 `a4-anomaly`와 가중치 볼륨 `hf-cache`(약 1.2GB)는 **⑧ 확인이 끝날 때까지 지우지 않는다** — 되돌릴 때 필요하다 (§6.6).
-- 네트워크 `a4-net`은 그대로 쓴다.
+- `/tmp/new`에는 저장소 `server/` 폴더를 그대로 둔다. `models/`·`samples/`·`videos/`는 프로젝트 폴더에 있는 것을 쓴다 — `/tmp/new/models`는 복사하지 않는다.
+- ⑧ 시험에 쓸 자료: `samples/`에 제품 사진 몇 장(.jpg), `videos/`에 제품을 찍은 영상. 없으면 ⑧ 전에 넣는다.
 
-### ④ DB (새 비밀번호)
+### ② 빌드
 
 ```bash
-# 비밀번호는 셸 기록에 남지 않게 입력받는다. 영문·숫자로 정한다 — @ : / 같은 문자는 DATABASE_URL을 깨뜨린다
-read -rsp "새 DB 비밀번호: " A4_DB_PASSWORD; echo; export A4_DB_PASSWORD
-[ -n "$A4_DB_PASSWORD" ] && echo "password set" || echo "EMPTY — 여기서 멈춘다"
-docker network inspect a4-net >/dev/null 2>&1 || docker network create a4-net
+#   --no-cache 를 쓰지 않는다 — Dockerfile·requirements.txt 가 그대로면 apt·pip 층은 캐시를 쓰고 코드(COPY)만 새로 들어간다.
+#   (gpudev 는 컨테이너 안에서 apt 저장소 접속이 막힌 적이 있다 — 2026-11-09). 새 코드가 들어갔는지는 아래 비교로 본다
+docker build -t a4-api api/
+docker build -t a4-gateway gateway/
+diff <(docker run --rm --entrypoint sh a4-api -c 'sha256sum *.py') <(cd api && sha256sum *.py) \
+  && diff <(docker run --rm --entrypoint sh a4-gateway -c 'sha256sum *.py') <(cd gateway && sha256sum *.py) \
+  && echo "BUILD OK — 이미지 안 코드 = 새 코드" \
+  || { echo "[멈춤] 빌드 실패 또는 이미지 안 코드가 다르다 — 옛 서비스는 그대로 돈다. ③으로 가지 않는다"; false; }
+```
+
+- `BUILD OK`가 안 나오면 **③으로 가지 않는다** — ③부터 서비스가 내려간다.
+- a4-api 빌드 로그에 `Downloading torch-`가 없어야 한다 (베이스 이미지의 torch를 쓴다). `libGL` ImportError면 Dockerfile의 libgl1 설치가 빠진 것.
+
+### ③ 내리기·지우기
+
+```bash
+#   여기서부터 서비스 중단. 컨테이너·네트워크를 지우고 데이터를 보관하지 않고 지운다 (남기려면 먼저 §6.5 DB 덤프).
+#   처음 설치하는 서버에서는 지울 것이 없어 그냥 지나간다. 지우기 전 10초 — §5.C 로 한 번에 실행할 때는 이때 Ctrl+C 면 전체가 취소된다
+docker ps -a --format '{{.Names}}  {{.Status}}' | grep '^a4-' || echo "(a4- 컨테이너 없음)"
+du -sh db product_frames results frames logs stream_out webrtc_out 2>/dev/null || true
+echo "10초 뒤 위 컨테이너와 데이터를 지운다"; sleep 10
+docker rm -f a4-gateway a4-api a4-api-1 a4-db 2>/dev/null || true
+docker network rm a4-net 2>/dev/null || true
+rm -rf db product_frames results frames logs stream_out webrtc_out
+mkdir -p db product_frames results frames logs/a4-api logs/a4-gateway
+docker ps -a --format '{{.Names}}' | grep '^a4-' || echo "a4- 컨테이너 없음 — OK"
+```
+
+- 지우는 것: 컨테이너 `a4-gateway`·`a4-api`·`a4-api-1`·`a4-db`, 네트워크 `a4-net`, `db/`(DB 전체 — 기록·스테이션), `product_frames/`, `results/`, `frames/`, `logs/`, `stream_out/`, `webrtc_out/`.
+- 남는 것: `models/`, `samples/`, `videos/`, 보관 폴더(`archive_*/`), 그 밖에 프로젝트 폴더에 있는 다른 파일, 기반 이미지와 빌드 캐시.
+- 단계별로 붙여 넣을 때는 이 블록을 붙여 넣는 것이 곧 삭제다 (10초 대기는 §5.C용).
+
+### ④ DB
+
+```bash
+#   비밀번호는 만들어서 a4-db 설정에만 둔다 (화면에 찍지 않는다). 16진수만 — @ : / 같은 문자는 DATABASE_URL 을 깨뜨린다.
+#   입력받지 않는다 — §5.C 처럼 한 번에 붙여 넣으면 다음 줄이 비밀번호로 들어간다. 새 셸에서는 ⑤ 첫 줄이 a4-db 설정에서 읽는다
+A4_DB_PASSWORD=$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')
+docker network create a4-net
 docker run -d --name a4-db --network a4-net --restart unless-stopped \
   -e POSTGRES_USER=a4 -e POSTGRES_PASSWORD="$A4_DB_PASSWORD" -e POSTGRES_DB=a4 -e TZ=Asia/Seoul \
   -v $PWD/db:/var/lib/postgresql/data \
   postgres:17
-docker logs a4-db 2>&1 | tail -n 3
-#   기대: "database system is ready to accept connections"
+#   처음 만들 때는 초기화용 서버가 한 번 떴다 내려간 뒤 진짜 서버가 뜬다 — "ready" 두 번째를 기다린다 (최대 2분)
+for i in $(seq 120); do
+  [ "$(docker logs a4-db 2>&1 | grep -c 'ready to accept connections')" -ge 2 ] && break
+  sleep 1
+done
+[ "$(docker logs a4-db 2>&1 | grep -c 'ready to accept connections')" -ge 2 ] && echo "DB ready" \
+  || { docker logs --tail 20 a4-db; echo "[멈춤] DB 가 2분 안에 준비되지 않았다"; false; }
 ```
 
-- 새 셸에서 비밀번호가 필요하면 `a4-db` 컨테이너 설정에서 다시 읽는다 (화면에 찍지 않는다):
-  `export A4_DB_PASSWORD=$(docker inspect a4-db --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^POSTGRES_PASSWORD=//p')`
+- 비밀번호를 볼 일이 있으면: `docker inspect a4-db --format '{{range .Config.Env}}{{println .}}{{end}}' | grep POSTGRES_PASSWORD` (화면·기록에 남는다).
 
 ### ⑤ API
 
 ```bash
-[ -n "$A4_DB_PASSWORD" ] && echo "password set" || echo "EMPTY — ④의 read 줄부터"
-#   비어 있으면 DB 접속이 PoolTimeout으로 실패해 재시작만 반복한다 (startup만 반복, db_ready 없음)
+A4_DB_PASSWORD=${A4_DB_PASSWORD:-$(docker inspect a4-db --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^POSTGRES_PASSWORD=//p')}
+[ -n "$A4_DB_PASSWORD" ] && echo "password set" || { echo "[멈춤] DB 비밀번호가 비었다 — ④부터"; false; }
 docker run -d --name a4-api --gpus '"device=0"' -p 8000:8000 --restart unless-stopped \
   --network a4-net \
   -e DATABASE_URL="postgresql://a4:$A4_DB_PASSWORD@a4-db:5432/a4" \
@@ -679,37 +644,48 @@ docker run -d --name a4-api --gpus '"device=0"' -p 8000:8000 --restart unless-st
   -v $PWD/results:/app/results \
   --log-opt max-size=50m --log-opt max-file=3 \
   a4-api
-timeout 180 sh -c 'until curl -sf -o /dev/null localhost:8000/docs; do sleep 2; done' \
-  && echo "API ready" || docker logs --tail 30 a4-api
-docker logs a4-api 2>&1 | grep -E '"event": "(startup|db_ready)"' | tail -n 2
+timeout 180 sh -c 'until curl -sf -o /dev/null localhost:8000/docs; do sleep 2; done' && echo "API ready" \
+  || { docker logs --tail 30 a4-api; echo "[멈춤] API 가 3분 안에 뜨지 않았다 (GPU·모델·DB 확인)"; false; }
+docker logs a4-api 2>&1 | grep -E '"event": "(startup|db_ready)"' | tail -n 2 || true
 #   기대: startup (checkpoint "yolo_product_detection_model_…pt@…|yolo_quality_inspection_model_…pt@…",
 #         pd_classes 3개, qi_classes 18개, pd_conf 0.4, qi_conf 0.4) 다음 db_ready
-docker exec a4-db psql -U a4 -d a4 -c '\dt'
-#   기대: alerts, decisions, results, sessions, stations
-docker exec a4-db psql -U a4 -d a4 -c '\d results' | grep -E 'detections|frame_size|mask_path|is_anomalous'
-#   기대: detections, frame_size 두 줄만 (mask_path·is_anomalous가 보이면 옛 db/를 읽고 있는 것 — ③-3 확인)
+docker logs a4-api 2>&1 | grep -c '"event": "db_ready"' >/dev/null && echo "DB 접속 OK" \
+  || { echo "[멈춤] db_ready 없음 — 비밀번호·DB 확인 (startup 만 반복되면 DB 접속 실패)"; false; }
 ```
 
-- 기동 시 PD·QI를 한 번씩 돌린다(예열). **GPU가 안 보이면(`--gpus` 누락 등) 여기서 기동이 멈추고** `docker logs`에 CUDA 장치 오류가 남는다 — CPU로 조용히 돌지 않게 했다.
-- `FileNotFoundError: models/…pt`면 ①-4의 파일명이나 `-v $PWD/models` 마운트를 확인한다.
+- 기동 때 PD·QI를 한 번씩 돌린다(예열). **GPU가 안 보이면(`--gpus` 누락 등) 여기서 기동이 멈추고** `docker logs`에 CUDA 장치 오류가 남는다 — CPU로 조용히 돌지 않게 했다.
+- `FileNotFoundError: models/…pt`면 ①의 모델 파일명이나 `-v $PWD/models` 마운트를 확인한다. 테이블은 API가 기동하며 만든다.
 
 ### ⑥ 스테이션 등록
 
 ```bash
-#   ST-01: 서버 테스트용 (⑧이 쓴다). ST-02: 모바일 앱용 (A4_WEBRTC_API.md §2.1). 알림이 섞이지 않게 나눈다
+#   ST-01: 서버 시험용 (⑧이 쓴다). ST-02: 모바일 앱용 (A4_WEBRTC_API.md §2.1)
 docker exec a4-db psql -U a4 -d a4 -c "INSERT INTO stations (station_id, name) VALUES ('ST-01', '1번 스테이션'), ('ST-02', '2번 스테이션');"
-docker exec a4-db psql -U a4 -d a4 -c "SELECT station_id, name FROM stations ORDER BY station_id;"
-#   기대: ST-01, ST-02
+docker exec a4-db psql -U a4 -d a4 -tAc "SELECT string_agg(station_id, ' ' ORDER BY station_id) FROM stations"
+#   기대: ST-01 ST-02
 ```
 
-### ⑦ 게이트웨이
+### ⑦ 게이트웨이·설치 확인
 
 ```bash
 docker run -d --name a4-gateway --network host --restart unless-stopped \
   -v $PWD/logs/a4-gateway:/app/logs \
   --log-opt max-size=50m --log-opt max-file=3 \
   a4-gateway
-until curl -sf -o /dev/null localhost:8080/docs; do sleep 1; done; echo "gateway ready"
+timeout 60 sh -c 'until curl -sf -o /dev/null localhost:8080/docs; do sleep 1; done' && echo "gateway ready" \
+  || { docker logs --tail 30 a4-gateway; echo "[멈춤] 게이트웨이가 1분 안에 뜨지 않았다"; false; }
+#   설치 확인
+docker exec a4-db psql -U a4 -d a4 -tAc "SELECT string_agg(table_name, ' ' ORDER BY table_name) FROM information_schema.tables WHERE table_schema = 'public'"
+#   기대: alerts decisions feedback_log frames products results sessions stations
+docker exec a4-db psql -U a4 -d a4 -tAc "SELECT string_agg(column_name, ' ' ORDER BY column_name) FROM information_schema.columns WHERE table_name = 'sessions' AND column_name IN ('config', 'stats')"
+#   기대: config stats
+docker inspect a4-api --format '{{range .Mounts}}{{.Destination}} {{end}}'
+#   기대: /app/models /app/logs /app/frames /app/product_frames /app/results (순서는 다를 수 있다)
+curl -sf -o /dev/null "localhost:8080/products?station=ST-02&limit=1" && curl -sf -o /dev/null localhost:8080/storage \
+  && echo "조회 OK (게이트웨이 → API → DB)" || { echo "[멈춤] :8080 조회 실패"; false; }
+docker ps --format '{{.Names}}  {{.Status}}' | grep '^a4-'
+#   기대: a4-gateway, a4-api, a4-db 모두 Up
+docker image prune -f   # 태그가 떨어진 옛 이미지 정리 (pytorch·postgres·python 기반 이미지와 빌드 캐시는 남는다)
 ```
 
 - 방화벽은 포트가 그대로라 바꿀 것이 없다. 현재 상태 확인은 §7.
@@ -793,8 +769,8 @@ docker run --rm --network host -v $PWD/samples:/samples:ro -v $PWD/stream_out/ph
 #         NG·REVIEW 사진은 1초에 1장꼴로 result_id (사진 10장 = 1초 → 1~2장 저장). OK는 "inspect OK ×N" 한 줄.
 #         끝에 "요약: inspect N (OK a / REVIEW b / NG c), 저장 m". 오버레이는 stream_out/photos/NNN_<decision>_<result_id>.jpg
 grep inspect_saved logs/a4-api/$D.jsonl | tail -n 3
-ls frames/$D/ results/$D/
-#   기대: 저장마다 frames/$D/<result_id>.jpg, results/$D/<result_id>/overlay.jpg
+ls product_frames/$D/ results/$D/
+#   기대: product_frames/$D/<session_id>/ 에 제품 프레임 사진, 저장마다 results/$D/<result_id>/overlay.jpg
 grep '"event": "ws_close"' logs/a4-api/$D.jsonl | tail -n 1
 #   기대: product_frames = 요약의 inspect 수, saved = 요약의 저장 수 = 그 세션의 frames 파일 수, error null
 RID=$(grep inspect_saved logs/a4-api/$D.jsonl | tail -n 1 | python3 -c "import sys,json; print(json.loads(sys.stdin.read())['result_id'])"); echo $RID
