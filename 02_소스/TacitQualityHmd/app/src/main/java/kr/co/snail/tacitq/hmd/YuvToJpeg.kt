@@ -16,7 +16,7 @@ import java.io.ByteArrayOutputStream
  */
 object YuvToJpeg {
 
-    /** 장마다 약 4MB(1920×1440)를 새로 잡지 않게 다시 쓴다 — YuvImage 는 compressToJpeg 가 끝나면 놓는다 */
+    /** 장마다 약 2.3MB(1440×1080)를 새로 잡지 않게 다시 쓴다 — YuvImage 는 compressToJpeg 가 끝나면 놓는다 */
     private var nv21: ByteArray? = null
 
     /** YUV_420_888 → NV21. rowStride·pixelStride 를 지켜 복사한다([Nv21]). */

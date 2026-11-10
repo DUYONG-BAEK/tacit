@@ -94,9 +94,10 @@ class Nv21Test {
         check(12, 4, planar(12, 4, yPix = 2, pad = 3, Random(4)))
     }
 
-    /** 실제 크기 1920×1440 (RealWear 520 분석 영상) */
+    /** 실제 크기 — 1440×1080 (RealWear 520 분석 영상, 2026-11-10~) · 1920×1440 (이전) */
     @Test fun fullSize() {
-        check(1920, 1440, semiPlanar(1920, 1440, pad = 64, vFirst = true, Random(5)))
+        check(1440, 1080, semiPlanar(1440, 1080, pad = 64, vFirst = true, Random(5)))
+        check(1920, 1440, semiPlanar(1920, 1440, pad = 64, vFirst = true, Random(8)))
     }
 
     /** 버퍼 위치(position)를 옮기지 않는다 — 카메라 버퍼를 다른 곳에서 다시 읽어도 처음 그대로 */

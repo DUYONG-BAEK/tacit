@@ -6,7 +6,7 @@
     앱 ── /results/*, /products*, /storage ──▶ gateway ──▶ A4 API   (그대로 넘긴다)
 
 프레임은 다시 압축하지 않는다 (PLAN_product_feedback.md §7.1): b"I420" + width·height(uint16 LE) + rx_at(int64 LE,
-게이트웨이가 받은 시각 epoch ms) + Y·U·V 평면. 앱은 HMD 프레임을 받는 대로(초당 약 12장) 보내고 A4 API가 가장 최근 프레임만 처리하므로
+게이트웨이가 받은 시각 epoch ms) + Y·U·V 평면. 앱은 HMD 프레임을 받는 대로(초당 약 10장) 보내고 A4 API가 가장 최근 프레임만 처리하므로
 게이트웨이는 프레임을 거르지 않는다.
 
 연결 절차 (앱):
@@ -155,7 +155,7 @@ async def forward(track, ws, pc: RTCPeerConnection, channel: asyncio.Future, pee
             frame = await track.recv()
             video["frames"] += 1
             rx_at = round(time.time() * 1000)
-            # 거르지 않는다 — 앱이 HMD 프레임을 받는 대로(초당 약 12장) 보내고, A4 API가 가장 최근 프레임만 처리한다.
+            # 거르지 않는다 — 앱이 HMD 프레임을 받는 대로(초당 약 10장) 보내고, A4 API가 가장 최근 프레임만 처리한다.
             # (옛 1/FORWARD_FPS 간격 제한은 도착 간격이 조금만 흔들려도 다음 장을 버린다 — 2026-11-05 실측 초당 약 7장의 원인으로 본다)
             await ws.send(await asyncio.to_thread(to_i420, frame, rx_at))
             video["forwarded"] += 1

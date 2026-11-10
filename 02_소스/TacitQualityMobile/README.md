@@ -24,7 +24,7 @@ AiFlow ─┬─ 결함 프레임 → BLE LIVE → HMD 판정 글자·결함 원
 | 결함 확정 · 제품 끝 · 면 | 5장 중 2장 · 1초 · 면은 5장 이상이면 봄 — **서버**가 정한다 (`server/api/stream.py`) |
 | 결함 표시 유지 | 0.5초 (`Profile.markHoldMs`) |
 | 모드 | 수동(폰에서 피드백) / 자동(피드백 건너뜀) — M-01, 연결 때 서버로 (`DevSettings.feedbackMode`) |
-| 영상 | HMD 프레임을 받는 대로 송출(쉬는 간격 없음, HMD 송출 초당 12장이 상한) · VP8 최대 12Mbps (`AiEdgeLink.MAX_BITRATE`) |
+| 영상 | HMD 프레임(4:3 1440×1080)을 받는 대로 송출(쉬는 간격 없음, HMD 송출 초당 10장이 상한) · VP8 최대 12Mbps (`AiEdgeLink.MAX_BITRATE`) |
 | 재연결 | 1 → 2 → 4 → 5초, 시도 마감 10초 (`ai/Reconnect.kt`) |
 | 판정 | 서버 `product_end.decision` 그대로 (PASS 합격 · FAIL 불합격, 원판정 `ai_decision` 따로) |
 

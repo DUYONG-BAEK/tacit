@@ -57,9 +57,11 @@ class MainActivity : AppCompatActivity() {
     /**
      * MJPEG 해상도 — 4:3(센서 비율). 2026-11-05: 16:9(1920×1080)는 4:3 센서의 위아래를 잘라 기본 카메라 앱보다
      * 약 1.33배 확대돼 보였다. 4:3 이면 센서 화각 전체를 쓴다. 실제 크기는 카메라가 고른다(상태줄·로그에 표시).
-     * adb: am start ... --es res 720 → 960×720
+     * 2026-11-10: 1920×1440 → 1440×1080 (4:3 1080p, 서버 권장 1080p 이상 유지) — 품질 80·초당 10장과 함께 HMD 영상량을
+     * 약 27Mbps → 약 8Mbps(추정)로 줄인다. 같은 Wi-Fi 에서 1920×1440 품질 90 초당 12장일 때 폰 → 서버 패킷 손실 27% 실측.
+     * adb: am start ... --es res 720 → 960×720 (진단용)
      */
-    private val mjpegSize by lazy { if (intent.getStringExtra(EXTRA_RES) == "720") Size(960, 720) else Size(1920, 1440) }
+    private val mjpegSize by lazy { if (intent.getStringExtra(EXTRA_RES) == "720") Size(960, 720) else Size(1440, 1080) }
     /**
      * 카메라 자동 노출 장수 범위 고정값 — 2026-11-10 dumpsys: 고정 범위는 [15,15]·[24,24]·[30,30] 뿐이고, 정하지 않으면
      * 어두울 때 [10,30] 안에서 초당 10장까지 내려가 송출 12장을 못 채운다. 30 이면 노출이 33ms 이하로 짧아 흔들림도 준다.
@@ -296,6 +298,7 @@ class MainActivity : AppCompatActivity() {
             val analysis = ImageAnalysis.Builder()
                 // 2026-10-07: 640×480 → 720p. 2026-10-10: 1080p. 2026-11-03 규격: 결함을 640px 타일로 보므로 1080p 이상 권장(API §5.5)
                 // 2026-11-05: 4:3 1920×1440 — 화각을 기본 카메라 앱과 맞추고 가로 화소는 1080p 와 같게
+                // 2026-11-10: 4:3 1440×1080 — 화각 그대로, 영상량을 줄인다([mjpegSize])
                 .setTargetResolution(mjpegSize)
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .build()
@@ -337,7 +340,7 @@ class MainActivity : AppCompatActivity() {
         }
         lastFrameAt = capturedAt
         stats.onAnalyzed()
-        // 초당 MJPEG_FPS 장만 JPEG 로 만든다(핫스팟 대역폭을 아낀다 — 폰은 받는 대로 서버로 보내므로 이 장수가 서버 도착 상한).
+        // 초당 MJPEG_FPS 장만 JPEG 로 만든다(HMD → 폰 영상량을 아낀다 — 폰은 받는 대로 서버로 보내므로 이 장수가 서버 도착 상한).
         // 예정 시각 방식에 반 간격 허용 — 도착 간격이 조금 흔들려도 다음 장을 버리지 않아 평균이 MJPEG_FPS 가 된다.
         if (capturedAt < nextSendAt - MJPEG_FRAME_MS / 2) { image.close(); return }
         nextSendAt = maxOf(nextSendAt + MJPEG_FRAME_MS, capturedAt - MJPEG_FRAME_MS / 2)
@@ -482,8 +485,10 @@ class MainActivity : AppCompatActivity() {
         private const val VIDEO_BITRATE = 8_000_000
         // 2026-11-06: JPEG 품질 80 → 95, 송출 초당 12장 (server/PLAN_product_feedback.md §7.4, 출발값)
         // 2026-11-10: 품질 95 → 90 — 실측 송출이 초당 약 7장(목표 12)이라 압축 시간·크기를 줄인다
-        private const val MJPEG_QUALITY = 90
-        private const val MJPEG_FPS = 12
+        // 2026-11-10: 1440×1080 · 품질 80 · 초당 10장 — 영상량을 줄인다([mjpegSize]). 서버가 보는 화질은 폰 VP8 이 정하므로
+        //   품질 80 은 서버 쪽 화질에 거의 영향이 없다. WebRTC 규격은 장수를 정하지 않는다(A4_WEBRTC_API.md §5)
+        private const val MJPEG_QUALITY = 80
+        private const val MJPEG_FPS = 10
         private const val MJPEG_FRAME_MS = 1000L / MJPEG_FPS
     }
 }

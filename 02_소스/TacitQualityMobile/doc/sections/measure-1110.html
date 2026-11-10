@@ -1,0 +1,45 @@
+<div class="section-head">
+  <h3>HMD 송출 병목 · 폰 → 서버 패킷 손실 · 1440×1080 결정</h3>
+  <span class="date-badge">2026-11-10</span>
+  <span class="status dev">구현 · 실기기 측정 완료 · 1440×1080 앱 빌드·실기기 확인 전</span>
+</div>
+
+<p>11-09 "받는 대로 송출" 뒤에도 서버 도착이 초당 약 7장이었다. 구간마다 장수를 세는 로그를 넣어 HMD → 폰 → 게이트웨이 → API 순서로 원인을 찾았다.
+HMD·폰·서버는 같은 사내 Wi-Fi(5GHz). 근거: <code>server/DEPLOY.md</code> §8 "실기기 영상 경로 (2026-11-10 오후)".</p>
+
+<h4>1. HMD 송출 — 초당 7.2장 → 12.0장</h4>
+<table class="col-table">
+  <tr><th style="width:22%">항목</th><th>내용</th></tr>
+  <tr><td>카메라 (dumpsys)</td><td>HAL <strong>LEVEL_3</strong>(구형 HAL 아님). YUV·JPEG 1920×1440·1440×1080 모두 초당 30장까지. 자동 노출 고정 범위 [15,15]·[24,24]·[30,30]</td></tr>
+  <tr><td>원인</td><td>분석 스레드 하나가 한 장마다 NV21 복사(화소마다 <code>ByteBuffer.get</code>, 약 415만 번) + JPEG 압축 — 한 장 약 140ms(추정)라 초당 약 7장</td></tr>
+  <tr><td>변경</td><td><code>Nv21</code> 줄 단위 복사(옛 방식과 바이트 동일 — <code>Nv21Test</code>), NV21 버퍼 재사용, 품질 95 → 90, 자동 노출 [30,30] 고정(<code>--ei fps 24|15</code>),
+      5초 측정 로그 <code>FrameStats</code>(센서·분석·송출 장수, NV21·JPEG ms, 평균 KB, 노출·ISO·AE — logcat <code>TacitQ.Hmd</code>·상태줄)</td></tr>
+  <tr><td>결과</td><td class="ok">센서 초당 26.7장 · 송출 <strong>12.0장</strong> · NV21 13ms + JPEG 37ms · 평균 약 280KB · 변환 점유 약 60% · ISO 600~3000</td></tr>
+</table>
+
+<h4>2. 폰 → 서버 — 패킷 손실 27%</h4>
+<table class="col-table">
+  <tr><th style="width:22%">구간</th><th>1920×1440 · 품질 90 · 12장</th><th>960×720 (진단)</th></tr>
+  <tr><td>폰 넣음 → 인코딩 → 전송</td><td>730 = 730 = 730 (VP8 제한 none)</td><td>—</td></tr>
+  <tr><td>게이트웨이 패킷 손실</td><td><strong>약 27%</strong> (받음 22,065 · 손실 8,206) · jitter 40~113ms · 폰 PLI 77번/약 70초</td><td class="ok">약 2.8% · jitter 5~14ms</td></tr>
+  <tr><td>디코딩 (게이트웨이)</td><td>폰이 보낸 것의 약 87% · 디코딩 실패 0</td><td class="ok">5초에 60장 (빠짐 없음)</td></tr>
+  <tr><td>API 처리</td><td>받은 만큼 처리 (1675장 중 1674장, decode 2 + PD 11 + QI 25ms)</td><td>—</td></tr>
+</table>
+<p>폰 인코더·게이트웨이 디코더는 정상이고, 빠지는 곳은 무선 구간이다. HMD → 폰 JPEG(약 27Mbps)가 같은 Wi-Fi 무선 시간을 차지해 폰 → 서버 UDP가 손실된 것으로 본다.
+측정용으로 폰 통신 로그에 WebRTC 송신 통계(넣음·인코딩·전송·패킷·재전송·NACK·PLI·서버 보고 손실), 게이트웨이에 <code>video_stats</code>(디코딩·/ws 장수, 패킷 수신·손실, jitter)를 더했다.</p>
+
+<div class="warn-box"><strong>결정 (2026-11-10):</strong> HMD 영상을 <strong>4:3 1440×1080 · JPEG 품질 80 · 초당 10장</strong>(약 8Mbps 추정)으로 바꾼다.
+1080p 이상(API §5.5)은 지킨다. 서버가 보는 화질은 폰 VP8(한 장 약 25~40KB)이 정하므로 품질 80은 서버 쪽 화질에 거의 영향이 없다.
+초당 10장이면 같은 장수 규칙(확정 5장 · 면 5장)이 약 0.5초가 된다.</div>
+
+<h4>3. 열린 문제 — 제품이 실제보다 많이 잡힘</h4>
+<p>약 2분 30초에 제품 39개, 그중 9개는 1~4장·면 없음. PD가 1초 넘게 놓쳐 쪼개짐 · PD 오탐 · 패킷 손실로 인한 프레임 공백 중 무엇인지 가르지 못했다.
+PD는 한 장 11ms로 모든 프레임에 돌았다(속도 문제 아님). 제품 수를 정해 다시 시험한다.</p>
+
+<h4>시험</h4>
+<ul class="checklist">
+  <li class="done">JVM: <code>Nv21Test</code> 7건(옛 방식과 바이트 비교 — 줄 여백·pixelStride 1·2·실제 크기) · <code>FrameStatsTest</code> 2건</li>
+  <li class="done">게이트웨이 <code>video_stats</code>: 작성 환경에서 가짜 A4 <code>/ws</code> + <code>webrtc_client.py</code> — 디코딩 143 · /ws 143 · A4 수신 143</li>
+  <li class="done">실기기: HMD 송출 12.0장, 폰 → 서버 손실 위치(무선 구간), 960×720 비교</li>
+  <li>1440×1080 · 품질 80 · 초당 10장 빌드 뒤: HMD 평균 KB, 게이트웨이 손실·디코딩 장수, 폰 VP8 목표 비트레이트, 제품 10개 시험의 제품 수</li>
+</ul>

@@ -6,11 +6,11 @@
 <h4>데이터 경로</h4>
 <pre style="background:#f8fafc;border:1px solid var(--line);border-radius:10px;padding:14px;font-size:12px;line-height:1.6;overflow-x:auto">
 [HMD · RealWear 520]
-  CameraX 4:3 1920×1440 → JPEG 품질 95 → MjpegServer :8080
+  CameraX 4:3 1440×1080 → JPEG 품질 80 → MjpegServer :8080
   BleServer(GATT) → HUD 화면 (대기 · 조준 · 수동 판정)
       │  ▲
       │  │  BLE 쪽지  폰 → HMD: SHOW · PING(1초) · HINT · LIVE · FACES · RESULT  /  HMD → 폰: ACK · HELLO(영상 주소 · 카메라 상태)
-      ▼  │  MJPEG 영상  HMD → 폰: 초당 12장 (폰 핫스팟)
+      ▼  │  MJPEG 영상  HMD → 폰: 초당 10장 (폰 핫스팟)
 [폰 · TacitQualityMobile]
   HmdVideoSource → AiEdgeLink (받는 대로 송출, WebRTC VP8 4~12Mbps)
   AiFlow (서버 메시지 → 화면, 판정하지 않음) → GattBleLink(HMD) · M-07 영상 화면
@@ -27,10 +27,10 @@
 <h4>통신 구간</h4>
 <table class="col-table">
   <tr><th style="width:16%">구간</th><th style="width:22%">방식</th><th>내용</th></tr>
-  <tr><td>HMD → 폰 영상</td><td>MJPEG over HTTP <code>http://&lt;HMD-IP&gt;:8080</code></td><td>4:3 1920×1440(목표, 카메라가 고름) · JPEG 품질 95 · 초당 12장. HMD IP는 BLE HELLO로 폰이 자동으로 받는다. 끊기면 폰이 5초마다 다시 붙는다</td></tr>
+  <tr><td>HMD → 폰 영상</td><td>MJPEG over HTTP <code>http://&lt;HMD-IP&gt;:8080</code></td><td>4:3 1440×1080(목표, 카메라가 고름) · JPEG 품질 80 · 초당 10장 (2026-11-10 — 이전 1920×1440 · 95→90 · 12장, 같은 Wi-Fi에서 폰 → 서버 패킷 손실 27%라 영상량을 줄임). HMD IP는 BLE HELLO로 폰이 자동으로 받는다. 끊기면 폰이 5초마다 다시 붙는다</td></tr>
   <tr><td>폰 → HMD 화면</td><td>BLE GATT (HMD = 서버, 폰 = 클라이언트)</td><td>SERVICE <code>9e7a1000-…</code>, DOWN <code>9e7a1001-…</code>(폰 → HMD 쓰기), UP <code>9e7a1002-…</code>(ACK notify · HELLO read).
       쪽지: <code>SHOW</code>(화면, 순번·ACK) · <code>PING</code>(1초) · <code>HINT</code>(진행 안내) · <code>LIVE</code>(실시간 결함, 응답 없는 쓰기·최신 1개만) · <code>FACES</code>(면 진행) · <code>RESULT</code>(제품 결과)</td></tr>
-  <tr><td>폰 → 서버 영상</td><td>WebRTC (<code>POST /offer</code>, ICE 서버 없음)</td><td>HMD JPEG를 받는 대로 I420으로 넣는다(쉬는 간격 없음, 상한 = HMD 초당 12장). VP8 4~12Mbps, <code>maintain-resolution</code>. 연결 때 <code>station_id</code>(ST-02)·<code>feedback_mode</code>(manual·auto)</td></tr>
+  <tr><td>폰 → 서버 영상</td><td>WebRTC (<code>POST /offer</code>, ICE 서버 없음)</td><td>HMD JPEG를 받는 대로 I420으로 넣는다(쉬는 간격 없음, 상한 = HMD 초당 10장). VP8 4~12Mbps, <code>maintain-resolution</code>. 연결 때 <code>station_id</code>(ST-02)·<code>feedback_mode</code>(manual·auto)</td></tr>
   <tr><td>서버 → 폰 결과</td><td>WebRTC 데이터 채널 (JSON)</td><td><code>searching</code>(바뀔 때만) · <code>inspect</code>(제품 프레임마다) · <code>product_end</code>(제품마다 한 번). 3장</td></tr>
   <tr><td>폰 ↔ 서버 조회</td><td>HTTP <code>:8080</code> (게이트웨이가 API로 프록시)</td><td>결함 오버레이 · 제품 이력·상세·프레임 사진 · 피드백 <code>PUT</code> · 디스크 사용량</td></tr>
   <tr><td>게이트웨이 → API</td><td>WebSocket <code>/ws</code></td><td>디코딩한 원본 프레임(I420 + 수신 시각 <code>rx_at</code>). 다시 압축하지 않는다. 시험용으로 앱이 JPEG를 <code>/ws</code>에 직접 보내는 경로(<code>:8000</code>)도 같은 메시지</td></tr>

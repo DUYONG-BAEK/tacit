@@ -217,7 +217,7 @@ archive_product_mode/            제품 단위 단계의 코드·문서·DB 덤�
 ### 4.2 프레임·결과 저장
 
 - `product_frames/<날짜>/<session_id>/<seq 6자리>.jpg` (2026-11-06부터): **제품이 보인 프레임 전부**. 게이트웨이 경유(I420 원본)는 `FRAME_JPEG_QUALITY`(90)로 압축하고, JPEG를 받은 연결(테스트·직접 연결)은 받은 바이트 그대로 쓴다. 경로는 `frames.file`·`results.frames_dir`에 남는다. 제품이 안 보인 프레임은 저장하지 않는다.
-- 양: 1920×1440 품질 90이 한 장 약 0.3~0.5MB면, 앱이 초당 12장을 보내고 제품을 계속 비출 때 스테이션 하나당 시간당 약 13~22GB (추정, PD가 놓친 프레임은 저장하지 않으므로 실제는 그보다 적다). 실제 양은 `GET /storage`·앱 M-06에서 본다.
+- 양: 1440×1080 품질 90이 한 장 약 0.2~0.3MB면, 앱이 초당 10장을 보내고 제품을 계속 비출 때 스테이션 하나당 시간당 약 7~11GB (추정, PD가 놓친 프레임은 저장하지 않으므로 실제는 그보다 적다). 실제 양은 `GET /storage`·앱 M-06에서 본다.
 - `frames/<날짜>/<result_id>.jpg`: 2026-11-06 전에 저장한 결함 프레임의 원본 (받은 바이트 그대로 — 게이트웨이가 만든 JPEG quality 95). 새 코드는 쓰지 않는다.
 - `results/<날짜>/<result_id>/overlay.jpg`: 그 프레임 위에 결함 상자. 테두리와 글자는 상자 **바깥쪽**에 그린다 (결함이 수십 px로 작아 안쪽에 그리면 가린다). 조회 엔드포인트가 이 파일을 돌려준다.
 - `result_id` = `[direct_]<세션 12자리>-<seq 6자리>`. 게이트웨이를 거치지 않은 연결(테스트)은 `direct_`가 붙는다.
@@ -302,7 +302,7 @@ FROM sessions WHERE stats IS NOT NULL ORDER BY opened_at DESC LIMIT 10;"
 cd /home/admin/odServer
 ```
 
-**① 연결(세션)** — `source` gateway, `mode`는 M-01에서 고른 값, `face_min`·`pd_conf`·`qi_conf`는 설정값(`api.CONFIG`). 닫힌 연결은 `closed`와 통계가 차 있다. `ms_avg` 합이 약 83ms 미만이어야 초당 12장을 처리한다.
+**① 연결(세션)** — `source` gateway, `mode`는 M-01에서 고른 값, `face_min`·`pd_conf`·`qi_conf`는 설정값(`api.CONFIG`). 닫힌 연결은 `closed`와 통계가 차 있다. `ms_avg` 합이 약 100ms 미만이어야 초당 10장을 처리한다.
 
 ```bash
 docker exec -i a4-db psql -U a4 -d a4 <<'SQL'
@@ -850,7 +850,7 @@ grep '"event": "predict"' logs/a4-api/$D.jsonl | tail -n 3 | python3 -c "
 import sys, json
 for l in sys.stdin: r = json.loads(l); print(r['image_size'], r['ms'])"
 #   ms.pd = 프레임 1장 PD 시간, ms.qi = 사진 1장 QI 시간 (타일 수에 비례: 1080p 8타일, 4K 32타일).
-#   /ws는 프레임마다 decode + pd + qi를 차례로 한다 — 합이 약 83ms를 넘으면 앱이 보내는 초당 12장을 처리하지 못한다 (아래 처리 속도)
+#   /ws는 프레임마다 decode + pd + qi를 차례로 한다 — 합이 약 100ms를 넘으면 앱이 보내는 초당 10장을 처리하지 못한다 (아래 처리 속도)
 ```
 
 **API — 예외·동시 요청**
@@ -932,7 +932,7 @@ grep '"event": "ws_close"' logs/a4-api/$D.jsonl | tail -n 1 | python3 -c "
 import sys, json; c = json.loads(sys.stdin.read())
 print('fps', round(c['processed'] / c['duration_s'], 1), '밀림', c['frames'] - c['processed'] - c['skipped_frames'], 'ms_avg', c['ms_avg'])"
 #   기록: 영상 해상도별(4K 테스트 영상, 가능하면 1080p 영상) fps·밀림·ms_avg.
-#   ms_avg.decode + pd + qi가 약 83ms를 넘으면 제품을 비추는 동안 초당 12장을 처리하지 못한다 — 1080p에서 그렇다면 §8 처리 속도
+#   ms_avg.decode + pd + qi가 약 100ms를 넘으면 제품을 비추는 동안 초당 10장을 처리하지 못한다 — 1080p에서 그렇다면 §8 처리 속도
 #   inspect가 한 번도 안 나오면 PD가 영상에서 제품을 못 찾는 것이다
 ```
 
@@ -1108,6 +1108,14 @@ cat /proc/sys/net/ipv4/ip_local_port_range
 
 ## 8. 알려진 제약과 확인하지 않은 것
 
+**확인한 것 — 실기기 영상 경로 (gpudev, 2026-11-10 오후)** — HMD·폰·서버가 같은 사내 Wi-Fi(5GHz), 앱 ST-02 자동 모드. HMD logcat `TacitQ.Hmd` 5초 요약, 폰 통신 로그 WebRTC 통계, 게이트웨이 `video_stats`(이번에 추가)로 구간마다 셌다:
+
+- **HMD 송출 병목 해소**: 초당 약 7.2장의 원인은 HMD CPU 변환(화소마다 읽던 NV21 복사 + JPEG 압축, 한 장 약 140ms 추정). 줄 단위 복사·품질 90 뒤 NV21 13ms + JPEG 37ms, 송출 **초당 12.0장**. 카메라는 1920×1440을 초당 30장까지 준다(dumpsys, HAL LEVEL_3) — 센서 실측 초당 26.7장, 자동 노출 [30,30] 고정, ISO 600~3000.
+- 1920×1440 · 품질 90 · 초당 12장에서 폰은 받은 만큼 넣고(넣음 = 인코딩 = 전송, VP8 제한 none) 서버는 받은 만큼 처리(1675장 중 1674장, ms_avg decode 2 + PD 11 + QI 25)했지만, **서버 도착은 폰이 보낸 것의 약 87~89%**.
+- 원인: **폰 → 게이트웨이 패킷 손실 약 27%**(받음 22,065 · 손실 8,206, jitter 40~113ms, 폰 PLI 77번/약 70초). 디코딩 실패 0 — 패킷이 빠져 완성되지 못한 프레임을 aiortc가 버린 것.
+- 같은 조건에서 HMD만 960×720으로 낮추자 손실 **약 2.8%**, jitter 5~14ms, 디코딩 5초에 60장(빠짐 없음) — HMD → 폰 영상량(약 27Mbps)이 같은 Wi-Fi 무선 구간을 차지한 것으로 본다. 그래서 **1440×1080 · 품질 80 · 초당 10장**(약 8Mbps 추정)으로 바꿨다 — 시험 전.
+- 제품이 실제보다 많이 잡힌다 (약 2분 30초에 39개, 그중 9개는 1~4장·면 없음). 원인(PD가 1초 넘게 놓쳐 쪼개짐 · PD 오탐 · 패킷 손실로 프레임 공백)은 가르지 못했다 — 제품 수를 정해 다시 시험한다.
+
 **확인한 것 — 실서버·실기기 (gpudev, 2026-11-09~10, §4.4 명령)** — 2026-11-09 전부 지우고 다시 설치(11-09 코드)한 뒤 HMD·폰 앱(ST-02, 수동 모드)으로 약 5분 시험, 앱을 끈 뒤 확인:
 
 - **2026-11-09에 더한 DB 열·기능이 정상 동작한다**: `sessions.config`에 설정값(면 5장·PD/QI 0.4), 연결을 닫을 때 `sessions.stats`(받음 2230 · 처리 2230 · 밀림 0 · 제품 프레임 1250 · 결함 프레임 60 · 저장 34 · 제품 59 · ms_avg decode 2 + PD 11 + QI 26 · 오류 없음).
@@ -1137,7 +1145,7 @@ cat /proc/sys/net/ipv4/ip_local_port_range
 - API: 피드백 입력·같은 값 무기록·수정·변경 기록·`NONE` 입력 422·없는 제품 404, 목록(최신 순·`before` 페이지·feedback/decision/날짜 필터·잘못된 필터 422), 상세, 프레임 목록·사진·`overlay=1`·없는 프레임 404, `/storage`, `/ws?mode=bad` 4422.
 - 게이트웨이: `webrtc_client.py --mode manual`로 동영상(10fps, 90장) → 제품 2개(FAIL·PASS) `product_end`, 제품 프레임 40장 모두 `inspect`(간격 제한 삭제로 버린 장 없음), `/products*`·`PUT`·`/storage` 중계, 잘못된 `feedback_mode` 422.
 
-**확인하지 않은 것 (2026-11-10 현재)**: 실서버 배포·실제 YOLO·GPU·I420 처리 속도·DB 기록(설정값·통계 포함)은 위 2026-11-09~10에서 확인했다. 남은 것: 앱이 초당 12장을 보낼 때의 도착 속도·VP8 화질, 디스크 증가량, 폰 화면에서의 피드백 입력·이력 수정 종단.
+**확인하지 않은 것 (2026-11-10 현재)**: 실서버 배포·실제 YOLO·GPU·I420 처리 속도·DB 기록(설정값·통계 포함)은 위 2026-11-09~10에서 확인했다. 남은 것: 1440×1080 · 품질 80 · 초당 10장에서의 패킷 손실·도착 속도·VP8 화질(위 2026-11-10), 제품 쪼개짐 원인, 디스크 증가량, 폰 화면에서의 피드백 입력·이력 수정 종단.
 
 **확인한 것 — 프레임 단위 (작성 환경, 2026-11-03)** — torch·ultralytics·FastAPI·websockets·psycopg·aiortc를 설치할 수 없어 PD·QI를 색으로 상자를 찾는 가짜 모델로, FastAPI·websockets·aiortc·httpx를 대역으로 바꾸고 실제 `api.py`·`stream.py`·`detect.py`·`db.py`·`stream_client.py`·`gateway.py`·`webrtc_client.py`를 돌렸다. SQL은 psql을 거쳐 실제 PostgreSQL 16에서 실행했다 (드라이버만 대역). 125개 확인 통과.
 

@@ -52,7 +52,7 @@ import kotlin.coroutines.suspendCoroutine
  * 설계서 §3 · 「제품 불량 판정 — 모바일 앱 연동 API」 2026-11-03 규격 §5 + 2026-11-06 제품 단위(`server/PLAN_product_feedback.md`).
  * 모의 엣지용 [StreamRelay] 자리를 그대로 대신한다(같은 offer · status).
  *
- *  - 영상: HMD JPEG 가 오는 대로 I420 으로 바꿔 넣는다(쉬는 간격 없음 — HMD 송출 초당 12장이 상한). 변환이 밀리면 최신 1장만 남긴다.
+ *  - 영상: HMD JPEG 가 오는 대로 I420 으로 바꿔 넣는다(쉬는 간격 없음 — HMD 송출 초당 10장이 상한). 변환이 밀리면 최신 1장만 남긴다.
  *  - 해상도: 대역폭이 모자라도 해상도를 낮추지 않게 MAINTAIN_RESOLUTION (서버는 결함을 640px 타일로 보므로 해상도가 곧 검출력, API §5.5).
  *  - 장애: 생존 신호가 없으므로 연결 상태 disconnected·failed·closed 를 끊김으로 보고 새 POST /offer.
  *    재시도 간격·시도 마감은 [Reconnect](1→2→4→5초, 10초). 422·403 은 설정 오류 — 다시 시도하지 않고 화면에 띄운다.
@@ -453,7 +453,7 @@ class AiEdgeLink(
         const val TICK_MS = 500L
         const val GATHER_MS = 5_000L
         // 2026-11-06: 6→12Mbps(출발값) — 압축을 덜 해 작은 결함을 지키려고(PLAN_product_feedback.md §7.3).
-        // 폰 소프트웨어 VP8 이 1920×1440 초당 12장을 이 비트레이트로 내는지 통신 로그의 "보냄 … fps" 로 확인한다.
+        // 폰 소프트웨어 VP8 이 1440×1080 초당 10장을 이 비트레이트로 내는지 통신 로그의 "보냄 … fps" 로 확인한다.
         const val MAX_BITRATE = 12_000_000
         const val MIN_BITRATE = 4_000_000          // 처음부터 낮은 비트레이트로 시작해 해상도를 깎지 않게
         const val STATS_MS = 5_000L
