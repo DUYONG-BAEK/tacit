@@ -115,6 +115,16 @@ class AiEdgeLink(
     private var connectedAt = 0L                      // 이번 연결 시각 — 연결 뒤 처음 영상이 들어온 때를 "다시 들어옴"과 가른다
     private var everReceived = false                  // 이번 연결에서 HMD 영상을 한 번이라도 받았나
     @Volatile private var sentInfo: String? = null
+    /**
+     * WebRTC 누적 통계 한 번(연결마다 0부터) — 폰이 넣은 장수와 인코딩·전송·손실을 같은 순간에 잰다.
+     * 2026-11-10: 폰이 초당 12장 넣는데 서버(A4 API)는 10.7장 — 어디서 빠지는지 게이트웨이 video_stats 와 맞춰 본다.
+     */
+    private class RtcCount(
+        val pushed: Long = 0, val encoded: Long = 0, val framesSent: Long = 0, val packets: Long = 0,
+        val retransmitted: Long = 0, val nack: Long = 0, val pli: Long = 0, val lost: Long = 0,
+    )
+    @Volatile private var rtcPrev = RtcCount()                // 직전 통계 — getStats 콜백에서만 바꾼다(연결 때 0으로)
+    @Volatile private var sentAtConnect = 0L                  // 이번 연결이 시작될 때의 [sent]
     private var argb: ByteBuffer? = null
 
     private val _status = MutableStateFlow(StreamRelay.Status())
@@ -260,13 +270,33 @@ class AiEdgeLink(
         }
     }
 
-    /** 실제로 나가는 영상 — WebRTC 통계(outbound-rtp). */
+    /**
+     * 실제로 나가는 영상 — WebRTC 통계(outbound-rtp) + 서버(게이트웨이)가 RTCP 로 알려 준 손실(remote-inbound-rtp).
+     * 직전 통계와의 차이(약 5초)와 연결 누적을 남긴다 — 넣음 > 인코딩이면 폰 인코더가 버림, 인코딩 = 전송인데
+     * 손실 보고·NACK·PLI 가 많으면 네트워크, 둘 다 아닌데 게이트웨이 디코딩 장수가 적으면 게이트웨이.
+     */
     private fun logStats() {
+        val pushed = sent - sentAtConnect                    // 통계와 같은 순간의 넣은 장수 — 콜백보다 먼저 읽는다
         pc?.getStats { report ->
-            report.statsMap.values.firstOrNull { it.type == "outbound-rtp" && it.members["kind"] == "video" }?.let { s ->
+            val all = report.statsMap.values
+            all.firstOrNull { it.type == "outbound-rtp" && it.members["kind"] == "video" }?.let { s ->
                 val m = s.members
+                val remote = all.firstOrNull { it.type == "remote-inbound-rtp" && it.members["kind"] == "video" }?.members
+                fun n(x: Any?) = (x as? Number)?.toLong() ?: 0L
+                val now = RtcCount(
+                    pushed = pushed, encoded = n(m["framesEncoded"]), framesSent = n(m["framesSent"]),
+                    packets = n(m["packetsSent"]), retransmitted = n(m["retransmittedPacketsSent"]),
+                    nack = n(m["nackCount"]), pli = n(m["pliCount"]), lost = n(remote?.get("packetsLost")),
+                )
+                val p = rtcPrev
+                rtcPrev = now
                 sentInfo = "보냄 ${m["frameWidth"]}×${m["frameHeight"]} · ${m["framesPerSecond"] ?: "-"}fps · " +
-                    "목표 ${(m["targetBitrate"] as? Number)?.toInt()?.div(1000) ?: "-"}kbps · 제한 ${m["qualityLimitationReason"]}"
+                    "목표 ${(m["targetBitrate"] as? Number)?.toInt()?.div(1000) ?: "-"}kbps · 제한 ${m["qualityLimitationReason"]} · " +
+                    "WebRTC 직전 5초: 넣음 ${now.pushed - p.pushed} · 인코딩 ${now.encoded - p.encoded} · 전송 ${now.framesSent - p.framesSent} · " +
+                    "패킷 ${now.packets - p.packets} · 재전송 ${now.retransmitted - p.retransmitted} · NACK ${now.nack - p.nack} · " +
+                    "PLI ${now.pli - p.pli} · 서버 보고 손실 ${now.lost - p.lost} · " +
+                    "누적: 넣음 ${now.pushed} · 인코딩 ${now.encoded} · 전송 ${now.framesSent} · 패킷 ${now.packets} · " +
+                    "손실 ${now.lost} · PLI ${now.pli}"
             }
         }
     }
@@ -332,6 +362,7 @@ class AiEdgeLink(
         nInspect.set(0); nSearching.set(0); nProduct.set(0); nUnknown.set(0)
         statsReceived = received; statsSent = sent; lastStats = System.currentTimeMillis(); idleSince = 0L
         connectedAt = lastStats; everReceived = false
+        sentAtConnect = sent; rtcPrev = RtcCount(); sentInfo = null
         policy.onConnected()
         flow.onConnected()
         onLinkUp()
