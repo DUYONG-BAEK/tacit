@@ -1,3 +1,5 @@
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 import java.util.Properties
 
 plugins {
@@ -35,8 +37,9 @@ android {
         buildConfigField("String", "EDGE_BASE_URL",         "\"http://10.42.1.10:8080\"")
         // 빌드 시각 — 통신 로그 화면·복사 맨 위에 찍어 폰에 어떤 빌드가 깔렸는지 안다 (versionName 은 0.1.0 고정).
         // git 커밋이 아니라 시각인 것은 Android Studio 로 여는 사본 폴더(C:\dev\TacitQualityMobile)가 git 저장소가 아니기 때문
+        //   java.time 은 맨 위에서 import 한다 — 이 스크립트 안에서 java.… 는 Gradle 의 java { } 설정으로 읽혀 Unresolved reference 가 난다
         buildConfigField("String", "BUILD_TIME",
-            "\"${java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))}\"")
+            "\"${LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))}\"")
     }
 
     signingConfigs {
