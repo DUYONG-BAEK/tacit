@@ -110,6 +110,8 @@ class AiEdgeLink(
     @Volatile private var firstMessage = true
     private var statsReceived = 0L
     private var statsSent = 0L
+    private var idleSince = 0L                        // HMD 영상이 끊긴 것을 처음 본 시각 (0 = 들어오는 중) — 연결 스레드에서만
+    private var idleLogged = 0L                       // 마지막으로 "HMD 영상 없음"을 남긴 시각
     @Volatile private var sentInfo: String? = null
     private var argb: ByteBuffer? = null
 
@@ -229,14 +231,28 @@ class AiEdgeLink(
 
     /** 통신 로그 5초 요약 — HMD 영상이 안 들어오면 서버로 보낼 것도 없다는 것을 바로 보이게 */
     private fun summary() {
+        val now = System.currentTimeMillis()
         val r = received - statsReceived; val s = sent - statsSent
         statsReceived = received; statsSent = sent
         val u = nUnknown.getAndSet(0)
         val line = "최근 ${STATS_MS / 1000}초: HMD 영상 ${r}장 받음 · 서버로 ${s}장 보냄 · 서버 메시지 inspect ${nInspect.getAndSet(0)} · " +
             "searching ${nSearching.getAndSet(0)} · product_end ${nProduct.getAndSet(0)}" + (if (u > 0) " · 모르는 메시지 $u (예: $lastUnknown)" else "") +
             (sentInfo?.let { " · $it" } ?: "")
-        if (r == 0L) CommLog.w(AI, TAG, "$line — HMD 영상이 들어오지 않아 서버로 보낼 프레임이 없음(HMD 로그 확인)")
-        else CommLog.i(AI, TAG, line)
+        if (r > 0L) {
+            if (idleSince > 0L) CommLog.i(AI, TAG, "HMD 영상 다시 들어옴 (${(now - idleSince) / 1000}초 만)")
+            idleSince = 0L
+            CommLog.i(AI, TAG, line)
+            return
+        }
+        // HMD 영상 없음 — 끊긴 순간 한 번, 그 뒤로는 1분에 한 번만 남긴다. 5초마다 남기면 KEEP(300줄)이 25분 만에 차서
+        // 시험하던 때의 줄이 밀려난다 (2026-11-10: HMD 를 끄고 앱만 켜 둔 동안 같은 경고만 남았다).
+        if (idleSince == 0L) {
+            idleSince = now; idleLogged = now
+            CommLog.w(AI, TAG, "$line — HMD 영상이 들어오지 않아 서버로 보낼 프레임이 없음(HMD 로그 확인)")
+        } else if (now - idleLogged >= IDLE_LOG_MS) {
+            idleLogged = now
+            CommLog.w(AI, TAG, "HMD 영상 없음 ${(now - idleSince) / 60_000}분째 — 서버로 보낸 프레임 없음 (1분마다 한 줄)")
+        }
     }
 
     /** 실제로 나가는 영상 — WebRTC 통계(outbound-rtp). */
@@ -309,7 +325,7 @@ class AiEdgeLink(
         CommLog.i(AI, TAG, "연결됨 — 영상 전송 시작, 서버 메시지 대기 ($baseUrl)")
         firstMessage = true
         nInspect.set(0); nSearching.set(0); nProduct.set(0); nUnknown.set(0)
-        statsReceived = received; statsSent = sent; lastStats = System.currentTimeMillis()
+        statsReceived = received; statsSent = sent; lastStats = System.currentTimeMillis(); idleSince = 0L
         policy.onConnected()
         flow.onConnected()
         onLinkUp()
@@ -404,5 +420,6 @@ class AiEdgeLink(
         const val MAX_BITRATE = 12_000_000
         const val MIN_BITRATE = 4_000_000          // 처음부터 낮은 비트레이트로 시작해 해상도를 깎지 않게
         const val STATS_MS = 5_000L
+        const val IDLE_LOG_MS = 60_000L            // HMD 영상이 없는 동안 통신 로그에 남기는 간격
     }
 }

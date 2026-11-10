@@ -54,7 +54,7 @@ fun CommLogDialog(onDismiss: () -> Unit) {
                 Text("닫기", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold,
                      modifier = Modifier.clickable(onClick = onDismiss).padding(8.dp))
             }
-            Text("앱 ${BuildConfig.VERSION_NAME} · AI 서버 규격 ${AiMessages.SPEC}", color = Color.White.copy(alpha = 0.6f), fontSize = 11.sp)
+            Text(APP_INFO, color = Color.White.copy(alpha = 0.6f), fontSize = 11.sp)
             Row(Modifier.padding(vertical = 8.dp)) {
                 CommLog.Ch.entries.forEach { ch ->
                     val on = ch == tab
@@ -94,7 +94,7 @@ fun CommLogDialog(onDismiss: () -> Unit) {
                 }
             }
             Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                LogButton("복사 (${lines.size}줄)") { clipboard.setText(AnnotatedString("[${tab.label}] 지금: $now\n" + CommLog.format(lines))) }
+                LogButton("복사 (${lines.size}줄)") { clipboard.setText(AnnotatedString("$APP_INFO\n[${tab.label}] 지금: $now\n" + CommLog.format(lines))) }
                 LogButton("지우기") { CommLog.clear(tab) }
             }
         }
@@ -102,6 +102,9 @@ fun CommLogDialog(onDismiss: () -> Unit) {
 }
 
 private val TIME = ThreadLocal.withInitial { SimpleDateFormat("HH:mm:ss", Locale.KOREA) }
+
+/** 화면 위·복사 맨 위 — 어떤 빌드의 로그인지 (빌드 시각은 app/build.gradle.kts BUILD_TIME) */
+private val APP_INFO = "앱 ${BuildConfig.VERSION_NAME} · 빌드 ${BuildConfig.BUILD_TIME} · AI 서버 규격 ${AiMessages.SPEC}"
 
 @Composable
 private fun LogButton(text: String, onClick: () -> Unit) {
