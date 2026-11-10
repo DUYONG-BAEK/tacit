@@ -112,6 +112,8 @@ class AiEdgeLink(
     private var statsSent = 0L
     private var idleSince = 0L                        // HMD 영상이 끊긴 것을 처음 본 시각 (0 = 들어오는 중) — 연결 스레드에서만
     private var idleLogged = 0L                       // 마지막으로 "HMD 영상 없음"을 남긴 시각
+    private var connectedAt = 0L                      // 이번 연결 시각 — 연결 뒤 처음 영상이 들어온 때를 "다시 들어옴"과 가른다
+    private var everReceived = false                  // 이번 연결에서 HMD 영상을 한 번이라도 받았나
     @Volatile private var sentInfo: String? = null
     private var argb: ByteBuffer? = null
 
@@ -239,8 +241,11 @@ class AiEdgeLink(
             "searching ${nSearching.getAndSet(0)} · product_end ${nProduct.getAndSet(0)}" + (if (u > 0) " · 모르는 메시지 $u (예: $lastUnknown)" else "") +
             (sentInfo?.let { " · $it" } ?: "")
         if (r > 0L) {
-            if (idleSince > 0L) CommLog.i(AI, TAG, "HMD 영상 다시 들어옴 (${(now - idleSince) / 1000}초 만)")
+            if (idleSince > 0L) CommLog.i(AI, TAG,
+                if (everReceived) "HMD 영상 다시 들어옴 (${(now - idleSince) / 1000}초 만)"
+                else "HMD 영상 들어옴 (연결 후 ${(now - connectedAt) / 1000}초)")
             idleSince = 0L
+            everReceived = true
             CommLog.i(AI, TAG, line)
             return
         }
@@ -326,6 +331,7 @@ class AiEdgeLink(
         firstMessage = true
         nInspect.set(0); nSearching.set(0); nProduct.set(0); nUnknown.set(0)
         statsReceived = received; statsSent = sent; lastStats = System.currentTimeMillis(); idleSince = 0L
+        connectedAt = lastStats; everReceived = false
         policy.onConnected()
         flow.onConnected()
         onLinkUp()
