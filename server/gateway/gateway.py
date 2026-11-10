@@ -27,6 +27,8 @@
 출력(print)과 같은 내용을 logs/<날짜>.jsonl에도 남긴다. 날짜가 바뀌면 새 파일에 쓰고, 지우지 않는다.
 decision이 OK인 inspect는 초당 10여 개라 한 줄씩 남기지 않고, 연결이 끝날 때 개수만
 relay_summary 한 줄로 남긴다.
+영상 수신 통계(video_stats)는 STATS_S초마다와 연결이 끝날 때 한 줄 — 앱이 보낸 프레임이 어디서 빠지는지
+(네트워크 패킷 손실 · aiortc 조립·디코딩) 앱 통신 로그와 맞춰 본다 (2026-11-10: 앱 초당 12장 → A4 API 10.7장).
 """
 
 import asyncio
@@ -52,6 +54,8 @@ A4_WS_URL = os.environ.get("A4_WS_URL", "ws://localhost:8000/ws")
 A4_HTTP_URL = os.environ.get("A4_HTTP_URL", "http://localhost:8000")  # /results/*·/products*·/storage 프록시 대상
 I420_HEADER = struct.Struct("<4sHHq")  # magic, width, height, rx_at — A4 API detect.I420_HEADER와 같아야 한다
 LOG_DIR = Path("logs")  # 날짜와 시각은 컨테이너 시간대(Dockerfile의 TZ=Asia/Seoul)를 따른다
+STATS_S = 5.0  # 영상 수신 통계(video_stats) 간격 — 앱 통신 로그의 5초 요약과 같다
+VIDEO_CLOCK_KHZ = 90  # 영상 RTP 시계 90kHz — aiortc jitter(시계 단위)를 ms로
 
 app = FastAPI(title="A4 WebRTC gateway")
 peers: set[RTCPeerConnection] = set()
@@ -144,19 +148,33 @@ async def forward(track, ws, pc: RTCPeerConnection, channel: asyncio.Future, pee
     A4 API가 /ws를 닫으면 다음 ws.send()가 ConnectionClosed를 낸다 (websockets의 끊김 감지 방법)."""
     summary = {"inspect": 0, "OK": 0, "REVIEW": 0, "NG": 0, "undelivered": 0}  # relay_messages가 센다
     relay = asyncio.create_task(relay_messages(ws, channel, peer, summary))
+    video = {"frames": 0, "forwarded": 0}  # 디코딩돼 나온 프레임 · /ws로 넘긴 프레임 (video_stats)
+    stats = asyncio.create_task(report_video(pc, peer, video))
     try:
         while True:
             frame = await track.recv()
+            video["frames"] += 1
             rx_at = round(time.time() * 1000)
             # 거르지 않는다 — 앱이 HMD 프레임을 받는 대로(초당 약 12장) 보내고, A4 API가 가장 최근 프레임만 처리한다.
             # (옛 1/FORWARD_FPS 간격 제한은 도착 간격이 조금만 흔들려도 다음 장을 버린다 — 2026-11-05 실측 초당 약 7장의 원인으로 본다)
             await ws.send(await asyncio.to_thread(to_i420, frame, rx_at))
+            video["forwarded"] += 1
     except MediaStreamError:
         log_event(f"[peer {peer}] track ended", "track_ended", peer=peer)  # 앱이 영상을 끊음
     except Exception as e:  # A4 API 쪽 끊김 포함
         log_event(f"[forward {peer}] {type(e).__name__}: {e}", "forward_error", peer=peer,
                   error=f"{type(e).__name__}: {e}")
     finally:
+        stats.cancel()
+        try:
+            await stats
+        except asyncio.CancelledError:
+            pass
+        try:  # 마지막 줄은 연결 전체 누적 — A4 API ws_close의 frames와 맞춰 본다
+            await log_video(pc, peer, video, None)
+        except Exception as e:  # 통계를 못 읽어도 닫기는 계속한다
+            log_event(f"[forward {peer}] video_stats {type(e).__name__}: {e}", "forward_error", peer=peer,
+                      error=f"{type(e).__name__}: {e}")
         relay.cancel()
         try:
             await relay
@@ -169,6 +187,42 @@ async def forward(track, ws, pc: RTCPeerConnection, channel: asyncio.Future, pee
         log_event(f"[peer {peer}] relay summary {summary}", "relay_summary", peer=peer, **summary)
         await ws.close()
         await pc.close()
+
+
+async def report_video(pc: RTCPeerConnection, peer: str, video: dict) -> None:
+    """STATS_S초마다 video_stats 한 줄 (forward가 연결 끝에 취소한다)."""
+    prev: dict = {}
+    while True:
+        await asyncio.sleep(STATS_S)
+        prev = await log_video(pc, peer, video, prev)
+
+
+async def log_video(pc: RTCPeerConnection, peer: str, video: dict, prev: dict | None) -> dict:
+    """영상 수신 통계 한 줄. prev(직전 값)가 있으면 STATS_S초 증가분, None이면 연결 끝 누적만 남긴다.
+        frames      aiortc가 조립·디코딩해 내준 프레임 (track.recv)
+        forwarded   A4 API /ws로 넘긴 프레임 (= A4 API ws_close의 frames)
+        packets     받은 RTP 패킷 (재전송 포함) · lost: 순번이 비어 못 받은 패킷 (aiortc inbound-rtp, 누적)
+        app_packets 앱이 보냈다고 알린 패킷 (RTCP SR, remote-outbound-rtp — SR 간격만큼 늦다)
+    디코딩 실패는 aiortc가 경고 로그로 따로 남긴다 ("failed to decode")"""
+    report = await pc.getStats()
+    inbound = next((s for s in report.values() if s.type == "inbound-rtp" and s.kind == "video"), None)
+    sender = next((s for s in report.values() if s.type == "remote-outbound-rtp" and s.kind == "video"), None)
+    now = {"frames": video["frames"], "forwarded": video["forwarded"],
+           "packets": inbound.packetsReceived if inbound else 0, "lost": inbound.packetsLost if inbound else 0,
+           "app_packets": sender.packetsSent if sender else 0}
+    jitter_ms = round(inbound.jitter / VIDEO_CLOCK_KHZ, 1) if inbound else None
+    if prev is None:
+        text = (f"[peer {peer}] video 연결 누적: 디코딩 {now['frames']}장 · /ws {now['forwarded']}장 · "
+                f"패킷 {now['packets']}개 받음 · 손실 {now['lost']}개 · 앱 보낸 패킷 {now['app_packets']}개(SR)")
+        log_event(text, "video_stats", peer=peer, final=True, jitter_ms=jitter_ms, **now)
+    else:
+        delta = {k: v - prev.get(k, 0) for k, v in now.items()}
+        text = (f"[peer {peer}] video 최근 {STATS_S:g}초: 디코딩 {delta['frames']}장 · /ws {delta['forwarded']}장 · "
+                f"패킷 {delta['packets']}개 받음 · 손실 {delta['lost']}개 · 앱 보낸 패킷 {delta['app_packets']}개(SR) · "
+                f"jitter {jitter_ms}ms (누적 디코딩 {now['frames']} · 손실 {now['lost']})")
+        log_event(text, "video_stats", peer=peer, final=False, jitter_ms=jitter_ms,
+                  **{f"d_{k}": v for k, v in delta.items()}, **now)
+    return now
 
 
 def to_i420(frame, rx_at: int) -> bytes:

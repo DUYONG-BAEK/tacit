@@ -120,11 +120,14 @@ firewall-cmd --reload
 | `peer_state` | peer, state (connected / failed / closed …) |
 | `a4_message` | peer, message (`/ws` 메시지 그대로 — `searching`, NG·REVIEW `inspect`), delivered (앱에 보냈는지) |
 | `relay_summary` | peer, inspect (받은 `inspect` 수), OK, REVIEW, NG (decision별 수), undelivered (데이터 채널이 닫혀 앱에 못 보낸 메시지 수, 모든 종류). 영상 트랙이 끝나거나 중계가 끊길 때 한 줄 |
+| `video_stats` | peer, final (false: 5초마다, true: 연결이 끝날 때 누적 한 줄), frames (aiortc가 조립·디코딩해 내준 프레임), forwarded (`/ws`로 넘긴 프레임), packets (받은 RTP 패킷, 재전송 포함), lost (순번이 비어 못 받은 패킷), app_packets (앱이 RTCP SR로 알린 보낸 패킷 — SR 간격만큼 늦다), jitter_ms. 5초 줄에는 같은 값의 증가분 `d_*`도 붙는다 |
 | `track_ended` | peer |
 | `forward_error` | peer, error (A4 API 쪽 끊김 포함 — 이후 WebRTC 연결을 닫는다) |
 
 - `/offer` 처리 중 받는 첫 `searching`은 연결 확인용이라 앱에 보내지 않는다 (A4_WEBRTC_API.md §5.4).
 - `relay_summary.inspect`는 A4 API 로그 `ws_close`의 `product_frames`와 같아야 한다 (같은 연결, `client` = `peer`).
+- `video_stats`(final)의 `forwarded`는 A4 API `ws_close`의 `frames`와 같아야 한다. 앱이 보낸 프레임이 빠지는 곳은 앱 통신 로그의 `WebRTC 직전 5초 · 누적`(넣음 · 인코딩 · 전송 · 패킷 · NACK · PLI · 서버 보고 손실)과 맞춰 본다 (2026-11-10 추가):
+  넣음 > 인코딩 → 폰 VP8이 버림 · 패킷 `lost`·앱 NACK·PLI 많음 → 네트워크 · 패킷 손실은 없는데 앱 전송 > `frames` → aiortc 조립·디코딩 (디코딩 실패는 `docker logs a4-gateway`에 aiortc 경고 `failed to decode`로 남는다).
 - `docker logs`는 `--log-opt`로 50MB × 3개까지만 남는다. 전체 기록은 위 JSONL 파일이다. 컨테이너를 지워도(`docker rm -f`) 파일은 남는다.
 
 ## 테스트 — 동영상 파일을 앱처럼 보내기
