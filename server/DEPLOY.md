@@ -294,6 +294,137 @@ SELECT session_id, station_id, opened_at, stats->>'duration_s' AS sec, stats->>'
 FROM sessions WHERE stats IS NOT NULL ORDER BY opened_at DESC LIMIT 10;"
 ```
 
+### 4.4 실기기 시험 뒤 DB 확인
+
+앱(ST-02)으로 시험한 뒤 DB에 값이 맞게 들어갔는지 본다. 모두 조회만 한다. **연결 통계(`sessions.stats`)는 연결이 닫힐 때 기록된다** — 폰 앱에서 교대 마감을 누르거나 앱을 끈 뒤에 본다 (앱이 켜져 있으면 HMD를 꺼도 연결은 그대로다). 2026-11-10 gpudev 실기기 시험으로 확인한 명령이다 (§8).
+
+```bash
+cd /home/admin/odServer
+```
+
+**① 연결(세션)** — `source` gateway, `mode`는 M-01에서 고른 값, `face_min`·`pd_conf`·`qi_conf`는 설정값(`api.CONFIG`). 닫힌 연결은 `closed`와 통계가 차 있다. `ms_avg` 합이 약 83ms 미만이어야 초당 12장을 처리한다.
+
+```bash
+docker exec -i a4-db psql -U a4 -d a4 <<'SQL'
+SELECT session_id, source, feedback_mode AS mode,
+       to_char(opened_at AT TIME ZONE 'Asia/Seoul', 'MM-DD HH24:MI:SS') AS opened,
+       to_char(closed_at AT TIME ZONE 'Asia/Seoul', 'HH24:MI:SS') AS closed,
+       config->>'face_min_frames' AS face_min, config->>'pd_conf' AS pd_conf, config->>'qi_conf' AS qi_conf,
+       stats->>'frames' AS recv, stats->>'processed' AS proc, stats->>'product_frames' AS pfr,
+       stats->>'products' AS prod, stats->>'saved' AS saved, stats->'ms_avg' AS ms_avg, stats->>'error' AS error
+FROM sessions WHERE station_id = 'ST-02' ORDER BY opened_at DESC LIMIT 10;
+SQL
+```
+
+**② 제품 (최근 20개)** — 실제로 든 제품 수와 비슷해야 한다 (훨씬 많으면 PD가 1초 넘게 제품을 놓쳐 쪼개진 것). `sec`는 비춘 시간 + 1초, `end`는 `gap`(연결이 끊긴 제품만 `disconnect`), `feedback`은 수동 모드면 누르기 전 `NOT_ENTERED`, 자동 모드면 `NONE`.
+
+```bash
+docker exec -i a4-db psql -U a4 -d a4 <<'SQL'
+SELECT product_id, to_char(started_at AT TIME ZONE 'Asia/Seoul', 'MM-DD HH24:MI:SS') AS started,
+       round(extract(epoch FROM ended_at - started_at)::numeric, 1) AS sec, end_reason AS end,
+       decision, ai_decision AS ai, defect_label AS label, frames, defect_frames AS dfr,
+       faces, faces_seen, complete, feedback_mode AS mode, feedback,
+       to_char(feedback_at AT TIME ZONE 'Asia/Seoul', 'HH24:MI:SS') AS fb_at, jsonb_array_length(coalesce(result_ids, '[]')) AS saved
+FROM products WHERE station_id = 'ST-02' ORDER BY started_at DESC LIMIT 20;
+SQL
+```
+
+**③ 피드백 변경 기록** — 결과 카드(M-07)에서 누른 것은 `source` live, 이력(M-05)에서 바꾼 것은 history. 같은 값을 다시 누르면 남지 않는다.
+
+```bash
+docker exec -i a4-db psql -U a4 -d a4 <<'SQL'
+SELECT l.product_id, to_char(l.changed_at AT TIME ZONE 'Asia/Seoul', 'MM-DD HH24:MI:SS') AS changed,
+       l.before, l.after, l.source, l.device, p.feedback AS now
+FROM feedback_log l JOIN products p USING (product_id)
+WHERE p.station_id = 'ST-02' ORDER BY l.id DESC LIMIT 20;
+SQL
+```
+
+**④ 일관성 검사 20항목 — 모두 0이어야 한다.** 01은 앱이 연결된 채 제품을 비추는 중이면 1이 될 수 있고, 19는 오류로 끝난 연결 수(①의 `error`를 본다).
+
+```bash
+docker exec -i a4-db psql -U a4 -d a4 <<'SQL'
+WITH p AS (SELECT * FROM products WHERE station_id = 'ST-02'),
+f AS (SELECT product_id, count(*) AS n, count(*) FILTER (WHERE decision <> 'OK') AS nd,
+             count(*) FILTER (WHERE file IS NULL) AS nofile,
+             count(*) FILTER (WHERE result_id IS NOT NULL AND decision = 'OK') AS ok_with_result
+      FROM frames GROUP BY product_id),
+s AS (SELECT * FROM sessions WHERE station_id = 'ST-02' AND stats IS NOT NULL)
+SELECT '01 끝나지 않은 제품 (ended_at 비어 있음)' AS 검사, count(*) AS 문제 FROM p WHERE ended_at IS NULL
+UNION ALL SELECT '02 제품 프레임 수 ≠ frames 행 수', count(*) FROM p LEFT JOIN f USING (product_id)
+  WHERE p.ended_at IS NOT NULL AND p.frames <> coalesce(f.n, 0)
+UNION ALL SELECT '03 결함 프레임 수 ≠ frames 의 NG·REVIEW 행 수', count(*) FROM p LEFT JOIN f USING (product_id)
+  WHERE p.ended_at IS NOT NULL AND p.defect_frames <> coalesce(f.nd, 0)
+UNION ALL SELECT '04 사진 경로 없는 프레임 (사진 저장 실패)', coalesce(sum(f.nofile), 0) FROM f JOIN p USING (product_id)
+UNION ALL SELECT '05 OK 프레임에 result_id', coalesce(sum(f.ok_with_result), 0) FROM f JOIN p USING (product_id)
+UNION ALL SELECT '06 판정 규칙 위반 (FAIL↔ai OK, PASS↔ai NG·REVIEW)', count(*) FROM p
+  WHERE (decision = 'FAIL' AND ai_decision = 'OK') OR (decision = 'PASS' AND ai_decision <> 'OK')
+UNION ALL SELECT '07 결함 확정 근거 없음 (FAIL 인데 결함 프레임 2장 미만)', count(*) FROM p WHERE decision = 'FAIL' AND defect_frames < 2
+UNION ALL SELECT '08 best_result_id 가 result_ids 에 없음', count(*) FROM p
+  WHERE best_result_id IS NOT NULL AND NOT (coalesce(result_ids, '[]') ? best_result_id)
+UNION ALL SELECT '09 result_ids 중 results 에 없는 것', count(*) FROM p, jsonb_array_elements_text(coalesce(p.result_ids, '[]')) r(id)
+  WHERE NOT EXISTS (SELECT 1 FROM results x WHERE x.result_id = r.id)
+UNION ALL SELECT '10 면 진행 ≠ 설정 기준 (faces_seen)', count(*) FROM p JOIN sessions ss USING (session_id)
+  WHERE ss.config IS NOT NULL AND p.faces IS NOT NULL
+    AND (SELECT coalesce(array_agg(k ORDER BY k), '{}') FROM jsonb_each_text(p.faces) e(k, v) WHERE v::int >= (ss.config->>'face_min_frames')::int)
+     <> (SELECT coalesce(array_agg(x ORDER BY x), '{}') FROM jsonb_array_elements_text(coalesce(p.faces_seen, '[]')) x)
+UNION ALL SELECT '11 complete ≠ 모든 면을 봄', count(*) FROM p
+  WHERE p.faces IS NOT NULL AND p.complete <> ((SELECT count(*) FROM jsonb_object_keys(p.faces)) > 0
+        AND jsonb_array_length(coalesce(p.faces_seen, '[]')) = (SELECT count(*) FROM jsonb_object_keys(p.faces)))
+UNION ALL SELECT '12 피드백 초기값 틀림 (변경 기록 없는 제품)', count(*) FROM p
+  WHERE NOT EXISTS (SELECT 1 FROM feedback_log l WHERE l.product_id = p.product_id)
+    AND p.ended_at IS NOT NULL AND p.feedback <> CASE p.feedback_mode WHEN 'manual' THEN 'NOT_ENTERED' ELSE 'NONE' END
+UNION ALL SELECT '13 피드백 값 ≠ 마지막 변경 기록', count(*) FROM p
+  JOIN LATERAL (SELECT after FROM feedback_log l WHERE l.product_id = p.product_id ORDER BY l.id DESC LIMIT 1) last ON true
+  WHERE p.feedback <> last.after
+UNION ALL SELECT '14 연결 설정값 없음 (config 비어 있음)', count(*) FROM sessions WHERE station_id = 'ST-02' AND config IS NULL
+UNION ALL SELECT '15 닫힌 연결인데 통계 없음 (stats 비어 있음)', count(*) FROM sessions
+  WHERE station_id = 'ST-02' AND closed_at IS NOT NULL AND stats IS NULL
+UNION ALL SELECT '16 통계 제품 수 ≠ products 행 수', count(*) FROM s
+  WHERE (s.stats->>'products')::int <> (SELECT count(*) FROM products x WHERE x.session_id = s.session_id)
+UNION ALL SELECT '17 통계 제품 프레임 수 ≠ frames 행 수', count(*) FROM s
+  WHERE (s.stats->>'product_frames')::int <> (SELECT count(*) FROM frames x WHERE x.session_id = s.session_id)
+UNION ALL SELECT '17b 통계 결함 프레임 수 ≠ frames 의 NG·REVIEW 행 수', count(*) FROM s
+  WHERE (s.stats->>'defect_frames')::int <> (SELECT count(*) FROM frames x WHERE x.session_id = s.session_id AND x.decision <> 'OK')
+UNION ALL SELECT '18 통계 저장 수 ≠ results 행 수', count(*) FROM s
+  WHERE (s.stats->>'saved')::int <> (SELECT count(*) FROM results x WHERE x.session_id = s.session_id)
+UNION ALL SELECT '19 연결 오류로 끝남 (stats.error)', count(*) FROM s WHERE s.stats->>'error' IS NOT NULL;
+SQL
+```
+
+**⑤ 사진·오버레이 파일 대 DB 행** — 연결마다 사진 장수 = DB 행 수, 오버레이 개수 = DB 행 수.
+
+```bash
+D=$(TZ=Asia/Seoul date +%F)   # 시험한 날이 오늘이 아니면 D=2026-11-09 처럼 직접 넣는다
+for dir in product_frames/$D/*/; do
+  s=$(basename "$dir")
+  echo "$s  사진 $(ls "$dir" | wc -l)장 · DB $(docker exec a4-db psql -U a4 -d a4 -tAc "SELECT count(*) FROM frames WHERE file LIKE '$D/$s/%'")행"
+done
+echo "오버레이 $(find results/$D -name overlay.jpg 2>/dev/null | wc -l)개 · DB $(docker exec a4-db psql -U a4 -d a4 -tAc "SELECT count(*) FROM results WHERE overlay_path IS NOT NULL AND (captured_at AT TIME ZONE 'Asia/Seoul')::date = '$D'")행"
+```
+
+**⑥ 기록 오류 로그** — 0이어야 한다.
+
+```bash
+D=$(TZ=Asia/Seoul date +%F)   # ⑤와 같은 날짜
+grep -cE '"event": "(db_error|frame_save_error|result_save_error|write_error|write_timeout)"' logs/a4-api/$D.jsonl
+```
+
+**⑦ 서버 도착 속도** — `frames.seq`는 받은 순번이라 프레임 20장 이상인 제품에서 도착 속도(`recv_fps`)를 잰다. 앱이 HMD 송출 그대로 보내면 11~12.
+
+```bash
+docker exec -i a4-db psql -U a4 -d a4 <<'SQL'
+SELECT product_id, count(*) AS frames, max(seq) - min(seq) + 1 AS recv,
+       round(((max(seq) - min(seq)) / nullif(extract(epoch FROM max(ts) - min(ts)), 0))::numeric, 1) AS recv_fps,
+       round((count(*) / nullif(extract(epoch FROM max(ts) - min(ts)), 0))::numeric, 1) AS product_fps
+FROM frames f JOIN products p USING (product_id) WHERE p.station_id = 'ST-02'
+GROUP BY product_id HAVING count(*) >= 20 ORDER BY product_id DESC LIMIT 10;
+SELECT count(*) AS products, count(*) FILTER (WHERE frames <= 2) AS one_or_two_frames,
+       count(*) FILTER (WHERE frames >= 20) AS twenty_plus, count(*) FILTER (WHERE complete) AS complete
+FROM products WHERE station_id = 'ST-02';
+SQL
+```
+
 ---
 
 ## 5. 배포
@@ -977,6 +1108,16 @@ cat /proc/sys/net/ipv4/ip_local_port_range
 
 ## 8. 알려진 제약과 확인하지 않은 것
 
+**확인한 것 — 실서버·실기기 (gpudev, 2026-11-09~10, §4.4 명령)** — 2026-11-09 전부 지우고 다시 설치(11-09 코드)한 뒤 HMD·폰 앱(ST-02, 수동 모드)으로 약 5분 시험, 앱을 끈 뒤 확인:
+
+- **2026-11-09에 더한 DB 열·기능이 정상 동작한다**: `sessions.config`에 설정값(면 5장·PD/QI 0.4), 연결을 닫을 때 `sessions.stats`(받음 2230 · 처리 2230 · 밀림 0 · 제품 프레임 1250 · 결함 프레임 60 · 저장 34 · 제품 59 · ms_avg decode 2 + PD 11 + QI 26 · 오류 없음).
+- 일관성 검사 20항목 모두 0 — 제품 ↔ 프레임 수, 결함 프레임, 판정 규칙, 면 진행(5장), 피드백 초기값, 통계 ↔ 실제 행 수.
+- 사진 1250장 = `frames` 1250행, 오버레이 34개 = `results` 34행, 기록 오류 로그 0. 게이트웨이 `relay_summary.inspect` 1250 = `stats.product_frames`, 앱에 못 보낸 메시지 0.
+- 서버 도착 속도(`frames.seq` 간격) 초당 6.8~7.5장 — 앱의 "받는 대로 송출" 빌드가 폰에 들어갔는지 확인하지 못했다 (폰 통신 로그가 시험 뒤 대기 줄로 밀려 남지 않음).
+- 제품 59개 중 18개가 프레임 1~2장 (PD가 제품을 놓쳐 쪼개진 것으로 보인다), `complete` 4개. 면은 대부분 하면비닐만 잡혔다 (PD 가모델).
+- 앱이 켜진 채 HMD만 끄면 연결은 그대로 유지된다 (이번 연결 약 17시간). 앱을 끄자 게이트웨이 `track_ended` → `closed`, API `ws_close`·`stats` 기록 — 끊김 처리 정상.
+- 피드백 버튼은 누르지 않아 피드백 기록 0건 (시험하지 않음).
+
 **확인한 것 — 실서버 (gpudev, 2026-11-09)** — 11-06 코드 배포 뒤 앱(ST-02, 1920×1440) 연결의 `a4-api` 로그 (GPU NVIDIA RTX PRO 4500 Blackwell):
 
 - 프레임 1장 처리 (`ws_close.ms_avg`, 305장): decode **2ms**(I420 원본 — 11-05 JPEG 때 34ms) + PD 11ms + QI 24ms = **약 37ms** → 서버만으로는 초당 약 27장. 밀림 0 (받은 프레임을 모두 처리).
@@ -996,7 +1137,7 @@ cat /proc/sys/net/ipv4/ip_local_port_range
 - API: 피드백 입력·같은 값 무기록·수정·변경 기록·`NONE` 입력 422·없는 제품 404, 목록(최신 순·`before` 페이지·feedback/decision/날짜 필터·잘못된 필터 422), 상세, 프레임 목록·사진·`overlay=1`·없는 프레임 404, `/storage`, `/ws?mode=bad` 4422.
 - 게이트웨이: `webrtc_client.py --mode manual`로 동영상(10fps, 90장) → 제품 2개(FAIL·PASS) `product_end`, 제품 프레임 40장 모두 `inspect`(간격 제한 삭제로 버린 장 없음), `/products*`·`PUT`·`/storage` 중계, 잘못된 `feedback_mode` 422.
 
-**확인하지 않은 것 (2026-11-06 → 2026-11-09 현재)**: 실서버 배포·실제 YOLO·GPU·I420 처리 속도는 위 "실서버 (gpudev, 2026-11-09)"에서 확인했다. 남은 것: 앱이 초당 12장을 보낼 때의 도착 속도·VP8 화질, 디스크 증가량, 폰 화면에서의 피드백·이력 종단.
+**확인하지 않은 것 (2026-11-10 현재)**: 실서버 배포·실제 YOLO·GPU·I420 처리 속도·DB 기록(설정값·통계 포함)은 위 2026-11-09~10에서 확인했다. 남은 것: 앱이 초당 12장을 보낼 때의 도착 속도·VP8 화질, 디스크 증가량, 폰 화면에서의 피드백 입력·이력 수정 종단.
 
 **확인한 것 — 프레임 단위 (작성 환경, 2026-11-03)** — torch·ultralytics·FastAPI·websockets·psycopg·aiortc를 설치할 수 없어 PD·QI를 색으로 상자를 찾는 가짜 모델로, FastAPI·websockets·aiortc·httpx를 대역으로 바꾸고 실제 `api.py`·`stream.py`·`detect.py`·`db.py`·`stream_client.py`·`gateway.py`·`webrtc_client.py`를 돌렸다. SQL은 psql을 거쳐 실제 PostgreSQL 16에서 실행했다 (드라이버만 대역). 125개 확인 통과.
 
