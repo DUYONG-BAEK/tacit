@@ -6,16 +6,24 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.hardware.camera2.CameraCaptureSession
+import android.hardware.camera2.CaptureRequest
+import android.hardware.camera2.CaptureResult
+import android.hardware.camera2.TotalCaptureResult
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import android.util.Range
 import android.util.Size
 import android.view.View
 import android.view.WindowManager
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.OptIn
 import androidx.appcompat.app.AppCompatActivity
+import androidx.camera.camera2.interop.Camera2Interop
+import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.CameraState
 import androidx.camera.core.ImageAnalysis
@@ -52,6 +60,21 @@ class MainActivity : AppCompatActivity() {
      * adb: am start ... --es res 720 → 960×720
      */
     private val mjpegSize by lazy { if (intent.getStringExtra(EXTRA_RES) == "720") Size(960, 720) else Size(1920, 1440) }
+    /**
+     * 카메라 자동 노출 장수 범위 고정값 — 2026-11-10 dumpsys: 고정 범위는 [15,15]·[24,24]·[30,30] 뿐이고, 정하지 않으면
+     * 어두울 때 [10,30] 안에서 초당 10장까지 내려가 송출 12장을 못 채운다. 30 이면 노출이 33ms 이하로 짧아 흔들림도 준다.
+     * 너무 어두우면 adb: am start ... --ei fps 24
+     */
+    private val aeFps by lazy { intent.getIntExtra(EXTRA_FPS, 30).takeIf { it in AE_FIXED_FPS } ?: 30 }
+    /** 5초 요약(센서·송출 장수, NV21·JPEG 시간) — logcat TacitQ.Hmd 와 상태줄 */
+    private val stats = FrameStats(System.currentTimeMillis())
+    @Volatile private var statsShort = ""
+    private val sensorCallback = object : CameraCaptureSession.CaptureCallback() {
+        override fun onCaptureCompleted(session: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
+            val ae = result.get(CaptureResult.CONTROL_AE_TARGET_FPS_RANGE)
+            stats.onSensor(result.get(CaptureResult.SENSOR_EXPOSURE_TIME), result.get(CaptureResult.SENSOR_SENSITIVITY), ae?.lower, ae?.upper)
+        }
+    }
     private lateinit var server: MjpegServer
     private var encoder: HevcEncoder? = null
     private var camera2: Camera2Source? = null
@@ -82,8 +105,9 @@ class MainActivity : AppCompatActivity() {
         setTurnScreenOn(true)
         setShowWhenLocked(true)
 
-        // 구형(legacy) 카메라 HAL 은 Preview 표면이 있어야 시작된다. RealWear 에서 SurfaceView 표면이
+        // RealWear 520 카메라는 Preview 표면이 있어야 시작되고(실장비), SurfaceView 표면이
         // 생성되지 않으므로 TextureView(COMPATIBLE) 로 표면을 확실히 공급한다.
+        // (HAL 등급은 구형이 아니라 LEVEL_3 — 2026-11-10 dumpsys media.camera. 위 동작은 실장비에서 본 그대로)
         binding.preview.implementationMode = PreviewView.ImplementationMode.COMPATIBLE
         // 4:3 미리보기를 자르지 않고 16:9 화면 가운데에(좌우 검은 띠) — 기본 카메라 앱과 같은 화각.
         // FILL_CENTER(기본값)는 위아래를 잘라 확대돼 보인다. 결함 원은 MarkerView 가 같은 맞춤으로 그린다.
@@ -201,7 +225,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStop() {
         super.onStop()
-        // 구형 카메라 HAL 은 뒤 → 앞 전환 때 CameraX 의 자동 닫기·다시 열기가 겹치면 OPENING 에서 멈춘다(실장비 2026-10-13).
+        // RealWear 520 은 뒤 → 앞 전환 때 CameraX 의 자동 닫기·다시 열기가 겹치면 OPENING 에서 멈춘다(실장비 2026-10-13).
         // 뒤로 갈 때 카메라를 확실히 놓고, 앞으로 나올 때 잠깐 뒤 새로 묶는다. MJPEG 만 — HEVC(Camera2)는 해당 없음.
         if (videoMode != "hevc") {
             runCatching { ProcessCameraProvider.getInstance(this).get().unbindAll() }
@@ -251,14 +275,20 @@ class MainActivity : AppCompatActivity() {
         finish()
     }
 
+    @OptIn(ExperimentalCamera2Interop::class)
     private fun startMjpeg() {
         val future = ProcessCameraProvider.getInstance(this)
         future.addListener({
             val provider = future.get()
 
-            // Preview: 구형 카메라 HAL 시작에 필요. TextureView 표면을 공급한다.
+            // Preview: RealWear 520 카메라 시작에 필요(실장비). TextureView 표면을 공급한다.
             // 비율은 기본값(4:3) 그대로 — 분석 영상도 4:3 이라 둘 다 센서 화각 전체다.
-            val preview = Preview.Builder().build().also {
+            // 촬영 요청 전체에 장수 범위 고정 + 센서가 찍은 장마다 콜백(측정) — Camera2 설정은 한 곳(여기)에서만 건다
+            val previewBuilder = Preview.Builder()
+            Camera2Interop.Extender(previewBuilder)
+                .setCaptureRequestOption(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, Range(aeFps, aeFps))
+                .setSessionCaptureCallback(sensorCallback)
+            val preview = previewBuilder.build().also {
                 it.setSurfaceProvider(binding.preview.surfaceProvider)
             }
 
@@ -283,7 +313,7 @@ class MainActivity : AppCompatActivity() {
                 cameraError = e.message ?: e.javaClass.simpleName
                 return@addListener
             }
-            Log.i(TAG, "카메라 바인딩 완료 (Preview+Analysis, $selector)")
+            Log.i(TAG, "카메라 바인딩 완료 (Preview+Analysis, $selector, AE [$aeFps, $aeFps])")
             cameraError = null
             cameraBound = true
             // 확대 없이 가장 넓게 — 기본 카메라 앱과 같은 배율
@@ -306,12 +336,19 @@ class MainActivity : AppCompatActivity() {
             ui.post { binding.marks.contentAspect = aspect }      // 결함 원 — 미리보기와 같은 비율로 맞춤
         }
         lastFrameAt = capturedAt
-        // 초당 MJPEG_FPS 장만 JPEG 로 만든다(품질을 올린 만큼 핫스팟 대역폭을 아낀다 — 폰은 0.1초마다 최신 1장만 쓴다).
+        stats.onAnalyzed()
+        // 초당 MJPEG_FPS 장만 JPEG 로 만든다(핫스팟 대역폭을 아낀다 — 폰은 받는 대로 서버로 보내므로 이 장수가 서버 도착 상한).
         // 예정 시각 방식에 반 간격 허용 — 도착 간격이 조금 흔들려도 다음 장을 버리지 않아 평균이 MJPEG_FPS 가 된다.
         if (capturedAt < nextSendAt - MJPEG_FRAME_MS / 2) { image.close(); return }
         nextSendAt = maxOf(nextSendAt + MJPEG_FRAME_MS, capturedAt - MJPEG_FRAME_MS / 2)
         try {
-            server.updateFrame(YuvToJpeg.convert(image, MJPEG_QUALITY), capturedAt)
+            val t0 = System.nanoTime()
+            val nv21 = YuvToJpeg.toNv21(image)
+            val t1 = System.nanoTime()
+            val jpeg = YuvToJpeg.compress(nv21, image.width, image.height, MJPEG_QUALITY)
+            val t2 = System.nanoTime()
+            server.updateFrame(jpeg, capturedAt)
+            stats.onSent(t1 - t0, t2 - t1, jpeg.size)
         } catch (e: Exception) {
             Log.w(TAG, "프레임 변환 실패: ${e.message}")
         } finally {
@@ -396,7 +433,12 @@ class MainActivity : AppCompatActivity() {
         val ip = deviceIp() ?: "IP 없음(Wi-Fi 확인)"
         val cam = cameraState()
         binding.statusText.text = (if (cam.startsWith("정상")) "" else "⚠ 카메라 $cam · ") +
-            "영상 ${if (videoMode == "hevc") "H.265 1080p" else "MJPEG ${analysisSize.ifEmpty { "${mjpegSize.width}×${mjpegSize.height}" }}"} http://$ip:$PORT (뷰어 ${server.viewerCount}) · $bleLabel · ${hud.lastInfo}"
+            "영상 ${if (videoMode == "hevc") "H.265 1080p" else "MJPEG ${analysisSize.ifEmpty { "${mjpegSize.width}×${mjpegSize.height}" }}"} http://$ip:$PORT (뷰어 ${server.viewerCount}) · $bleLabel · ${hud.lastInfo}" +
+            (if (statsShort.isEmpty()) "" else " · $statsShort")
+        stats.take(System.currentTimeMillis())?.let { s ->
+            statsShort = if (s.active) s.short() else ""
+            if (s.active) Log.i(TAG, s.line())
+        }
         ui.postDelayed(::refreshStatus, 1000)
     }
 
@@ -430,6 +472,9 @@ class MainActivity : AppCompatActivity() {
         private const val ACTION_INJECT = "kr.co.snail.tacitq.hmd.SHOW"
         private const val EXTRA_VIDEO = "video"
         private const val EXTRA_RES = "res"
+        private const val EXTRA_FPS = "fps"
+        /** 카메라가 고정으로 받는 장수 범위 (2026-11-10 dumpsys aeAvailableTargetFpsRanges) — 12 이상만 */
+        private val AE_FIXED_FPS = setOf(15, 24, 30)
         const val EXTRA_BACKGROUND = "background"
         private const val VIDEO_W = 1920
         private const val VIDEO_H = 1080

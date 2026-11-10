@@ -42,10 +42,26 @@ adb -s <HMD> shell am start -n kr.co.snail.tacitq.hmd.debug/kr.co.snail.tacitq.h
   `adb shell pm list packages tacitq` 로 확인, `adb uninstall <패키지>` 로 지운다.
 
 ## ⚠️ RealWear 520 카메라 주의
-구형 카메라 HAL 이라 CameraX 가 까다롭다:
+카메라 HAL 등급은 LEVEL_3(2026-11-10 `adb shell dumpsys media.camera` — 구형 HAL 아님)이지만, 실장비에서 CameraX 가 까다로웠다:
 - **ImageAnalysis 단독 바인딩 시 카메라가 안 열린다.** Preview 를 반드시 함께 바인딩.
 - Preview 는 **TextureView(COMPATIBLE) 모드**로. (기본 SurfaceView 는 표면 생성이 안 돼 카메라 미시작.)
 - **화면이 실제 렌더링(디스플레이 깨어남)돼야** 카메라가 열린다. 앱이 뒤로 가면 카메라를 놓고, 앞으로 오면 다시 묶는다.
+- 카메라 능력(2026-11-10 dumpsys): YUV·JPEG 1920×1440 은 초당 30장까지(최소 프레임 간격 33.3ms). 자동 노출 범위는 [10,10]·[10,15]·[15,15]·[24,24]·[10,30]·[30,30]. 앱은 **[30,30] 고정**(어두울 때 초당 10장까지 떨어지지 않게) — 너무 어두우면 `--ei fps 24`(또는 15)로 실행한다(아래).
+
+## 영상 속도 측정 로그 (5초마다)
+```bash
+adb -s <HMD> logcat -s TacitQ.Hmd
+```
+`최근 5.0초: 센서 150장(30.0/초) · 분석 60장 · 송출 60장(12.0/초) · NV21 평균 …ms · JPEG 평균 …ms · 평균 …KB · 변환 점유 …% · 노출 …ms · ISO … · AE [30, 30]`
+- **센서**: 카메라가 실제로 찍은 장수(캡처 콜백). 12 미만이면 카메라 쪽(노출·AE) 문제.
+- **분석**: 분석 스레드가 받은 장수 — 변환이 느리면 센서보다 적다(밀린 장은 카메라가 버림).
+- **송출**: JPEG 로 만들어 폰에 보낸 장수(목표 초당 12장). **변환 점유**가 100% 가까우면 NV21·JPEG 변환이 병목.
+- 같은 내용 줄임판이 HMD 상태줄 끝에 나온다. 앱이 뒤에 있어 카메라가 꺼져 있는 동안은 남기지 않는다.
+- 장수 범위 바꿔 보기 (실행 중이면 새 값이 무시되므로 먼저 종료):
+```bash
+adb -s <HMD> shell am force-stop kr.co.snail.tacitq.hmd.debug
+adb -s <HMD> shell am start -n kr.co.snail.tacitq.hmd.debug/kr.co.snail.tacitq.hmd.MainActivity --ei fps 24
+```
 
 ## BLE 없이 화면 확인 (디버그 빌드)
 ```powershell

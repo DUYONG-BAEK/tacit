@@ -19,7 +19,8 @@ import android.view.TextureView
  * Camera2 직접 촬영 — 출력 2개: 화면 미리보기(TextureView) + 인코더 입력 표면. 녹화용 표준 구성(TEMPLATE_RECORD).
  * 설계서 §4. CameraX 는 이 조합(미리보기 + 임의 표면)을 직접 열 수 없어 Camera2 를 쓴다.
  *
- * RealWear 520 함정(hmd-app 메모): 구형 HAL 은 미리보기 표면이 있어야 시작되고, SurfaceView 는 안 되며 TextureView 는 된다.
+ * RealWear 520 함정(hmd-app 메모, 실장비): 미리보기 표면이 있어야 시작되고, SurfaceView 는 안 되며 TextureView 는 된다.
+ * (HAL 등급은 구형이 아니라 LEVEL_3 — 2026-11-10 dumpsys media.camera)
  * 세션 구성이 거부되면 [onError] — 호출자가 MJPEG 예비 모드로 되돌린다.
  */
 class Camera2Source(
@@ -71,7 +72,7 @@ class Camera2Source(
         }, handler)
     }
 
-    @Suppress("DEPRECATION")      // API 28 미만 호환 목록형 — minSdk 29 이지만 구형 HAL 에서 가장 무난
+    @Suppress("DEPRECATION")      // API 28 미만 호환 목록형 — minSdk 29 이지만 가장 무난
     private fun createSession(d: CameraDevice, id: String) {
         val targets = listOf(previewSurface!!, encoderSurface)
         d.createCaptureSession(targets, object : CameraCaptureSession.StateCallback() {
