@@ -436,7 +436,8 @@ class MainActivity : AppCompatActivity() {
         private const val VIDEO_FPS = 30
         private const val VIDEO_BITRATE = 8_000_000
         // 2026-11-06: JPEG 품질 80 → 95, 송출 초당 12장 (server/PLAN_product_feedback.md §7.4, 출발값)
-        private const val MJPEG_QUALITY = 95
+        // 2026-11-10: 품질 95 → 90 — 실측 송출이 초당 약 7장(목표 12)이라 압축 시간·크기를 줄인다
+        private const val MJPEG_QUALITY = 90
         private const val MJPEG_FPS = 12
         private const val MJPEG_FRAME_MS = 1000L / MJPEG_FPS
     }

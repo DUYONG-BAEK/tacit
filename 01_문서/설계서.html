@@ -196,7 +196,7 @@ HMD 화면과 폰 화면에 바로 표시하고, 제품 하나가 끝날 때마�
 <h4>데이터 경로</h4>
 <pre style="background:#f8fafc;border:1px solid var(--line);border-radius:10px;padding:14px;font-size:12px;line-height:1.6;overflow-x:auto">
 [HMD · RealWear 520]
-  CameraX 4:3 1920×1440 → JPEG 품질 95 → MjpegServer :8080
+  CameraX 4:3 1920×1440 → JPEG 품질 90 → MjpegServer :8080
   BleServer(GATT) → HUD 화면 (대기 · 조준 · 수동 판정)
       │  ▲
       │  │  BLE 쪽지  폰 → HMD: SHOW · PING(1초) · HINT · LIVE · FACES · RESULT  /  HMD → 폰: ACK · HELLO(영상 주소 · 카메라 상태)
@@ -217,7 +217,7 @@ HMD 화면과 폰 화면에 바로 표시하고, 제품 하나가 끝날 때마�
 <h4>통신 구간</h4>
 <table class="col-table">
   <tr><th style="width:16%">구간</th><th style="width:22%">방식</th><th>내용</th></tr>
-  <tr><td>HMD → 폰 영상</td><td>MJPEG over HTTP <code>http://&lt;HMD-IP&gt;:8080</code></td><td>4:3 1920×1440(목표, 카메라가 고름) · JPEG 품질 95 · 초당 12장. HMD IP는 BLE HELLO로 폰이 자동으로 받는다. 끊기면 폰이 5초마다 다시 붙는다</td></tr>
+  <tr><td>HMD → 폰 영상</td><td>MJPEG over HTTP <code>http://&lt;HMD-IP&gt;:8080</code></td><td>4:3 1920×1440(목표, 카메라가 고름) · JPEG 품질 90 · 초당 12장. HMD IP는 BLE HELLO로 폰이 자동으로 받는다. 끊기면 폰이 5초마다 다시 붙는다</td></tr>
   <tr><td>폰 → HMD 화면</td><td>BLE GATT (HMD = 서버, 폰 = 클라이언트)</td><td>SERVICE <code>9e7a1000-…</code>, DOWN <code>9e7a1001-…</code>(폰 → HMD 쓰기), UP <code>9e7a1002-…</code>(ACK notify · HELLO read).
       쪽지: <code>SHOW</code>(화면, 순번·ACK) · <code>PING</code>(1초) · <code>HINT</code>(진행 안내) · <code>LIVE</code>(실시간 결함, 응답 없는 쓰기·최신 1개만) · <code>FACES</code>(면 진행) · <code>RESULT</code>(제품 결과)</td></tr>
   <tr><td>폰 → 서버 영상</td><td>WebRTC (<code>POST /offer</code>, ICE 서버 없음)</td><td>HMD JPEG를 받는 대로 I420으로 넣는다(쉬는 간격 없음, 상한 = HMD 초당 12장). VP8 4~12Mbps, <code>maintain-resolution</code>. 연결 때 <code>station_id</code>(ST-02)·<code>feedback_mode</code>(manual·auto)</td></tr>
