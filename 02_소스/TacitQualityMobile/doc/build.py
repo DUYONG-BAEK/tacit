@@ -31,7 +31,7 @@ SECTIONS = [
     ("frame-inspect", "AI 서버 11-03 규격 — 프레임 단위 판정", "s-confirmed"),
     ("product-feedback", "제품 단위 판정 서버 이전 · 피드백 · 사진 저장", "s-dev"),
     ("measure-1109", "실서버 실측 · 송출 간격 · 면 기준 5장", "s-dev"),
-    ("measure-1110", "HMD 송출 병목 · 패킷 손실 · 1440×1080", "s-dev"),
+    ("measure-1110", "HMD 송출 병목 · 패킷 손실 · 1440×1080", "s-confirmed"),
 ]
 
 BASE_DIR  = os.path.dirname(os.path.abspath(__file__))
