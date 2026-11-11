@@ -10,6 +10,7 @@ import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.CaptureResult
 import android.hardware.camera2.TotalCaptureResult
+import android.os.BatteryManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -128,7 +129,7 @@ class MainActivity : AppCompatActivity() {
 
         // 폰 쪽지(1초 PING·SHOW)가 오는 동안 = 검사 중 → 뒤에 있으면 앞으로(연결 순서와 상관없이 1초 안에)
         ble = BleServer(this, onDown = { bringToFront(); hud.onDown(it) }, onState = ::onBleState,
-                        hello = { Wire.hello(deviceIp()?.let { "http://$it:$PORT" }, cameraState()) })
+                        hello = { Wire.hello(deviceIp()?.let { "http://$it:$PORT" }, cameraState(), batteryPct(), battery.isCharging) })
         hud = HudController(binding, sendUp = ble::notify)
         startBle()
         if (BuildConfig.DEBUG) registerDebugInjector()
@@ -223,6 +224,12 @@ class MainActivity : AppCompatActivity() {
         val age = System.currentTimeMillis() - at
         return if (age > 2_000) "멈춤 — 마지막 프레임 ${age / 1000}초 전" else "정상 $analysisSize"
     }
+    private val battery by lazy { getSystemService(BatteryManager::class.java) }
+
+    /** 배터리 % — 기기가 값을 못 주면 null(HELLO 에서 빠짐). BLE 스레드에서도 부른다. */
+    private fun batteryPct(): Int? =
+        battery.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY).takeIf { it in 0..100 }
+
     private var lastBringAt = 0L
 
     override fun onStop() {

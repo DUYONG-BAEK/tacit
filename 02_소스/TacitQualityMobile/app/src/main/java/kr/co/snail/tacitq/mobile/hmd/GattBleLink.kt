@@ -55,6 +55,8 @@ class GattBleLink(
     private val onReady: () -> Unit = {},
     /** HMD 가 알려 준 영상 주소(HELLO) — IP 수동 입력 없이 자동으로 맞춘다 */
     private val onVideoUrl: (String) -> Unit = {},
+    /** HELLO 전체(카메라 상태·배터리) — 읽을 때마다(연결 직후 · 영상 끊김 · [HELLO_MS]마다) */
+    private val onHello: (HmdHello) -> Unit = {},
 ) : BleLink {
 
     private val adapter = context.getSystemService(BluetoothManager::class.java)?.adapter
@@ -68,11 +70,13 @@ class GattBleLink(
     @Volatile private var pendingRead: CompletableDeferred<ByteArray?>? = null
     @Volatile private var up: BluetoothGattCharacteristic? = null
     @Volatile private var needHello = true
+    private var lastHelloAt = 0L                       // 배터리 갱신 — HELLO 를 [HELLO_MS]마다 다시 읽는다
     private var pingSeq = 0L
     @Volatile private var connectStartedAt = 0L
     private var pingFailing = false                    // 통신 로그 — PING 실패는 바뀔 때만 남긴다
     private var lastHelloUrl: String? = null           // 통신 로그 — HELLO 는 영상이 끊길 때마다 다시 읽으므로 바뀔 때만
     private var lastHelloCamera: String? = null
+    private var lastHelloBattery: String? = null
 
     private val _state = MutableStateFlow("BLE 준비")
     val state: StateFlow<String> = _state
@@ -94,7 +98,7 @@ class GattBleLink(
                     continue
                 }
                 if (ready) {
-                    if (needHello) readHello()
+                    if (needHello || System.currentTimeMillis() - lastHelloAt >= HELLO_MS) readHello()
                     val ok = runCatching { write("""{"cmd":"PING","seq":${++pingSeq}}""".toByteArray()) }
                         .onFailure { if (!pingFailing) CommLog.w(HMD, TAG, "PING 쓰기 실패: ${it.message}") }.isSuccess
                     if (ok && pingFailing) CommLog.i(HMD, TAG, "PING 쓰기 다시 성공")
@@ -149,7 +153,10 @@ class GattBleLink(
     /** 영상이 끊겼을 때 — HMD IP 가 바뀌었을 수 있으니 다음 주기에 HELLO 를 다시 읽는다. */
     fun refreshVideoUrl() { needHello = true }
 
-    /** UP 특성 읽기 = HMD HELLO {"type":"HELLO","video_url":"http://IP:8080"}. 옛 HMD 앱은 빈 값 → 수동 주소 유지. */
+    /**
+     * UP 특성 읽기 = HMD HELLO([HmdHello] — 영상 주소 · 카메라 상태 · 배터리). 옛 HMD 앱은 빈 값 → 수동 주소 유지.
+     * 연결 직후 · 영상이 끊겼을 때 · [HELLO_MS]마다(배터리 갱신) 읽는다.
+     */
     private suspend fun readHello() {
         val g = gatt ?: return
         val ch = up ?: return
@@ -159,23 +166,33 @@ class GattBleLink(
             if (!g.readCharacteristic(ch)) return
             withTimeoutOrNull(WRITE_TIMEOUT_MS) { done.await() }
         } ?: return
+        val periodic = !needHello                      // 배터리 갱신용 30초 읽기 — 옛 HMD 앱이면 "HELLO 없음" 을 매번 남기지 않는다
         needHello = false
-        runCatching {
-            val o = json.parseToJsonElement(bytes.decodeToString()).jsonObject
-            val url = o["video_url"]?.jsonPrimitive?.takeIf { it.isString }?.content
-            if (o["type"]?.jsonPrimitive?.content == "HELLO" && !url.isNullOrBlank()) {
-                if (url != lastHelloUrl) CommLog.i(HMD, TAG, "HMD 영상 주소 $url")
-                lastHelloUrl = url
-                onVideoUrl(url)
+        lastHelloAt = System.currentTimeMillis()
+        val h = HmdHello.parse(bytes)
+        if (h == null) { if (!periodic) CommLog.i(HMD, TAG, "HELLO 없음 — 수동 HMD 주소 사용"); return }
+        h.videoUrl?.let { url ->
+            if (url != lastHelloUrl) CommLog.i(HMD, TAG, "HMD 영상 주소 $url")
+            lastHelloUrl = url
+            onVideoUrl(url)
+        }
+        // HMD 카메라 상태 — 영상 서버에 붙어도 프레임이 안 올 때 원인(앱이 화면 뒤 · 카메라 시작 실패 등). 바뀔 때만 남긴다
+        h.camera?.let { cam ->
+            if (cam != lastHelloCamera) {
+                if (cam.startsWith("정상")) CommLog.i(HMD, TAG, "HMD 카메라 $cam") else CommLog.w(HMD, TAG, "HMD 카메라 $cam")
             }
-            // HMD 카메라 상태 — 영상 서버에 붙어도 프레임이 안 올 때 원인(앱이 화면 뒤 · 카메라 시작 실패 등). 바뀔 때만 남긴다
-            o["camera"]?.jsonPrimitive?.takeIf { it.isString }?.content?.let { cam ->
-                if (cam != lastHelloCamera) {
-                    if (cam.startsWith("정상")) CommLog.i(HMD, TAG, "HMD 카메라 $cam") else CommLog.w(HMD, TAG, "HMD 카메라 $cam")
-                }
-                lastHelloCamera = cam
+            lastHelloCamera = cam
+        }
+        // HMD 배터리 — 처음 · 10% 단위가 바뀔 때 · 충전 여부가 바뀔 때만 남긴다
+        h.battery?.let { b ->
+            val key = "${b / 10}:${h.charging}"
+            if (key != lastHelloBattery) {
+                val text = "HMD 배터리 $b%" + if (h.charging == true) " (충전 중)" else ""
+                if (h.batteryLow) CommLog.w(HMD, TAG, "$text — 충전 필요") else CommLog.i(HMD, TAG, text)
             }
-        }.onFailure { CommLog.i(HMD, TAG, "HELLO 없음 — 수동 HMD 주소 사용") }
+            lastHelloBattery = key
+        }
+        onHello(h)
     }
 
     private suspend fun scanOnce(timeoutMs: Long): BluetoothDevice? {
@@ -325,5 +342,6 @@ class GattBleLink(
         private const val PING_MS = 1_000L
         private const val WRITE_TIMEOUT_MS = 1_000L
         private const val CONNECT_TIMEOUT_MS = 15_000L
+        private const val HELLO_MS = 30_000L
     }
 }

@@ -1,5 +1,6 @@
 package kr.co.snail.tacitq.mobile.core
 
+import kr.co.snail.tacitq.mobile.hmd.HmdHello
 import kr.co.snail.tacitq.mobile.model.Verdict
 
 /**
@@ -26,8 +27,8 @@ class StateMachine(private var state: AppState = AppState()) {
 
         // ── 세션 ─────────────────────────────────────────
         is Event.ShiftStarted -> s.copy(
-            mode = Mode.RUNNING, line = e.line, partNo = e.partNo, profile = e.profile,
-        ) to listOf(Effect.ShowScreen(Screens.guide(e.partNo, 0, e.profile)))
+            mode = Mode.RUNNING, station = e.station, profile = e.profile,
+        ) to listOf(Effect.ShowScreen(Screens.guide(e.station, 0, e.profile)))
 
         // R20 — 교대 마감. 세션 종료, 큐 강제 플러시.
         is Event.ShiftClosed -> s.copy(mode = Mode.CLOSED) to
@@ -47,7 +48,7 @@ class StateMachine(private var state: AppState = AppState()) {
                     s.withPart(p.copy(phase = PartPhase.CONFIRMED)).bump() to listOf(
                         Effect.CancelTimer("confirm:${e.partId}"),
                         Effect.Persist(Records.confirmed(p, trigger = "TRAY_SENSOR")),
-                        Effect.ShowScreen(Screens.guide(s.partNo, s.doneCount + 1, s.profile)),
+                        Effect.ShowScreen(Screens.guide(s.station, s.doneCount + 1, s.profile)),
                     )
                 else -> s to emptyList()
             }
@@ -59,7 +60,7 @@ class StateMachine(private var state: AppState = AppState()) {
         // R11 — 헤드 커서 (이의 사유 2택 선택)
         is Event.CursorPick -> s.copy(openWindowId = null) to listOf(
             Effect.Persist(Records.objection(s.lastObjectionPartId(), e.optionId)),
-            Effect.ShowScreen(Screens.guide(s.partNo, s.doneCount, s.profile)),
+            Effect.ShowScreen(Screens.guide(s.station, s.doneCount, s.profile)),
         )
 
         // R12 — 확인 대기 만료 / 제스처 확정
@@ -74,7 +75,7 @@ class StateMachine(private var state: AppState = AppState()) {
         is Event.StopApproved -> s.copy(mode = Mode.LINE_STOPPED) to
             listOf(Effect.ShowScreen(Screens.stopped(e.reason, e.at)))
         is Event.ResumeApproved -> s.copy(mode = Mode.RUNNING) to
-            listOf(Effect.ShowScreen(Screens.guide(s.partNo, s.doneCount, s.profile)))
+            listOf(Effect.ShowScreen(Screens.guide(s.station, s.doneCount, s.profile)))
 
         // R16 — HMD 끊김. 화면 지시를 보낼 수 없다. HMD 가 스스로 H-09 를 띄운다.
         is Event.HmdLost -> s.copy(mode = Mode.OFFLINE) to
@@ -88,9 +89,9 @@ class StateMachine(private var state: AppState = AppState()) {
         is Event.EdgeRecovered -> s.copy(mode = Mode.RUNNING) to
             listOf(Effect.ShowScreen(Screens.overlayOff()), Effect.Enqueue(Payloads.resend()))
 
-        // R19 — 배터리
+        // R19 — 배터리(충전 중이면 알리지 않음)
         is Event.HmdHeartbeat ->
-            if (e.battery < 15) s to listOf(Effect.NotifyLead("HMD 배터리 ${e.battery}%"))
+            if (e.battery < HmdHello.BATTERY_LOW && !e.charging) s to listOf(Effect.NotifyLead("HMD 배터리 ${e.battery}%"))
             else s to emptyList()
 
         // 그 외(HELLO·ACK·RelayOverflow 등)는 상태 기계가 관여하지 않는다.
@@ -165,7 +166,7 @@ class StateMachine(private var state: AppState = AppState()) {
             e.key.startsWith("commit:") ->
                 s.withPart(p.copy(phase = PartPhase.CONFIRMED)).bump() to listOf(
                     Effect.Persist(Records.reviewDecided(p)),
-                    Effect.ShowScreen(Screens.guide(s.partNo, s.doneCount + 1, s.profile)),
+                    Effect.ShowScreen(Screens.guide(s.station, s.doneCount + 1, s.profile)),
                 )
             else -> s to emptyList()
         }

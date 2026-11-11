@@ -250,30 +250,6 @@ data class PartProfile(
         "${viewCnt}면 (" + viewSeq.split(" > ").joinToString("→") { it.first().toString() } + ")"
 }
 
-/** TB_SHIFT_CHECK — M-01 점검 6항목의 이력. v1.2 신설 */
-@Serializable
-data class ShiftCheck(
-    val checkId: String,
-    val shiftDate: String,
-    val shiftCd: String,
-    val lineId: String,
-    val workerId: String,
-    val hmdId: String,
-    val mobileId: String,
-    val partNo: String,
-    val checkItem: String,
-    val checkResult: String,
-    val measuredVal: String? = null,
-    val thresholdVal: String? = null,
-    val retryCnt: Int = 0,
-    val checkedAt: String,
-    val startBlocked: Boolean = false,
-    val remark: String? = null
-) {
-    val item: CheckItem get() = CheckItem.entries.first { it.code == checkItem }
-    val result: CheckResult get() = CheckResult.entries.first { it.code == checkResult }
-}
-
 @Serializable
 data class User(
     val userId: String, val userNm: String, val empNo: String, val roleCd: String,

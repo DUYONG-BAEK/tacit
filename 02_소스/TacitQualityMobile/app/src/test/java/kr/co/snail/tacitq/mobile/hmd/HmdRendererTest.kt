@@ -43,7 +43,7 @@ class HmdRendererTest {
         val r = HmdRenderer(ble).also { ble.renderer = it }
         val e = sampleJudge()
         val cmds = listOf(
-            Screens.guide("PRS-4410", 0, Profile()),
+            Screens.guide("ST-02", 0, Profile()),
             Screens.idle(),
             Screens.pass(e, ttl = 1_500),
             Screens.fail(e),

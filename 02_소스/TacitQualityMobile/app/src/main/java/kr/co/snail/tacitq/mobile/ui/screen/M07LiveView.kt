@@ -62,6 +62,7 @@ fun LiveViewScreen(@Suppress("UNUSED_PARAMETER") vm: AppViewModel) {
     val running by InspectionService.running.collectAsStateWithLifecycle()
     val hmdOn by InspectionService.hmdVideo.collectAsStateWithLifecycle()
     val hmdBle by InspectionService.hmdBle.collectAsStateWithLifecycle()
+    val hmdInfo by InspectionService.hmdInfo.collectAsStateWithLifecycle()
     val status by InspectionService.relayStatus.collectAsStateWithLifecycle()
     val liveMark by InspectionService.liveMark.collectAsStateWithLifecycle()
     val lastDefectId by InspectionService.lastDefectId.collectAsStateWithLifecycle()
@@ -154,6 +155,7 @@ fun LiveViewScreen(@Suppress("UNUSED_PARAMETER") vm: AppViewModel) {
             Field("HMD 영상", if (hmdOn) "수신" else "끊김", accent = if (hmdOn) null else T.Red, modifier = Modifier.weight(1f))
             Field("HMD 화면(BLE)", hmdBle, modifier = Modifier.weight(1f))
         }
+        Field("HMD 배터리", hmdBatteryText(hmdInfo), accent = if (hmdInfo?.batteryLow == true) T.Red else null)
         Row {
             Field("엣지", if (s?.edgeConnected == true) "연결" else "끊김", accent = if (s?.edgeConnected == true) null else T.Red, modifier = Modifier.weight(1f))
             Field("보냄 · 버림", s?.let { "${it.sent} · ${it.dropped}" } ?: "-", modifier = Modifier.weight(1f))

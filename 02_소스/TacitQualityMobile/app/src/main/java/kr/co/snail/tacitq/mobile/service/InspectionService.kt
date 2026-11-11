@@ -29,7 +29,6 @@ import kotlinx.coroutines.launch
 import kr.co.snail.tacitq.mobile.R
 import kr.co.snail.tacitq.mobile.core.Profile
 import kr.co.snail.tacitq.mobile.core.Screens
-import kotlinx.coroutines.flow.StateFlow
 import kr.co.snail.tacitq.mobile.ai.AiEdgeLink
 import kr.co.snail.tacitq.mobile.ai.AiMessages
 import kr.co.snail.tacitq.mobile.ai.AiProduct
@@ -37,10 +36,8 @@ import kr.co.snail.tacitq.mobile.ai.AiResultsApi
 import kr.co.snail.tacitq.mobile.ai.FacesMark
 import kr.co.snail.tacitq.mobile.ai.LiveMark
 import kr.co.snail.tacitq.mobile.relay.DevSettings
-import kr.co.snail.tacitq.mobile.relay.Hello
 import kr.co.snail.tacitq.mobile.relay.HmdVideoSource
 import kr.co.snail.tacitq.mobile.relay.StreamRelay
-import kr.co.snail.tacitq.mobile.relay.WebSocketTransport
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -51,6 +48,7 @@ import kr.co.snail.tacitq.mobile.core.Mode
 import kr.co.snail.tacitq.mobile.core.ShowCommand
 import kr.co.snail.tacitq.mobile.hmd.FacesWire
 import kr.co.snail.tacitq.mobile.hmd.GattBleLink
+import kr.co.snail.tacitq.mobile.hmd.HmdHello
 import kr.co.snail.tacitq.mobile.hmd.HintWire
 import kr.co.snail.tacitq.mobile.hmd.LiveWire
 import kr.co.snail.tacitq.mobile.hmd.ResultWire
@@ -67,7 +65,7 @@ import java.util.concurrent.Executors
  * 실제 로직(줄 세우기·분배)은 안드로이드를 모르는 [InspectionEngine] 에 있고, 여기서는
  * 포그라운드·잠금·알림과 **실물 부품 주입**만 한다.
  *
- * C2 [StreamRelay]: [start] 로 교대를 시작하면 HMD 영상([HmdVideoSource]) → 엣지(WebSocket) 중계를 돌리고,
+ * [start] 로 교대를 시작하면 HMD 영상([HmdVideoSource]) → AI 서버([AiEdgeLink], WebRTC) 중계를 돌리고,
  *   엣지 판정은 [InspectionEngine] 으로 되먹인다. [stop] 은 교대 마감.
  * C1 [GattBleLink]: 상태기계의 화면 지시(SHOW)를 BLE 로 HMD 에 보내고 ACK 를 받는다.
  */
@@ -105,6 +103,11 @@ class InspectionService : LifecycleService() {
             onVideoUrl = { url ->
                 if (url != hmdUrl) { CommLog.i(CommLog.Ch.HMD, TAG, "HMD 영상 주소 자동 변경 $hmdUrl → $url"); hmdUrl = url; DevSettings(this).hmdUrl = url }
             },
+            // HMD 카메라 상태·배터리 — M-01·M-07 표시, 배터리는 R19(부족이면 반장 알림 기록)
+            onHello = { h ->
+                hmdInfo.value = h
+                h.battery?.let { engine.send(Event.HmdHeartbeat(it, h.charging == true)) }
+            },
         )
         hmd = HmdRenderer(
             ble = ble,
@@ -125,75 +128,58 @@ class InspectionService : LifecycleService() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
         when (intent?.action) {
-            ACTION_START -> startShift(
-                line = intent.getStringExtra(EXTRA_LINE) ?: "A",
-                partNo = intent.getStringExtra(EXTRA_PART_NO) ?: "",
-                hmdUrl = intent.getStringExtra(EXTRA_HMD_URL) ?: "",
-                edgeUrl = intent.getStringExtra(EXTRA_EDGE_URL) ?: "",
-            )
+            ACTION_START -> startShift(hmdUrl = intent.getStringExtra(EXTRA_HMD_URL) ?: "")
             ACTION_STOP -> closeShift()
         }
         return START_STICKY   // 죽어도 안드로이드가 다시 띄운다
     }
 
-    /** 교대 시작 — 상태기계를 RUNNING 으로, HMD 영상 → 엣지 중계를 시작한다. */
-    private fun startShift(line: String, partNo: String, hmdUrl: String, edgeUrl: String) {
+    /** 교대 시작 — 상태기계를 RUNNING 으로, HMD 영상 → AI 서버(WebRTC) 중계를 시작한다. 스테이션은 M-01 입력값(설정). */
+    private fun startShift(hmdUrl: String) {
         if (relayJob != null) return
         // 저장된 값 우선 — 지난 교대에 BLE HELLO 로 받은 주소가 들어 있다(화면 입력칸은 옛 값일 수 있음).
         // 그래도 틀리면 BLE 가 붙는 즉시 HELLO 로 다시 맞춘다.
         this.hmdUrl = DevSettings(this).hmdUrl.ifBlank { hmdUrl }
-        val profile = Profile(liveMarks = DevSettings(this).liveMarks)
-        engine.send(Event.ShiftStarted(line, partNo, profile))
-        val sessionId = "S-" + SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date()) + "-$line"
+        val settings = DevSettings(this)
+        val profile = Profile(liveMarks = settings.liveMarks)
+        engine.send(Event.ShiftStarted(settings.stationId, profile))
+        val sessionId = "S-" + SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date()) + "-${settings.stationId}"
         val toEngine: (Event) -> Unit = { e ->
             Log.i(TAG, "엣지 → 엔진: $e")
             engine.send(e)
         }
-        val settings = DevSettings(this)
-        // 엣지 종류에 따라 모의 엣지(WebSocket 중계) 또는 실제 AI 서버(WebRTC, 설계서 §3)
-        val offer: (Long, Long, ByteArray, String, Boolean) -> Unit
-        val edgeRun: suspend () -> Unit
-        val edgeStatus: StateFlow<StreamRelay.Status>
-        if (settings.edgeKind == DevSettings.EDGE_AI) {
-            val api = AiResultsApi(settings.aiUrl)
-            var linkUps = 0                                       // AiEdgeLink 연결 스레드에서만 바뀐다
-            val ai = AiEdgeLink(this, settings.aiUrl, settings.stationId, toEngine, profile, feedbackMode = settings.feedbackMode,
-                onHint = { text, tone ->
-                    hudHint.value = text to tone                  // M-07 HMD 화면 따라 그리기
-                    // HMD 조준 화면 진행 안내 — 화면 지시(SHOW)와 달리 순번·ACK 없이 최신 것만 보낸다
-                    effectScope.launch { runCatching { ble.write(HintWire.encode(text, tone)) } }
-                },
-                // 실시간 결함 쪽지 — 최신 1개만 남기고(앞 쓰기가 안 끝났으면 덮어씀) 응답 없는 쓰기로 보낸다(R8)
-                onLive = { m ->
-                    liveOut.trySend(LiveWire.encode(m, profile.liveMarks))
-                    liveMark.value = LiveMarkAt(m, System.currentTimeMillis())    // M-07 결함 원
-                    m.resultId?.let { lastDefectId.value = it }                   // M-07 최근 결함 확대
-                },
-                // 면 진행 — 바뀔 때만 온다. HMD 조준 화면의 면 칩 줄
-                onFaces = { f ->
-                    hudFaces.value = f.takeIf { it.all.isNotEmpty() }
-                    effectScope.launch { runCatching { ble.write(FacesWire.encode(f)) } }
-                },
-                // 제품 끝(서버 판정) — M-07 결과 카드, HMD 결과 2초, 불합격이면 진동 1회
-                onProduct = { p -> showProduct(p, settings.feedbackMode) },
-                // 다시 연결되면(교대 첫 연결은 빼고) — 끊긴 사이 서버가 끝낸 제품(disconnect)을 카드로 받는다
-                onLinkUp = { if (linkUps++ > 0) ioScope.launch { recoverProduct(api, settings.stationId, settings.feedbackMode) } },
-            )
-            offer = ai::offer; edgeRun = ai::run; edgeStatus = ai.status
-            CommLog.i(CommLog.Ch.AI, TAG, "교대 시작 $sessionId · AI 서버 ${settings.aiUrl} · 스테이션 ${settings.stationId}")
-            CommLog.i(CommLog.Ch.HMD, TAG, "교대 시작 $sessionId · HMD 영상 주소 ${this.hmdUrl.ifBlank { "(없음 — BLE 로 HMD 가 알려 줄 때까지 대기)" }}")
-        } else {
-            val relay = StreamRelay(transport = WebSocketTransport(), emit = toEngine)
-            offer = relay::offer
-            edgeRun = { relay.run(edgeUrl, Hello(sessionId = sessionId, line = line, partNo = partNo, viewTotal = Profile().viewCount)) }
-            edgeStatus = relay.status
-            Log.i(TAG, "교대 시작 $sessionId · HMD ${this.hmdUrl} → 모의 엣지 $edgeUrl")
-        }
+        // AI 서버(WebRTC, 설계서 §3)
+        val api = AiResultsApi(settings.aiUrl)
+        var linkUps = 0                                       // AiEdgeLink 연결 스레드에서만 바뀐다
+        val ai = AiEdgeLink(this, settings.aiUrl, settings.stationId, toEngine, profile, feedbackMode = settings.feedbackMode,
+            onHint = { text, tone ->
+                hudHint.value = text to tone                  // M-07 HMD 화면 따라 그리기
+                // HMD 조준 화면 진행 안내 — 화면 지시(SHOW)와 달리 순번·ACK 없이 최신 것만 보낸다
+                effectScope.launch { runCatching { ble.write(HintWire.encode(text, tone)) } }
+            },
+            // 실시간 결함 쪽지 — 최신 1개만 남기고(앞 쓰기가 안 끝났으면 덮어씀) 응답 없는 쓰기로 보낸다(R8)
+            onLive = { m ->
+                liveOut.trySend(LiveWire.encode(m, profile.liveMarks))
+                liveMark.value = LiveMarkAt(m, System.currentTimeMillis())    // M-07 결함 원
+                m.resultId?.let { lastDefectId.value = it }                   // M-07 최근 결함 확대
+            },
+            // 면 진행 — 바뀔 때만 온다. HMD 조준 화면의 면 칩 줄
+            onFaces = { f ->
+                hudFaces.value = f.takeIf { it.all.isNotEmpty() }
+                effectScope.launch { runCatching { ble.write(FacesWire.encode(f)) } }
+            },
+            // 제품 끝(서버 판정) — M-07 결과 카드, HMD 결과 2초, 불합격이면 진동 1회
+            onProduct = { p -> showProduct(p, settings.feedbackMode) },
+            // 다시 연결되면(교대 첫 연결은 빼고) — 끊긴 사이 서버가 끝낸 제품(disconnect)을 카드로 받는다
+            onLinkUp = { if (linkUps++ > 0) ioScope.launch { recoverProduct(api, settings.stationId, settings.feedbackMode) } },
+        )
+        CommLog.i(CommLog.Ch.AI, TAG, "교대 시작 $sessionId · AI 서버 ${settings.aiUrl} · 스테이션 ${settings.stationId}")
+        CommLog.i(CommLog.Ch.HMD, TAG, "교대 시작 $sessionId · HMD 영상 주소 ${this.hmdUrl.ifBlank { "(없음 — BLE 로 HMD 가 알려 줄 때까지 대기)" }}")
         relayJob = ioScope.launch {
-            launch { edgeRun() }
+            launch { ai.run() }
             launch {
                 HmdVideoSource({ this@InspectionService.hmdUrl }, { seq, at, data, codec, key ->
-                    offer(seq, at, data, codec, key)
+                    ai.offer(seq, at, data, codec, key)
                     liveFrame.value = LiveFrame(seq, data, codec)     // M-07 영상 화면용 — 마지막 1장만
                 }, onConnected = { on ->
                     hmdVideo.value = on
@@ -203,7 +189,7 @@ class InspectionService : LifecycleService() {
             launch { ble.run() }
             launch { for (b in liveOut) runCatching { ble.writeNoResponse(b) } }
             launch { ble.state.collect { hmdBle.value = it } }
-            edgeStatus.collect { relayStatus.value = it }
+            ai.status.collect { relayStatus.value = it }
         }
         running.value = true
     }
@@ -237,7 +223,7 @@ class InspectionService : LifecycleService() {
     private fun resendCurrentScreen() {
         val s = engine.currentState
         val cmd = if (s.mode == Mode.RUNNING || s.mode == Mode.DEGRADED || s.mode == Mode.OFFLINE)
-            Screens.guide(s.partNo, s.doneCount, s.profile) else Screens.idle()
+            Screens.guide(s.station, s.doneCount, s.profile) else Screens.idle()
         effectScope.launch { sinks.show(cmd) }
     }
 
@@ -248,6 +234,7 @@ class InspectionService : LifecycleService() {
         relayStatus.value = null
         hmdVideo.value = false
         hmdBle.value = "-"
+        hmdInfo.value = null
         liveFrame.value = null
         liveMark.value = null
         lastDefectId.value = null
@@ -344,8 +331,8 @@ class InspectionService : LifecycleService() {
     /** 상태가 바뀔 때마다 알림 문구 갱신 — 작업자가 주머니에서 꺼내지 않고 확인. */
     private fun updateNotification(s: AppState) {
         val text = when (s.mode) {
-            Mode.RUNNING -> "${s.line}라인 · ${s.doneCount}건 · 정상"
-            Mode.DEGRADED -> "${s.line}라인 · 서버 지연 — 검사 계속"
+            Mode.RUNNING -> "${s.station} · ${s.doneCount}건 · 정상"
+            Mode.DEGRADED -> "${s.station} · 서버 지연 — 검사 계속"
             Mode.OFFLINE -> "연결 끊김 — 육안 검사 모드"
             Mode.LINE_STOPPED -> "라인 정지 중"
             else -> "검사 대기 중"
@@ -373,16 +360,15 @@ class InspectionService : LifecycleService() {
         private const val CH_ID = "inspection"
         private const val ACTION_START = "kr.co.snail.tacitq.mobile.START_SHIFT"
         private const val ACTION_STOP = "kr.co.snail.tacitq.mobile.CLOSE_SHIFT"
-        private const val EXTRA_LINE = "line"
-        private const val EXTRA_PART_NO = "part_no"
         private const val EXTRA_HMD_URL = "hmd_url"
-        private const val EXTRA_EDGE_URL = "edge_url"
 
         /** 화면(M-01) 표시용 — 프로세스 안에서 공유하는 가장 단순한 방법 */
         val running = MutableStateFlow(false)
         val relayStatus = MutableStateFlow<StreamRelay.Status?>(null)
         val hmdVideo = MutableStateFlow(false)
         val hmdBle = MutableStateFlow("-")
+        /** HMD HELLO 마지막 값(카메라 상태·배터리) — 30초마다 갱신. null = 아직 못 받음 */
+        val hmdInfo = MutableStateFlow<HmdHello?>(null)
         /** HMD 에서 받은 마지막 프레임 — 영상 화면(M-07)이 켜져 있을 때만 그림으로 바꾼다 */
         val liveFrame = MutableStateFlow<LiveFrame?>(null)
 
@@ -412,11 +398,9 @@ class InspectionService : LifecycleService() {
         data class ProductCard(val product: AiProduct, val mode: String, val sent: String? = null, val error: String? = null)
         val lastProduct = MutableStateFlow<ProductCard?>(null)
 
-        fun start(ctx: Context, line: String, partNo: String, hmdUrl: String, edgeUrl: String) {
+        fun start(ctx: Context, hmdUrl: String) {
             ctx.startForegroundService(
-                Intent(ctx, InspectionService::class.java).setAction(ACTION_START)
-                    .putExtra(EXTRA_LINE, line).putExtra(EXTRA_PART_NO, partNo)
-                    .putExtra(EXTRA_HMD_URL, hmdUrl).putExtra(EXTRA_EDGE_URL, edgeUrl),
+                Intent(ctx, InspectionService::class.java).setAction(ACTION_START).putExtra(EXTRA_HMD_URL, hmdUrl),
             )
         }
 

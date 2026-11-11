@@ -140,20 +140,6 @@ enum class DeviceType(override val code: String, override val label: String) : C
     HMD("HMD", "HMD"), MOBILE("MOBILE", "모바일"), EDGE("EDGE", "Edge 서버"), PLC("PLC", "PLC")
 }
 
-/** M-01 점검 6항목. v1.2 신설 — 선언 순서가 곧 화면 표시 순서다. */
-enum class CheckItem(override val code: String, override val label: String, val threshold: String) : CodeItem {
-    PAIRING("PAIRING", "HMD 페어링", "연결 성공"),
-    BITRATE("BITRATE", "스트림 대역폭", "≥ 6.0 Mbps"),
-    GESTURE_CAL("GESTURE_CAL", "제스처 캘리브레이션", "각 3회 중 3회"),
-    FRAME_GATING("FRAME_GATING", "프레임 게이팅 시험", "4장 중 3장 이상"),
-    MODEL_VER("MODEL_VER", "모델 · 임계값", "배포 버전 일치"),
-    TRAY_OPEN("TRAY_OPEN", "트레이 개설", "양품 · 불량 2종")
-}
-
-enum class CheckResult(override val code: String, override val label: String) : CodeItem {
-    PASS("PASS", "통과"), WARN("WARN", "주의"), FAIL("FAIL", "미달")
-}
-
 /** 감사 액션. v1.2에서 STORE_EXTEND 신설, EXPORT 사용 개시. */
 enum class AuditAction(override val code: String, override val label: String) : CodeItem {
     VERDICT_OVERRIDE("VERDICT_OVERRIDE", "판정 수정"),

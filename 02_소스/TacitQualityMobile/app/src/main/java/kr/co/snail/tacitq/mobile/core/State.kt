@@ -52,8 +52,7 @@ data class Profile(
 /** 앱 전체 상태. 이 객체 하나가 곧 진실이다. */
 data class AppState(
     val mode: Mode = Mode.INIT,
-    val line: String = "",
-    val partNo: String = "",
+    val station: String = "",             // 스테이션(M-01 입력) — HMD 조준 화면 왼쪽 위 · 폰 알림
     val profile: Profile = Profile(),
     val parts: Map<String, Part> = emptyMap(),
     val lastSeq: Long = 0,                // R06 — 처리한 마지막 판정 순번

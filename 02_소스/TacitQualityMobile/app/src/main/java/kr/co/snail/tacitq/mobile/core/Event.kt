@@ -9,7 +9,7 @@ import kr.co.snail.tacitq.mobile.model.Verdict
 sealed interface Event {
 
     // ── 세션 ─────────────────────────────────────────
-    data class ShiftStarted(val line: String, val partNo: String, val profile: Profile) : Event
+    data class ShiftStarted(val station: String, val profile: Profile) : Event
     data object ShiftClosed : Event                                                  // R20
 
     // ── Edge ─────────────────────────────────────────
@@ -43,7 +43,7 @@ sealed interface Event {
 
     // ── HMD ──────────────────────────────────────────
     data class HmdConnected(val info: DeviceInfo) : Event
-    data class HmdHeartbeat(val battery: Int, val temp: Int) : Event                // R19
+    data class HmdHeartbeat(val battery: Int, val charging: Boolean = false) : Event // R19 — HELLO 배터리(30초마다)
     data class HmdLost(val gapMs: Long) : Event                                     // R16
     data class Gesture(val kind: String, val repeats: Int, val windowId: String?) : Event // R09·R10
     data class CursorPick(val optionId: String) : Event                            // R11

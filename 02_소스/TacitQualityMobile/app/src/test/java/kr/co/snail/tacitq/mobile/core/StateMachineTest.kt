@@ -24,7 +24,7 @@ class StateMachineTest {
         capturedEndAt = 1_000, arrivedAt = 1_000 + delay, aiDecision = aiDecision,
     )
 
-    private fun machine() = StateMachine(AppState(mode = Mode.RUNNING, partNo = "PRS-4410"))
+    private fun machine() = StateMachine(AppState(mode = Mode.RUNNING, station = "ST-02"))
 
     /** R06 — 순서가 뒤바뀌어 도착해도 오래된 판정이 새 판정을 덮지 못한다. */
     @Test fun `오래된 판정은 무시된다`() {
@@ -80,5 +80,13 @@ class StateMachineTest {
         val (_, fx) = machine().reduce(Event.PatternAlert("WARN", "DENT", 5, 20))
         assertTrue(fx.none { it is Effect.ShowScreen || it is Effect.Vibrate })
         assertTrue(fx.any { it is Effect.NotifyLead })
+    }
+
+    /** R19 — HMD 배터리 부족이면 반장 알림 기록. 충전 중이면 알리지 않는다. */
+    @Test fun `HMD 배터리 부족은 충전 중이 아니면 알린다`() {
+        val m = machine()
+        assertTrue(m.reduce(Event.HmdHeartbeat(14)).second.any { it is Effect.NotifyLead })
+        assertTrue(m.reduce(Event.HmdHeartbeat(14, charging = true)).second.isEmpty())
+        assertTrue(m.reduce(Event.HmdHeartbeat(15)).second.isEmpty())
     }
 }

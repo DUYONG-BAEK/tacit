@@ -12,7 +12,6 @@ import kotlinx.coroutines.flow.update
  * 갈아끼운다. 화면은 이 인터페이스만 알면 되므로 교체해도 UI는 건드리지 않는다.
  */
 interface QualityRepository {
-    val shiftChecks: StateFlow<List<ShiftCheck>>
     val trays: StateFlow<List<Tray>>
     val inspections: StateFlow<List<Inspection>>
     val defectItems: StateFlow<List<DefectItem>>
@@ -20,12 +19,8 @@ interface QualityRepository {
     val auditLogs: StateFlow<List<AuditLog>>
 
     fun profile(): PartProfile
-    fun hmd(): Device
     fun mobile(): Device
     fun me(): User
-
-    /** M-01 — 점검 항목 재시도 */
-    fun retryCheck(item: CheckItem, result: CheckResult, measured: String)
 
     /** M-02 — 조치 등록. 파라미터 전/후는 이 화면의 핵심 산출물이다. */
     fun registerAction(
@@ -55,7 +50,6 @@ interface QualityRepository {
 
 class InMemoryQualityRepository : QualityRepository {
 
-    private val _shiftChecks = MutableStateFlow(SampleData.shiftChecks)
     private val _trays = MutableStateFlow(SampleData.trays)
     private val _inspections = MutableStateFlow(SampleData.inspections)
     private val _items = MutableStateFlow(SampleData.defectItems)
@@ -63,7 +57,6 @@ class InMemoryQualityRepository : QualityRepository {
     private val _audit = MutableStateFlow(emptyList<AuditLog>())
     private var logSeq = 0
 
-    override val shiftChecks: StateFlow<List<ShiftCheck>> = _shiftChecks
     override val trays: StateFlow<List<Tray>> = _trays
     override val inspections: StateFlow<List<Inspection>> = _inspections
     override val defectItems: StateFlow<List<DefectItem>> = _items
@@ -71,23 +64,8 @@ class InMemoryQualityRepository : QualityRepository {
     override val auditLogs: StateFlow<List<AuditLog>> = _audit
 
     override fun profile() = SampleData.profile
-    override fun hmd() = SampleData.hmd
     override fun mobile() = SampleData.mobile
     override fun me() = SampleData.currentUser
-
-    override fun retryCheck(item: CheckItem, result: CheckResult, measured: String) {
-        _shiftChecks.update { list ->
-            list.map {
-                if (it.checkItem == item.code)
-                    it.copy(
-                        checkResult = result.code, measuredVal = measured,
-                        retryCnt = it.retryCnt + 1,
-                        startBlocked = result == CheckResult.FAIL
-                    )
-                else it
-            }
-        }
-    }
 
     override fun registerAction(
         actionId: String, cause: Cause, action: ActionTaken,

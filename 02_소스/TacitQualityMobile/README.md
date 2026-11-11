@@ -1,7 +1,7 @@
 # 품질검사 지원 APP — 모바일 모듈
 
 > **대외비 — 외부 공개 금지**
-> 제조암묵지기반 AI모델개발사업 (RS-2026-25590666) · ㈜스네일 · 2026-11-09 기준
+> 제조암묵지기반 AI모델개발사업 (RS-2026-25590666) · ㈜스네일 · 2026-11-11 기준
 
 HMD(RealWear Navigator 520) 영상을 받아 AI 판정 서버로 보내고, 서버가 돌려주는 프레임 판정·제품 판정을
 HMD(BLE)와 폰 화면에 표시하며, 작업자 피드백을 서버로 보내는 안드로이드 앱이다. 판정·기록은 서버가 한다.
@@ -15,7 +15,7 @@ HMD ─MJPEG─▶ HmdVideoSource ─▶ AiEdgeLink ─WebRTC─▶ AI 서버(:8
 AiFlow ─┬─ 결함 프레임 → BLE LIVE → HMD 판정 글자·결함 원 (0.5초 유지)
         ├─ 면 진행 바뀜 → BLE FACES → HMD 면 칩 줄
         ├─ product_end → BLE RESULT(HMD 2초) · M-07 결과 카드(수동: 맞음·틀림·확인필요 → PUT /products/{id}/feedback) · 불합격 진동
-        └─ M-05: 서버 이력(GET /products) · 프레임 사진 · 피드백 수정 / M-06: 서버 디스크(GET /storage)
+        └─ M-05: 서버 이력(GET /products) · 프레임 사진 · 피드백 수정
 ```
 
 | 규칙 | 값 (위치) |
@@ -42,17 +42,18 @@ app/src/main/java/kr/co/snail/tacitq/mobile/
 │   └── DefectCrop.kt · DefectLoader.kt   결함 확대 영역 · 이미지 불러오기
 ├── core/                        상태기계 (안드로이드 모름) — Event · Effect · Records · Screens · State
 ├── hmd/
-│   ├── GattBleLink.kt           BLE 클라이언트 (SHOW·PING·HINT·LIVE·FACES·RESULT, HELLO 읽기)
+│   ├── GattBleLink.kt           BLE 클라이언트 (SHOW·PING·HINT·LIVE·FACES·RESULT, HELLO 읽기 — 30초마다 배터리 갱신)
+│   ├── HmdHello.kt              HELLO 해석 (영상 주소 · 카메라 상태 · 배터리 · 충전)
 │   ├── HmdRenderer.kt           SHOW 순번 · ACK 200ms
 │   ├── ShowWire.kt              SHOW · HINT · LIVE · FACES · RESULT 쪽지 규격
 │   └── HudMirror.kt             M-07 HMD 화면 따라 그리기 (HMD Screens·LiveHold 와 같은 규칙)
-├── relay/                       HMD 영상 수신(HmdVideoSource·MjpegReader) · 개발 설정(DevSettings) · 모의 엣지(StreamRelay)
+├── relay/                       HMD 영상 수신(HmdVideoSource·MjpegReader) · 연결 설정(DevSettings) · 옛 모의 엣지(StreamRelay — 앱에서는 안 씀)
 ├── service/                     InspectionService(포그라운드 서비스, 부품 연결) · InspectionEngine(이벤트 한 줄 세우기)
 ├── store/                       Room v2 — 상태 기계 기록 · 전송 큐 (이력 화면은 서버를 본다)
 ├── log/CommLog.kt               통신 로그 (모바일 ↔ AI 서버 / 모바일 ↔ HMD)
 ├── ui/
-│   ├── AppShell.kt              상단 바("로그" 버튼) · 본문 · 하단 탭
-│   └── screen/                  M-01 검사 준비 · M-07 영상 · M-05 이력 · ProductViews · DefectViewer · CommLogView · M-02~M-06
+│   ├── AppShell.kt              상단 바("로그" 버튼) · 본문 · 하단 탭(검사 · 영상 · 이력)
+│   └── screen/                  M-01 검사 준비 · M-07 영상 · M-05 이력 · ProductViews · DefectViewer · CommLogView · M-02~M-06(탭에서 숨김)
 ├── model/ · data/               코드 정의 · 화면 예시 데이터
 └── vm/AppViewModel.kt
 ```
@@ -61,10 +62,10 @@ app/src/main/java/kr/co/snail/tacitq/mobile/
 
 | 화면 | 내용 |
 |---|---|
-| M-01 검사 | AI 서버 주소 · 스테이션 · 모드(수동/자동) · HMD 결함 원 켜기/끄기 · 검사 시작/마감 |
+| M-01 검사 | 스테이션 · 시작 전 확인(입력값 · 폰 블루투스 · AI 서버 응답 — 하나라도 안 되면 시작 막힘) · 검사 중 상태(HMD 연결·영상·카메라·배터리, AI 서버) · AI 서버 주소 · 모드(수동/자동) · HMD 결함 원 · 검사 시작/마감 |
 | M-07 영상 | HMD 영상 + HMD 와 같은 글자·결함 원·면 칩·제품 결과 · 제품 결과 카드(수동: 맞음·틀림·확인필요) · 최근 결함 프레임 확대 · 연결 상태 |
 | M-05 이력 | 서버 제품 기록(최신 순, 미입력·확인필요·불합격 필터, 더 보기) · 상세: 프레임 사진 넘겨 보기 · 결함 확대 · 피드백 바꾸기 · 변경 기록 |
-| M-06 관리 | AI 서버 디스크(남은 공간·종류별·날짜별) + 화면 예시 지표 |
+| (숨김) M-03·M-04 수거 · M-06 관리 | 샘플 데이터 화면 — 2026-11-11 탭에서 숨김(코드는 남김, `AppShell.TABS`) |
 | 로그(상단 바) | 통신 로그 — 연결 과정 · 5초 요약(HMD 영상이 없으면 1분마다 한 줄) · HMD 카메라 상태, 복사·지우기. 화면 위·복사 맨 위에 앱 빌드 시각 |
 
 ## 빌드 · 시험

@@ -11,14 +11,14 @@ import org.junit.Test
 
 /** M-07 HMD 화면 따라 그리기 — HMD Screens·LiveHold 와 같은 글자·색 */
 class HudMirrorTest {
-    private val aim = Screens.guide("PRS-4410", 0, Profile())
+    private val aim = Screens.guide("ST-02", 0, Profile())
 
     @Test fun `조준 화면 - 큰 글자는 LIVE 가 HINT 보다 먼저`() {
         val hint = "검사 중" to "OK"
         assertEquals("검사 중" to HudMirror.Tone.OK, HudMirror.view(aim, hint, null, null).let { it.big to it.bigTone })
         val ng = HudMirror.view(aim, hint, LiveMark("NG", "칩찍힘"), null)
         assertEquals("✕ 불량 · 칩찍힘", ng.big); assertEquals(HudMirror.Tone.BAD, ng.bigTone)
-        assertEquals("● REC · PRS-4410", ng.topLeft)
+        assertEquals("● REC · ST-02", ng.topLeft)
         assertTrue(ng.marks)
         assertEquals("? 애매 · 이물찍힘", HudMirror.view(aim, hint, LiveMark("REVIEW", "이물찍힘"), null).big)
         assertEquals("지움(d=null)이면 HINT", "검사 중", HudMirror.view(aim, hint, LiveMark.CLEAR, null).big)

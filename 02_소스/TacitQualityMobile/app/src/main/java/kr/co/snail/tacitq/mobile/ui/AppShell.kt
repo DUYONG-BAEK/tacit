@@ -26,17 +26,16 @@ import kr.co.snail.tacitq.mobile.vm.AppViewModel
 import kr.co.snail.tacitq.mobile.vm.Screen
 
 /**
- * 앱 뼈대 — 상단 바 · 본문 · 하단 탭 4개.
+ * 앱 뼈대 — 상단 바 · 본문 · 하단 탭 3개.
  *
- * 하단 탭은 검사(M-01) · 영상(M-07) · 이력(M-05) · 수거(M-03) · 관리(M-06)로
- * 이어진다. M-02와 M-04는 각각 경보와 목록에서 진입하는 하위 화면이다.
+ * 하단 탭은 검사(M-01) · 영상(M-07) · 이력(M-05).
+ * 2026-11-11: 수거(M-03 · M-04)·관리(M-06) 탭 숨김 — 샘플 데이터 화면이라 지금 시스템(AI 서버)과 맞지 않는다.
+ * 화면 코드는 남겨 두었다(다시 쓰려면 아래 목록에 되돌린다).
  */
 private val TABS = listOf(
     Triple("▣", "검사", Screen.M01),
     Triple("◉", "영상", Screen.M07),
     Triple("≣", "이력", Screen.M05),
-    Triple("▤", "수거", Screen.M03),
-    Triple("◍", "관리", Screen.M06)
 )
 
 @Composable
@@ -57,6 +56,13 @@ fun AppShell(vm: AppViewModel) {
             vm.go(Screen.M07)
             vm.toast("HMD 연결됨 — 영상 화면")
         }
+    }
+
+    // HMD 배터리 부족 — 부족해질 때 한 번 알린다(M-01·M-07 에는 빨간 글자로 계속 보인다)
+    val hmdInfo by InspectionService.hmdInfo.collectAsStateWithLifecycle()
+    val hmdLow = hmdInfo?.batteryLow == true
+    LaunchedEffect(hmdLow) {
+        if (hmdLow) vm.toast("HMD 배터리 ${hmdInfo?.battery}% — 충전이 필요합니다")
     }
 
     Box(Modifier.fillMaxSize().background(T.Bg)) {
@@ -116,7 +122,6 @@ private fun BottomTabs(current: Screen, onTab: (Screen) -> Unit) {
     ) {
         TABS.forEach { (icon, label, target) ->
             val on = current == target ||
-                (current == Screen.M04 && target == Screen.M03) ||
                 (current == Screen.M02 && target == Screen.M01)
             Column(
                 Modifier.weight(1f).clickable { onTab(target) },

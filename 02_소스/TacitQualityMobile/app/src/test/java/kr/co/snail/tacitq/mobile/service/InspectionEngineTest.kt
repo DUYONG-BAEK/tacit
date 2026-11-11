@@ -51,7 +51,7 @@ class InspectionEngineTest {
         }
     }
 
-    private fun running() = Harness(AppState(mode = Mode.RUNNING, partNo = "PRS-4410"))
+    private fun running() = Harness(AppState(mode = Mode.RUNNING, station = "ST-02"))
 
     private fun judge(seq: Long, id: String, v: Verdict, agree: Double = 1.0) = Event.JudgeResult(
         seq = seq, partId = id, verdict = v, severity = if (v == Verdict.FAIL) "CRITICAL" else null,
@@ -96,7 +96,7 @@ class InspectionEngineTest {
     @Test fun `제품 구간 1건이 엔진을 거쳐 저장된다`() {
         val h = running()
         try {
-            h.engine.send(Event.ShiftStarted("A", "PRS-4410", Profile()))
+            h.engine.send(Event.ShiftStarted("ST-02", Profile()))
             h.engine.send(judge(1, "ST-02-1000", Verdict.FAIL).copy(aiDecision = "NG", defectLabel = "칩찍힘",
                 resultIds = listOf("r-2", "r-1"), frames = 12, defectFrames = 3))
             waitUntil { h.sinks.persists.isNotEmpty() }

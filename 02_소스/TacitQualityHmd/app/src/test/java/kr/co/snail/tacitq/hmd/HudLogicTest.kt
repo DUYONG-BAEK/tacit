@@ -42,6 +42,11 @@ class HudLogicTest {
         assertEquals("""{"type":"HELLO","video_url":null}""", Wire.hello(null).decodeToString())
     }
 
+    @Test fun `HELLO 는 배터리와 충전 여부를 싣는다`() {
+        assertEquals("""{"type":"HELLO","video_url":"http://192.168.1.2:8080","camera":"정상","battery":87,"charging":false}""",
+            Wire.hello("http://192.168.1.2:8080", "정상", 87, false).decodeToString())
+    }
+
     @Test fun `ACK 는 계약 필드명 type seq rendered_at`() {
         assertEquals("""{"type":"ACK","seq":7,"rendered_at":1000}""", Wire.ack(7, 1000).decodeToString())
     }

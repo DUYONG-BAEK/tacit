@@ -43,15 +43,6 @@ object SampleData {
         updatedAt = "2026-08-20 14:00:00", updatedBy = "a_4410"
     )
 
-    val hmd = Device(
-        deviceId = "hmd-01", deviceType = DeviceType.HMD.code,
-        modelNm = "RealWear Navigator 520", serialNo = "HMD10230037", lineId = Line.A.code,
-        assignedUser = "w_8842", deviceStatus = "NORMAL", batteryPct = 92,
-        streamState = StreamState.STREAMING.code, avgBitrateKbps = 8200,
-        fwVersion = "RW-2.1.3-23", appVersion = "1.0.0",
-        lastSeenAt = "$TODAY 07:51:00", registeredAt = "2026-09-01 10:00:00"
-    )
-
     val mobile = Device(
         deviceId = "mob-02", deviceType = DeviceType.MOBILE.code,
         modelNm = "Galaxy XCover7", serialNo = "MOB10230074", lineId = Line.A.code,
@@ -60,26 +51,6 @@ object SampleData {
         fwVersion = "One UI 6.1", appVersion = "1.0.0",
         lastSeenAt = "$TODAY 07:51:00", registeredAt = "2026-09-01 10:00:00"
     )
-
-    /** M-01 점검 6항목 — 오늘 교대분 */
-    val shiftChecks: List<ShiftCheck> = CheckItem.entries.mapIndexed { i, item ->
-        val measured = when (item) {
-            CheckItem.PAIRING -> "hmd-01 · 배터리 92%"
-            CheckItem.BITRATE -> "8.2 Mbps · Edge 연결 정상"
-            CheckItem.GESTURE_CAL -> "끄덕임 3/3 · 가로젓기 3/3"
-            CheckItem.FRAME_GATING -> "샘플 4장 중 4장 통과"
-            CheckItem.MODEL_VER -> "$MODEL_VERSION · $PROFILE_VERSION"
-            CheckItem.TRAY_OPEN -> "T-0913-A 개설됨 (양품 · 불량)"
-        }
-        ShiftCheck(
-            checkId = "chk_20260913_A_day_1_${item.code.lowercase()}",
-            shiftDate = TODAY, shiftCd = Shift.DAY_1.code, lineId = Line.A.code,
-            workerId = currentUser.userId, hmdId = hmd.deviceId, mobileId = mobile.deviceId,
-            partNo = profile.partNo, checkItem = item.code, checkResult = CheckResult.PASS.code,
-            measuredVal = measured, thresholdVal = item.threshold, retryCnt = 0,
-            checkedAt = "$TODAY 07:5${i}:00", startBlocked = false
-        )
-    }
 
     val trays = listOf(
         tray("T-0913-A", TrayKind.GOOD, TrayStatus.OPEN, "2026-09-13 06:05:00", 0, 0),
