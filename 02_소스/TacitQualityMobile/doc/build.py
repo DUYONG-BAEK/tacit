@@ -33,6 +33,7 @@ SECTIONS = [
     ("measure-1109", "실서버 실측 · 송출 간격 · 면 기준 5장", "s-dev"),
     ("measure-1110", "HMD 송출 병목 · 패킷 손실 · 1440×1080", "s-confirmed"),
     ("check-menu-1111", "검사 메뉴 정비 · HMD 배터리 · 스테이션", "s-dev"),
+    ("hmd-standby-1111", "HMD 자동 실행 — 대기 서비스 · 설치 스크립트", "s-dev"),
 ]
 
 BASE_DIR  = os.path.dirname(os.path.abspath(__file__))

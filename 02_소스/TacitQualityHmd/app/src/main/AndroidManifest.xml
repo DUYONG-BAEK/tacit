@@ -3,6 +3,7 @@
   품질검사 지원 — HMD 앱 (RealWear Navigator 520) / ㈜스네일 / 대외비
   1단계: 카메라 촬영 → MJPEG 로 폰에 송출 (설계서 ① HMD 앱의 최소 구현).
   2단계: BLE GATT 서버 — 모바일의 SHOW 쪽지 수신 → HUD 화면 · ACK.
+  2026-11-11: BLE 는 대기 서비스(LinkService)가 늘 켜 두고, 폰이 연결하면 화면을 띄운다.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
@@ -16,8 +17,11 @@
     <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
 
-    <!-- 부팅 후 자동 실행 — Android 10+ 는 뒤에서 화면 띄우기를 막으므로 "다른 앱 위에 표시" 허용이 함께 필요 -->
+    <!-- 부팅·업데이트 후 대기 서비스 자동 시작 — 폰 연결 때 화면을 띄우려면 Android 10+ 는 "다른 앱 위에 표시" 허용이 함께 필요 -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- 대기 서비스(LinkService, BLE) — 화면이 없어도 늘 켜 둔다 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <!-- 앞으로 나올 때 꺼진 화면 깨우기 -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
@@ -50,7 +54,13 @@
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
+
+        <service
+            android:name=".link.LinkService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice" />
     </application>
 </manifest>

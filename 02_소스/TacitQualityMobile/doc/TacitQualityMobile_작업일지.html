@@ -156,6 +156,7 @@
     <a class="nav-item s-dev" href="#measure-1109">실서버 실측 · 송출 간격 · 면 기준 5장</a>
     <a class="nav-item s-confirmed" href="#measure-1110">HMD 송출 병목 · 패킷 손실 · 1440×1080</a>
     <a class="nav-item s-dev" href="#check-menu-1111">검사 메뉴 정비 · HMD 배터리 · 스테이션</a>
+    <a class="nav-item s-dev" href="#hmd-standby-1111">HMD 자동 실행 — 대기 서비스 · 설치 스크립트</a>
   </nav>
 </aside>
 
@@ -811,6 +812,44 @@ outbox 순서 = 이벤트 처리 순서.</p>
 
 <div class="warn-box"><strong>결정 (2026-10-07):</strong> 대시보드 기준 체감 화질 차이가 작고 지연이 느껴져 <strong>기본값은 MJPEG 1280×720 · JPEG 품질 80 · 약 22fps · 12~16Mbps</strong>로 확정.
 H.265 1080p 코드는 유지 — HMD <code>VIDEO_MODE</code>를 <code>"hevc"</code>로 바꾸면 재사용(실제 AI의 고해상도 필요 시).</div>
+</section>
+
+  <section id="hmd-standby-1111">
+<div class="section-head">
+  <h3>HMD 자동 실행 — 대기 서비스 · 설치 스크립트</h3>
+  <span class="date-badge">2026-11-11</span>
+  <span class="status dev">작성 완료 · 실기기 확인 대기</span>
+</div>
+
+<p>사용 순서가 "HMD 에서 앱 실행 → 폰 앱 실행 → 폰 검사 시작"이 되어 번거로웠다. 부팅 때 화면(MainActivity)을 뒤에서 띄워 BLE 를 들게 하는 구조였는데,
+화면이 정리되면(메모리 정리 · 최근 앱에서 지움 · 앱 업데이트 뒤 재부팅 안 함) BLE 도 사라져 폰이 HMD 를 부를 수 없었다.
+앱이 하나도 떠 있지 않은 HMD 를 폰이 BLE 로 실행시키는 것은 안드로이드가 막으므로, <strong>작은 대기 서비스를 늘 켜 두고 그 서비스가 화면을 띄운다</strong>.</p>
+
+<h4>1. 대기 서비스 (HMD <code>link/LinkService.kt</code>)</h4>
+<table class="col-table">
+  <tr><th style="width:24%">항목</th><th>내용</th></tr>
+  <tr><td>하는 일</td><td>포그라운드 서비스(connectedDevice)가 BLE GATT 서버(광고 · 연결 · HELLO)를 화면과 따로 들고 있다. 정리돼도 다시 뜬다(START_STICKY)</td></tr>
+  <tr><td>켜지는 때</td><td>HMD 부팅(<code>BOOT_COMPLETED</code>) · 앱 설치/업데이트(<code>MY_PACKAGE_REPLACED</code>, 새로 추가) · 앱 실행. 부팅 때 화면은 띄우지 않는다</td></tr>
+  <tr><td>폰 연결 · 쪽지</td><td>화면을 앞으로 띄운다(3초에 한 번, 꺼진 화면은 깨움 — 전에 화면이 하던 일). 카메라는 화면이 떠 있어야 켜지는 구조 그대로</td></tr>
+  <tr><td>화면이 뜨기 전 1~2초</td><td>폰은 SHOW 뒤 200ms 안에 ACK 가 없으면 BLE 를 끊고 다시 붙는다 → 서비스가 대신 ACK 하고 마지막 화면 지시 · 예외 띠만 들고 있다가
+      화면이 붙으면 순번 순서로 넘긴다(<code>link/HeldShow.kt</code>). 폰은 이미 끝난 순번의 ACK 를 무시한다</td></tr>
+  <tr><td>HELLO</td><td>서비스가 답한다(영상 주소 · 배터리). 카메라 상태만 화면에서 받고, 화면이 없으면 "꺼짐 — HMD 앱 화면이 아직 안 뜸"</td></tr>
+  <tr><td>한계</td><td>설정에서 "강제 종료"하면 서비스도 멈춘다(안드로이드 규칙) — 재부팅하거나 앱을 한 번 실행.
+      영상 서버(MJPEG)는 화면에 있어서 대기에서 깨면 폰 영상 재연결(5초 주기)만큼 늦게 붙는다</td></tr>
+</table>
+
+<h4>2. 권한 — 설치 스크립트 <code>HMD_설치.bat</code></h4>
+<p>앱이 스스로 권한을 줄 수는 없다(안드로이드 보안). 대신 USB 로 한 번에: <code>adb install -r -g</code>(카메라) ·
+<code>appops set … SYSTEM_ALERT_WINDOW allow</code>(다른 앱 위에 표시) · 앱 한 번 실행(대기 시작). <code>release</code> · <code>grant</code>(설치 없이 권한만) 인자.
+adb 가 PATH 에 없으면 Android Studio 기본 SDK 위치를 쓴다. 디버그·릴리스가 같이 깔려 있으면 경고.
+권한은 업데이트로 덮어써도 남는다 — 지우고 새로 깔 때만 다시 한다. adb 가 없으면 앱이 "다른 앱 위에 표시" 설정 화면을 직접 열고, 상태줄에 경고를 띄운다.</p>
+
+<h4>시험</h4>
+<ul class="checklist">
+  <li class="done">JVM: <code>HeldShowTest</code> 4건(대리 ACK 순번 · 마지막 화면 지시와 예외 띠만 순번 순서로 · 늦은 작은 순번 · 끊기면 버림) — HMD 31건 · 모바일 70건 통과</li>
+  <li>안드로이드 빌드(서비스 · MainActivity · BootReceiver) — 작성 환경에 Android SDK 가 없어 Android Studio 에서 확인</li>
+  <li>실기기: <code>HMD_설치.bat</code> → HMD 화면 끄기·최근 앱에서 지우기·재부팅 각각 뒤 폰 '검사 시작'으로 화면이 뜨는지 · 끊김 반복 없는지(통신 로그 "ACK 없음") · 앱 업데이트 뒤 재부팅 없이 되는지</li>
+</ul>
 </section>
 
   <section id="check-menu-1111">

@@ -10,9 +10,9 @@ import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.CaptureResult
 import android.hardware.camera2.TotalCaptureResult
-import android.os.BatteryManager
-import android.os.Build
 import android.os.Bundle
+import android.net.Uri
+import android.provider.Settings
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -35,11 +35,9 @@ import androidx.core.content.ContextCompat
 import kr.co.snail.tacitq.hmd.databinding.ActivityMainBinding
 import kr.co.snail.tacitq.hmd.hud.HudController
 import kr.co.snail.tacitq.hmd.link.BleServer
-import kr.co.snail.tacitq.hmd.protocol.Wire
+import kr.co.snail.tacitq.hmd.link.LinkService
 import kr.co.snail.tacitq.hmd.video.Camera2Source
 import kr.co.snail.tacitq.hmd.video.HevcEncoder
-import java.net.Inet4Address
-import java.net.NetworkInterface
 import java.util.Base64
 import java.util.concurrent.Executors
 
@@ -84,17 +82,17 @@ class MainActivity : AppCompatActivity() {
     private val analysisExecutor = Executors.newSingleThreadExecutor()
     private val ui = Handler(Looper.getMainLooper())
     private lateinit var hud: HudController
-    private lateinit var ble: BleServer
     private var bleState: BleServer.State? = null
     private var bleLabel = "-"
 
     private val requestCamera = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) startCamera()
         else binding.statusText.text = "카메라 권한이 필요합니다"
+        askOverlayIfMissing()
     }
 
     private val requestBle = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { r ->
-        if (r.values.all { it }) ble.start() else showBleLabel("BLE 권한 없음")
+        if (r.values.all { it }) LinkService.start(this) else showBleLabel("BLE 권한 없음")
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -118,25 +116,40 @@ class MainActivity : AppCompatActivity() {
 
         server = if (videoMode == "hevc") MjpegServer(PORT, "video/hevc") else MjpegServer(PORT)
         server.start()
-        val background = intent.getBooleanExtra(EXTRA_BACKGROUND, false)
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
             requestCamera.launch(Manifest.permission.CAMERA)
-        } else if (background && videoMode != "hevc") {
-            cameraNeedsRebind = true        // 대기 실행 — 카메라는 앞으로 나올 때(onResume) 연다
         } else {
             startCamera()
+            askOverlayIfMissing()
         }
 
-        // 폰 쪽지(1초 PING·SHOW)가 오는 동안 = 검사 중 → 뒤에 있으면 앞으로(연결 순서와 상관없이 1초 안에)
-        ble = BleServer(this, onDown = { bringToFront(); hud.onDown(it) }, onState = ::onBleState,
-                        hello = { Wire.hello(deviceIp()?.let { "http://$it:$PORT" }, cameraState(), batteryPct(), battery.isCharging) })
-        hud = HudController(binding, sendUp = ble::notify)
-        startBle()
+        // BLE 는 대기 서비스(LinkService)가 늘 켜 둔다 — 폰 쪽지가 오면 서비스가 이 화면을 앞으로 부르고 쪽지를 넘긴다
+        hud = HudController(binding, sendUp = { LinkService.notifyUp(it) })
+        startLink()
+        LinkService.attach(linkUi)
         if (BuildConfig.DEBUG) registerDebugInjector()
 
         refreshStatus()
-        // 부팅 자동 실행이면 화면은 비켜 두고 BLE 만 켠 채 기다린다 — 폰이 검사 시작하면 앞으로 나온다
-        if (background) moveTaskToBack(true)
+    }
+
+    /** 대기 서비스와 잇는 쪽 — 쪽지·BLE 상태를 받고 카메라 상태(HELLO)를 알려 준다 */
+    private val linkUi = object : LinkService.Ui {
+        override fun onDown(bytes: ByteArray) = hud.onDown(bytes)
+        override fun onLinkState(state: BleServer.State) = onBleState(state)
+        override val isInFront: Boolean
+            get() = lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)
+        override fun cameraState(): String = this@MainActivity.cameraState()
+    }
+
+    /**
+     * '다른 앱 위에 표시'가 꺼져 있으면 이 앱의 설정 화면을 연다 — 꺼져 있으면 폰이 이 화면을 띄우지 못한다.
+     * 보통은 HMD_설치.bat 이 켜 준다(adb 가 없을 때의 비상용).
+     */
+    private fun askOverlayIfMissing() {
+        if (Settings.canDrawOverlays(this)) return
+        Log.w(TAG, "'다른 앱 위에 표시' 꺼짐 → 설정 화면 열기")
+        runCatching { startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))) }
+            .onFailure { Log.w(TAG, "설정 화면을 열 수 없음: ${it.message}") }
     }
 
     private fun startCamera() {
@@ -168,7 +181,7 @@ class MainActivity : AppCompatActivity() {
         Log.i(TAG, "다시 실행됨 — 기존 화면 사용")
     }
 
-    /** 뒤로 가기 = 끄지 않고 뒤로만 — 꺼지면 BLE 도 꺼져 폰이 다시 붙지 못한다 */
+    /** 뒤로 가기 = 끄지 않고 뒤로만 — 폰이 다시 부를 때 빨리 뜬다(BLE 는 대기 서비스가 따로 켜 둔다) */
     @Deprecated("Android 13 미만(RealWear 11) 뒤로 가기")
     override fun onBackPressed() {
         moveTaskToBack(true)
@@ -224,13 +237,6 @@ class MainActivity : AppCompatActivity() {
         val age = System.currentTimeMillis() - at
         return if (age > 2_000) "멈춤 — 마지막 프레임 ${age / 1000}초 전" else "정상 $analysisSize"
     }
-    private val battery by lazy { getSystemService(BatteryManager::class.java) }
-
-    /** 배터리 % — 기기가 값을 못 주면 null(HELLO 에서 빠짐). BLE 스레드에서도 부른다. */
-    private fun batteryPct(): Int? =
-        battery.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY).takeIf { it in 0..100 }
-
-    private var lastBringAt = 0L
 
     override fun onStop() {
         super.onStop()
@@ -366,52 +372,21 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun startBle() {
-        val needed = if (Build.VERSION.SDK_INT >= 31)
-            listOf(Manifest.permission.BLUETOOTH_ADVERTISE, Manifest.permission.BLUETOOTH_CONNECT)
-        else emptyList()
-        val missing = needed.filter {
+    /** 대기 서비스 시작 — BLE 권한(API 31+)을 먼저 받는다. 이미 돌고 있으면 아무 일 없음. */
+    private fun startLink() {
+        val missing = LinkService.BLE_PERMISSIONS.filter {
             ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
         }
-        if (missing.isEmpty()) ble.start() else requestBle.launch(missing.toTypedArray())
+        if (missing.isEmpty()) LinkService.start(this) else requestBle.launch(missing.toTypedArray())
     }
 
     private fun onBleState(state: BleServer.State) {
         val was = bleState
         bleState = state
         if (state == BleServer.State.CONNECTED) {
-            hud.onLinkConnected()
-            bringToFront()                 // 폰에서 검사 시작 → BLE 연결 → 앱이 앞으로 나와 카메라를 켠다
+            hud.onLinkConnected()          // 앞으로 부르기는 대기 서비스가 한다
         } else if (was == BleServer.State.CONNECTED) hud.onLinkDisconnected()
         showBleLabel(state.label)
-    }
-
-    /**
-     * 뒤에 있으면 화면 맨 앞으로. 카메라는 화면에 보일 때만 돈다(생명주기 연결) — 뒤에 있으면 영상이 끊긴다.
-     * Android 10+ 는 뒤에서 앞으로 나오기를 막으므로 "다른 앱 위에 표시" 허용이 있어야 동작한다.
-     */
-    private fun bringToFront() {
-        if (lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) return
-        val now = System.currentTimeMillis()
-        if (now - lastBringAt < 3_000) return            // PING 마다 부르므로 3초에 한 번만
-        lastBringAt = now
-        if (!android.provider.Settings.canDrawOverlays(this)) {
-            Log.w(TAG, "앞으로 나오기 불가 — '다른 앱 위에 표시' 허용 필요")
-            return
-        }
-        Log.i(TAG, "폰 연결 → 앱을 앞으로")
-        // 화면이 꺼져 있으면 먼저 깨운다(3초 뒤 놓음 — 그 뒤는 앱의 화면 켜짐 유지가 맡는다)
-        val pm = getSystemService(android.os.PowerManager::class.java)
-        if (!pm.isInteractive) {
-            Log.i(TAG, "화면 꺼짐 → 켜기")
-            @Suppress("DEPRECATION")
-            pm.newWakeLock(
-                android.os.PowerManager.SCREEN_BRIGHT_WAKE_LOCK or android.os.PowerManager.ACQUIRE_CAUSES_WAKEUP,
-                "TacitQ:wake",
-            ).acquire(3_000)
-        }
-        startActivity(Intent(this, MainActivity::class.java)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
     }
 
     private fun showBleLabel(label: String) {
@@ -442,7 +417,8 @@ class MainActivity : AppCompatActivity() {
     private fun refreshStatus() {
         val ip = deviceIp() ?: "IP 없음(Wi-Fi 확인)"
         val cam = cameraState()
-        binding.statusText.text = (if (cam.startsWith("정상")) "" else "⚠ 카메라 $cam · ") +
+        binding.statusText.text = (if (Settings.canDrawOverlays(this)) "" else "⚠ '다른 앱 위에 표시' 꺼짐 — 폰이 화면을 못 띄움 · ") +
+            (if (cam.startsWith("정상")) "" else "⚠ 카메라 $cam · ") +
             "영상 ${if (videoMode == "hevc") "H.265 1080p" else "MJPEG ${analysisSize.ifEmpty { "${mjpegSize.width}×${mjpegSize.height}" }}"} http://$ip:$PORT (뷰어 ${server.viewerCount}) · $bleLabel · ${hud.lastInfo}" +
             (if (statsShort.isEmpty()) "" else " · $statsShort")
         stats.take(System.currentTimeMillis())?.let { s ->
@@ -452,23 +428,11 @@ class MainActivity : AppCompatActivity() {
         ui.postDelayed(::refreshStatus, 1000)
     }
 
-    /** wlan0 등 사설 IPv4 주소를 찾는다. */
-    private fun deviceIp(): String? {
-        return runCatching {
-            NetworkInterface.getNetworkInterfaces().toList()
-                .filter { it.isUp && !it.isLoopback }
-                .flatMap { it.inetAddresses.toList() }
-                .filterIsInstance<Inet4Address>()
-                .firstOrNull { it.isSiteLocalAddress }
-                ?.hostAddress
-        }.getOrNull()
-    }
-
     override fun onDestroy() {
         ui.removeCallbacksAndMessages(null)
         if (BuildConfig.DEBUG) unregisterReceiver(debugInjector)
         hud.stop()
-        ble.stop()
+        LinkService.detach(linkUi)
         camera2?.stop()
         encoder?.stop()
         analysisExecutor.shutdown()
@@ -478,14 +442,13 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "TacitQ.Hmd"
-        private const val PORT = 8080
+        const val PORT = 8080
         private const val ACTION_INJECT = "kr.co.snail.tacitq.hmd.SHOW"
         private const val EXTRA_VIDEO = "video"
         private const val EXTRA_RES = "res"
         private const val EXTRA_FPS = "fps"
         /** 카메라가 고정으로 받는 장수 범위 (2026-11-10 dumpsys aeAvailableTargetFpsRanges) — 12 이상만 */
         private val AE_FIXED_FPS = setOf(15, 24, 30)
-        const val EXTRA_BACKGROUND = "background"
         private const val VIDEO_W = 1920
         private const val VIDEO_H = 1080
         private const val VIDEO_FPS = 30

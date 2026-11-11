@@ -21,7 +21,7 @@ HMD(RealWear Navigator 520) 카메라 영상을 모바일(Android)이 받아 AI 
 01_문서
  - 설계서.html: 1~4장이 지금 시스템(1 개요 · 2 구성 · 3 AI 서버 연동 · 4 H.265 보류),
    부록 A~G는 2026-10 E1(모의 엣지) 기록 (2026-11-09 재편 — 옛 9장 = 3장, 옛 8장 = 4장)
- - 작업일지.html: 단계별 작업과 시험 결과 (마지막 항목: 2026-11-11 검사 메뉴 정비 · HMD 배터리 · 스테이션 표시)
+ - 작업일지.html: 단계별 작업과 시험 결과 (마지막 항목: 2026-11-11 HMD 자동 실행 — 대기 서비스 · 설치 스크립트)
  - TacitQ_*.pptx: 10월 현황 자료 (11-03 규격 변경 전 내용)
    두 html 은 02_소스/TacitQualityMobile/doc 의 build.py 로 만든 사본입니다 (sections/*.html 을 고친 뒤 build)
 
@@ -34,7 +34,7 @@ server (AI 판정 서버 — 배포는 DEPLOY.md §5.B, 이번 변경 근거는 
      AI 서버 연동: app/src/main/java/kr/co/snail/tacitq/mobile/ai/
      검사 서비스: service/InspectionService.kt, 상태 기계: core/StateMachine.kt, 통신 로그: log/CommLog.kt
  - TacitQualityHmd: HMD 앱 (Kotlin, CameraX, BLE GATT 서버)
-     화면: hud/, BLE: link/BleServer.kt, 카메라: MainActivity.kt
+     화면: hud/, BLE: link/BleServer.kt · 대기 서비스 link/LinkService.kt, 카메라: MainActivity.kt, 설치: HMD_설치.bat
 
 [Git — 최신 코드 받기 (Windows PowerShell)]
 작업 브랜치는 claude/zealous-dirac-xntfgb 입니다. main 에는 올리지 않습니다.
@@ -77,16 +77,17 @@ server (AI 판정 서버 — 배포는 DEPLOY.md §5.B, 이번 변경 근거는 
      adb uninstall kr.co.snail.tacitq.hmd
 
 [사용 순서]
- 1. HMD 전원을 켭니다 (품질검사 앱이 뒤에서 자동 대기).
+ 1. HMD 전원을 켭니다 (품질검사 앱의 대기 서비스가 뒤에서 자동으로 켜짐 — HMD 에서 앱을 실행할 필요 없음).
  2. 폰 핫스팟을 켜고, 폰은 사무실 Wi-Fi 에도 연결합니다.
  3. 폰 앱 검사 메뉴에서 스테이션을 확인하고, '시작 전 확인'(입력값 · 폰 블루투스 · AI 서버 응답)이 모두 통과하면
     검사 시작을 누릅니다. 하단 탭은 검사 · 영상 · 이력 3개입니다(수거·관리 탭은 2026-11-11 숨김).
-    HMD 앱이 자동으로 화면에 나타나고, 폰은 영상 메뉴(M-07)로 이동합니다.
+    HMD 앱이 자동으로 화면에 나타나고(꺼진 화면도 깨움), 폰은 영상 메뉴(M-07)로 이동합니다.
     M-07 에는 HMD 와 같은 화면(판정 글자·결함 원)이 보입니다.
- - 새 HMD 는 처음 1회 권한이 필요합니다 (앱을 새로 깔았을 때도):
-   adb shell pm grant kr.co.snail.tacitq.hmd.debug android.permission.CAMERA
-   adb shell appops set kr.co.snail.tacitq.hmd.debug SYSTEM_ALERT_WINDOW allow
-   (카메라 권한이 없으면 폰은 HMD 영상 서버에 붙지만 프레임이 0장입니다 — 2026-11-05 실제 원인)
+ - 새 HMD 는 처음 1회 설치·권한이 필요합니다 — HMD 를 USB 로 꽂고 C:\dev\TacitQualityHmd\HMD_설치.bat 실행
+   (설치 + 카메라 권한 + 다른 앱 위에 표시 + 대기 시작. Android Studio 로 깔았으면 HMD_설치.bat grant).
+   권한은 업데이트해도 남습니다. 앱을 지우고 새로 깔았을 때만 다시 합니다.
+   (카메라 권한이 없으면 폰은 HMD 영상 서버에 붙지만 프레임이 0장입니다 — 2026-11-05 실제 원인.
+    다른 앱 위에 표시가 없으면 폰이 HMD 화면을 띄우지 못합니다 — HMD 상태줄에 경고)
 
 [연결이 안 될 때 — 통신 로그]
  - 폰 앱 상단 바 오른쪽 "로그" 버튼 → 모바일 ↔ AI 서버 / 모바일 ↔ HMD 탭
