@@ -23,6 +23,7 @@ HMD(RealWear Navigator 520) 카메라 영상을 모바일(Android)이 받아 AI 
    부록 A~G는 2026-10 E1(모의 엣지) 기록 (2026-11-09 재편 — 옛 9장 = 3장, 옛 8장 = 4장)
  - 작업일지.html: 단계별 작업과 시험 결과 (마지막 항목: 2026-11-11 HMD 자동 실행 — 대기 서비스 · 설치 스크립트)
  - TacitQ_*.pptx: 10월 현황 자료 (11-03 규격 변경 전 내용)
+ - 2611_TacitQ_*.pptx: 위 세 자료의 2026-11-11 기준 갱신판 (만드는 스크립트: 02_소스/TacitQualityMobile/doc/ppt/2611_*_만들기.py)
    두 html 은 02_소스/TacitQualityMobile/doc 의 build.py 로 만든 사본입니다 (sections/*.html 을 고친 뒤 build)
 
 server (AI 판정 서버 — 배포는 DEPLOY.md §5.B, 이번 변경 근거는 PLAN_product_feedback.md)
