@@ -9,7 +9,7 @@ sys.path.insert(0, r'C:\Projects\_공용양식')
 from ppt_양식 import Deck, E, MUTE  # noqa: E402
 
 IMG = os.path.join(HERE, 'img')
-REDO = '코드 기준 재현 화면 (실기기 캡처 아님) — 카메라 영상은 그림, 값은 예시'
+REDO = '코드 기준 재현 화면 (실기기 캡처 아님) — 카메라 영상 자리는 현장 부품 사진, 값은 예시'
 
 
 def picture(s, name, x, y, w, h):

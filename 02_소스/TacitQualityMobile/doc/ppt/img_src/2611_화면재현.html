@@ -1,5 +1,5 @@
 <!-- 2611 PPT 화면 재현 (코드 기준, 실기기 캡처 아님). 글꼴: npm @fontsource/noto-sans-kr · noto-sans-mono 5.0.19 를 ../fonts/package 에 풀면 같은 모양 (없으면 시스템 글꼴).
-     캡처: Playwright 로 #hmd_* (배율 2) · #m0* · #commlog (배율 3) 요소를 찍어 img/2611_<id>.png 로 저장 -->
+     캡처: Playwright 로 #hmd_* (배율 2) · #m0* · #commlog (배율 3) 요소를 찍어 img/2611_<id>.png 로 저장      카메라 영상 자리: part.jpg (현장 부품 사진, 1920×1080) 를 4:3 으로 잘라 씀 -->
 <!doctype html>
 <html lang="ko"><head><meta charset="utf-8">
 <title>TacitQ 화면 재현</title>
@@ -246,31 +246,27 @@ body{background:#888;font-family:NL,NK,sans-serif;padding:20px;display:flex;flex
 </div>
 
 <script>
-/* 카메라 영상 자리 — 실제 영상이 아니라 그림(작업대 위 금속 부품). n: 0 = 제품 없음 */
+/* 카메라 영상 자리 — 현장 부품 사진(part.jpg 1920×1080)을 4:3으로 잘라 씀. n: 0 = 제품 없음(옆 설비), 1~3 = 부품
+   결함 = 사진에 마커로 표시된 찍힘 (원본 424, 490) */
+const CROPS={0:[1440,480,480],1:[200,0,1440],2:[300,0,1440],3:[240,0,1440]};   // [x0, y0, 폭] — 높이 = 폭 × 3/4
+const DEF=[424,490];
+function camXY(n,x,y){const [x0,y0,w]=CROPS[n],k=640/w;return [(x-x0)*k,(y-y0)*k];}
 function cam(svg, n, withBox){
+  const [x0,y0,w]=CROPS[n], k=640/w;
   svg.setAttribute('viewBox','0 0 640 480'); svg.setAttribute('preserveAspectRatio','xMidYMid slice');
-  const part = n===0 ? '' : `
-    <g transform="translate(320 250) rotate(${[0,-8,6,-3][n]})">
-      <rect x="-150" y="-95" width="300" height="190" rx="22" fill="url(#metal)" stroke="#4d555d" stroke-width="3"/>
-      <rect x="-150" y="40" width="300" height="55" rx="0" fill="rgba(170,200,215,.25)"/>
-      <circle cx="-95" cy="-40" r="18" fill="#2a2e33" stroke="#5c646c" stroke-width="3"/>
-      <circle cx="95" cy="-40" r="18" fill="#2a2e33" stroke="#5c646c" stroke-width="3"/>
-      <rect x="-45" y="-30" width="90" height="40" rx="8" fill="none" stroke="#5c646c" stroke-width="3"/>
-      <path d="M118 -95 l14 0 l-6 9 z" fill="#3b4148"/>
-    </g>`;
-  svg.innerHTML = `<defs>
-    <linearGradient id="bench" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3b4046"/><stop offset="1" stop-color="#23272b"/></linearGradient>
-    <linearGradient id="metal" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#b9c1c8"/><stop offset=".55" stop-color="#8d969e"/><stop offset="1" stop-color="#6c747c"/></linearGradient></defs>
-    <rect width="640" height="480" fill="url(#bench)"/>${part}
-    ${withBox ? '<rect x="420" y="131" width="22" height="20" fill="none" stroke="#ff2d2d" stroke-width="3"/><rect x="420" y="109" width="92" height="22" fill="#ff2d2d"/><text x="424" y="125" font-size="15" fill="#fff" font-family="NL,NK">칩찍힘 0.62</text>' : ''}`;
+  let box='';
+  if(withBox){const [dx,dy]=camXY(n,...DEF);
+    box=`<rect x="${dx-7}" y="${dy-7}" width="14" height="14" fill="none" stroke="#ff2d2d" stroke-width="2.5"/>`+
+        `<rect x="${dx-7}" y="${dy-29}" width="92" height="22" fill="#ff2d2d"/><text x="${dx-3}" y="${dy-13}" font-size="15" fill="#fff" font-family="NL,NK">칩찍힘 0.62</text>`;}
+  svg.innerHTML=`<image href="part.jpg" x="${-x0*k}" y="${-y0*k}" width="${1920*k}" height="${1080*k}"/>${box}`;
 }
 document.querySelectorAll('svg[data-cam]').forEach(s=>cam(s,+s.dataset.cam, s.dataset.box));
-/* 결함 원 — 결함 상자(부품 오른쪽 위 모서리 홈)를 FIT_CENTER 로 HMD 화면 좌표에 (LiveHold.circle, 최소 반지름 20dp) */
-document.querySelectorAll('circle[data-mark]').forEach(c=>{c.setAttribute("cx",106.5+431);c.setAttribute("cy",141);});
+/* 결함 원 — 결함 위치를 FIT_CENTER(좌우 106.5 띠)로 HMD 화면 좌표에 (LiveHold.circle, 최소 반지름 20dp) */
+document.querySelectorAll('circle[data-mark]').forEach(c=>{const [x,y]=camXY(1,...DEF);c.setAttribute('cx',106.5+x);c.setAttribute('cy',y);});
 /* 결함 확대(DefectThumb) — 결함 둘레 정사각 */
 document.querySelectorAll('svg[data-crop]').forEach(s=>{
-  const g=document.createElementNS('http://www.w3.org/2000/svg','svg'); cam(g,1,false);
-  s.setAttribute('viewBox','371 81 120 120'); s.innerHTML=g.innerHTML+'<circle cx="431" cy="141" r="16" fill="none" stroke="#FF6B61" stroke-width="3"/>';
+  const g=document.createElementNS('http://www.w3.org/2000/svg','svg'); cam(g,1,false); const [x,y]=camXY(1,...DEF);
+  s.setAttribute('viewBox',`${x-45} ${y-45} 90 90`); s.innerHTML=g.innerHTML+`<circle cx="${x}" cy="${y}" r="12" fill="none" stroke="#FF6B61" stroke-width="2.5"/>`;
 });
 /* M-07 HMD 따라 그리기 — 853×480 HMD 화면을 332px 상자로 줄임 (HudMirror) */
 (function(){
