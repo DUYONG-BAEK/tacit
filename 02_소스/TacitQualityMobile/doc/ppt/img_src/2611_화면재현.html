@@ -1,0 +1,316 @@
+<!-- 2611 PPT 화면 재현 (코드 기준, 실기기 캡처 아님). 글꼴: npm @fontsource/noto-sans-kr · noto-sans-mono 5.0.19 를 ../fonts/package 에 풀면 같은 모양 (없으면 시스템 글꼴).
+     캡처: Playwright 로 #hmd_* (배율 2) · #m0* · #commlog (배율 3) 요소를 찍어 img/2611_<id>.png 로 저장 -->
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8">
+<title>TacitQ 화면 재현</title>
+<style>
+@font-face{font-family:NK;font-weight:400;src:url(../fonts/package/files/noto-sans-kr-korean-400-normal.woff2)}
+@font-face{font-family:NK;font-weight:500;src:url(../fonts/package/files/noto-sans-kr-korean-500-normal.woff2)}
+@font-face{font-family:NK;font-weight:700;src:url(../fonts/package/files/noto-sans-kr-korean-700-normal.woff2)}
+@font-face{font-family:NL;font-weight:400;src:url(../fonts/package/files/noto-sans-kr-latin-400-normal.woff2)}
+@font-face{font-family:NL;font-weight:500;src:url(../fonts/package/files/noto-sans-kr-latin-500-normal.woff2)}
+@font-face{font-family:NL;font-weight:700;src:url(../fonts/package/files/noto-sans-kr-latin-700-normal.woff2)}
+@font-face{font-family:NM;src:url(../fonts/package/files/noto-sans-mono-latin-400-normal.woff2)}
+:root{
+  /* 모바일 ui/theme/Theme.kt */
+  --ink:#1B222B;--slate:#44515E;--muted:#7C8896;--line:#DFE3EA;--bg:#F4F5F8;--surface:#FFFFFF;--card:#F7F8FB;
+  --purple:#5B4B8A;--purpleL:#EFECF7;--amber:#C4661F;--amberL:#FDF2E8;--teal:#1F7A8C;--tealL:#E9F3F5;
+  --green:#2E7D5B;--greenL:#E9F4EF;--red:#B4453C;--redL:#FBECEB;
+  /* HMD hud/Screens.kt Tone */
+  --ok:#5FB98F;--bad:#FF6B61;--warn:#F0A95C;--idle:#8FA2B5;--stop:#C9D4E0;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#888;font-family:NL,NK,sans-serif;padding:20px;display:flex;flex-wrap:wrap;gap:20px;align-items:flex-start}
+
+/* ── HMD 853×480dp (RealWear 520, activity_main.xml) ── */
+.hmd{position:relative;width:853px;height:480px;background:#000;overflow:hidden;color:var(--stop)}
+.hmd .cam{position:absolute;left:106.5px;top:0;width:640px;height:480px}
+.hmd .marks{position:absolute;inset:0}
+.hmd .hud{position:absolute;inset:0;padding:18px 28px;display:flex;flex-direction:column;
+  text-shadow:0 1px 4px rgba(0,0,0,.8)}
+.hmd .top{display:flex;font-size:20px;font-weight:700;line-height:1.2}
+.hmd .top .l{flex:1}
+.hmd .mid{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center}
+.hmd .big{font-size:44px;font-weight:700;line-height:1.2}
+.hmd .lines{font-size:22px;margin-top:10px;line-height:1.45;white-space:pre}
+.hmd .keys{font-size:22px;text-align:center;white-space:pre}
+.hmd .overlay{position:absolute;top:56px;left:50%;transform:translateX(-50%);background:rgba(240,169,92,.9);
+  color:#101620;font-size:20px;font-weight:700;padding:6px 16px;text-shadow:none;white-space:nowrap}
+
+/* ── 폰 360dp ── */
+.phone{width:360px;height:760px;background:var(--bg);display:flex;flex-direction:column;overflow:hidden;color:var(--ink);position:relative}
+.bar{display:flex;align-items:center;padding:13px 14px;color:#fff}
+.bar .t{flex:1;font-size:15px;font-weight:700}
+.bar .p{font-size:11px;font-weight:700;opacity:.75}
+.bar .log{margin-left:10px;background:#fff;border-radius:10px;padding:4px 10px;font-size:11px;font-weight:700}
+.body{flex:1;overflow:hidden;padding:10px 14px}
+.tabs{display:flex;background:var(--surface);padding:6px 0 10px}
+.tabs div{flex:1;text-align:center;color:var(--muted)}
+.tabs .i{font-size:15px;line-height:1.3}.tabs .n{font-size:10px}
+.tabs .on{color:var(--purple)}.tabs .on .n{font-weight:700}
+.sec{font-size:11px;color:var(--muted);font-weight:700;padding:14px 0 4px}
+.fld{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:9px 12px;margin:3px 0}
+.fld .k{font-size:11px;color:var(--muted);font-weight:500}
+.fld .v{font-size:14px;font-weight:500;margin-top:2px}
+.row{display:flex;gap:0}.row>.fld{flex:1}
+.row>.fld+.fld{margin-left:0}
+.badge{display:inline-block;font-size:10px;font-weight:700;border-radius:11px;padding:3px 8px;white-space:nowrap}
+.tf{position:relative;border:1px solid #79747E;border-radius:4px;height:56px;margin:8px 0 4px;padding:0 16px;display:flex;align-items:center;font-size:16px}
+.tf .lb{position:absolute;top:-9px;left:12px;background:var(--bg);padding:0 4px;font-size:12px;color:#49454F}
+.tf.dis{border-color:#CAC4D0;color:#9A979E}.tf.dis .lb{color:#B0ADB4}
+.choice{display:flex;padding-top:8px;font-size:13px}
+.choice .ti{padding-right:14px}.choice .o{padding-right:18px;color:var(--muted)}.choice .o.on{color:var(--purple)}
+.btn{border-radius:9px;padding:13px 0;text-align:center;color:#fff;font-size:14px;font-weight:700}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px}
+.fb{display:flex;gap:8px;margin-top:6px}
+.fb div{flex:1;height:56px;border-radius:10px;border:2px solid;display:flex;align-items:center;justify-content:center;font-size:17px;font-weight:700;background:var(--surface)}
+.hist{display:flex;align-items:center;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin:3px 0}
+.hist .c{flex:1}
+.hist .a{font-size:12.5px;font-weight:700}.hist .b{font-size:11px;color:var(--muted)}.hist .f{font-size:11.5px;font-weight:700}
+.mono{font-family:NM,NK,monospace}
+.cap{font-size:12px;color:var(--slate)}
+</style></head>
+<body>
+
+<!-- ═════════ HMD ═════════ -->
+<!-- H1: 조준 화면 — 결함(LIVE NG) + 면 진행 -->
+<div class="hmd" id="hmd_live">
+  <svg class="cam" data-cam="1"></svg>
+  <svg class="marks" viewBox="0 0 853 480"><circle data-mark="NG" r="22" fill="none" stroke="#FF6B61" stroke-width="4"/></svg>
+  <div class="hud">
+    <div class="top"><span class="l" style="color:var(--bad)">● REC · ST-02</span><span></span></div>
+    <div class="mid"><div class="big" style="color:var(--bad)">✕ 불량 · 칩찍힘</div>
+      <div class="lines" style="color:var(--stop)">■ 상면   ■ 엣지   □ 하면비닐</div></div>
+    <div class="keys"></div>
+  </div>
+</div>
+
+<!-- H2: 조준 화면 — 진행 안내(검사 중) + 면 모두 봄 -->
+<div class="hmd" id="hmd_faces">
+  <svg class="cam" data-cam="2"></svg>
+  <div class="hud">
+    <div class="top"><span class="l" style="color:var(--bad)">● REC · ST-02</span><span></span></div>
+    <div class="mid"><div class="big" style="color:var(--ok)">검사 중</div>
+      <div class="lines" style="color:var(--ok)">■ 상면   ■ 엣지   ■ 하면비닐   ✓ 검사 완료</div></div>
+    <div class="keys"></div>
+  </div>
+</div>
+
+<!-- H3: 제품 결과 2초 — 불합격 -->
+<div class="hmd" id="hmd_result">
+  <svg class="cam" data-cam="3"></svg>
+  <div class="hud">
+    <div class="top"><span class="l" style="color:var(--bad)">● REC · ST-02</span><span></span></div>
+    <div class="mid"><div class="big" style="color:var(--bad)">✕ 불합격 · 칩찍힘</div></div>
+    <div class="keys"></div>
+  </div>
+</div>
+
+<!-- H4: 제품 결과 2초 — 합격 -->
+<div class="hmd" id="hmd_pass">
+  <svg class="cam" data-cam="2"></svg>
+  <div class="hud">
+    <div class="top"><span class="l" style="color:var(--bad)">● REC · ST-02</span><span></span></div>
+    <div class="mid"><div class="big" style="color:var(--ok)">✓ 합격</div></div>
+    <div class="keys"></div>
+  </div>
+</div>
+
+<!-- H5: 제품 찾는 중 + 서버 지연 띠 -->
+<div class="hmd" id="hmd_search">
+  <svg class="cam" data-cam="0"></svg>
+  <div class="hud">
+    <div class="top"><span class="l" style="color:var(--bad)">● REC · ST-02</span><span></span></div>
+    <div class="mid"><div class="big" style="color:var(--idle)">제품을 비춰 주세요</div></div>
+    <div class="keys"></div>
+  </div>
+  <div class="overlay">⚠ 서버 지연 · 검사 계속</div>
+</div>
+
+<!-- H6: H-09 수동 판정 (폰 3초 무소식) -->
+<div class="hmd" id="hmd_manual">
+  <svg class="cam" data-cam="2"></svg>
+  <div class="hud" style="background:#1D0C0B">
+    <div class="top"><span class="l" style="color:var(--bad)">⚠ AI 미적용 — 육안 검사</span><span></span></div>
+    <div class="mid"><div class="big" style="color:var(--bad)">수동 판정</div>
+      <div class="lines" style="color:var(--stop)">사유 : 모바일 중계 끊김
+복구 시 소급 판정됩니다</div></div>
+    <div class="keys" style="color:var(--stop)">↕ 끄덕임 = 합격      ↔ 가로젓기 = 불합격</div>
+  </div>
+</div>
+
+<!-- ═════════ 폰 ═════════ -->
+<!-- P1: M-01 시작 전 -->
+<div class="phone" id="m01_ready">
+  <div class="bar" style="background:var(--purple)"><span class="t">교대 시작 준비</span><span class="p">P0</span><span class="log" style="color:var(--purple)">로그</span></div>
+  <div class="body">
+    <div class="sec" style="padding-top:4px">스테이션</div>
+    <div class="tf"><span class="lb">스테이션 (예: ST-02)</span>ST-02</div>
+    <div class="sec">시작 전 확인</div>
+    <div class="row"><div class="fld"><div class="k">입력값</div><div class="v">스테이션 · AI 서버 주소</div></div><div style="padding:14px 0 0 8px"><span class="badge" style="color:var(--green);background:var(--greenL)">통과</span></div></div>
+    <div class="row"><div class="fld"><div class="k">폰 블루투스</div><div class="v">켜짐</div></div><div style="padding:14px 0 0 8px"><span class="badge" style="color:var(--green);background:var(--greenL)">통과</span></div></div>
+    <div class="row"><div class="fld"><div class="k">AI 서버</div><div class="v">응답 · 디스크 여유 812 GB</div></div><div style="padding:14px 0 0 8px"><span class="badge" style="color:var(--green);background:var(--greenL)">통과</span></div></div>
+    <div class="sec">연결 설정</div>
+    <div class="tf"><span class="lb">AI 서버 주소</span>http://192.168.1.11:8080</div>
+    <div class="tf"><span class="lb">HMD 영상 주소 (BLE 로 자동)</span>http://10.213.0.42:8080</div>
+    <div class="choice"><span class="ti">HMD 결함 원</span><span class="o on">● 켜기</span><span class="o">○ 끄기 (판정 글자만)</span></div>
+    <div class="choice"><span class="ti">모드</span><span class="o on">● 수동 (폰에서 피드백)</span><span class="o">○ 자동 (피드백 건너뜀)</span></div>
+    <div style="height:12px"></div>
+    <div class="btn" style="background:var(--purple)">검사 시작 — 스트림 개시</div>
+  </div>
+  <div class="tabs"><div class="on"><div class="i">▣</div><div class="n">검사</div></div><div><div class="i">◉</div><div class="n">영상</div></div><div><div class="i">≣</div><div class="n">이력</div></div></div>
+</div>
+
+<!-- P2: M-01 검사 중 -->
+<div class="phone" id="m01_running">
+  <div class="bar" style="background:var(--purple)"><span class="t">교대 시작 준비</span><span class="p">P0</span><span class="log" style="color:var(--purple)">로그</span></div>
+  <div class="body">
+    <div class="sec" style="padding-top:4px">스테이션</div>
+    <div class="tf dis"><span class="lb">스테이션 (예: ST-02)</span>ST-02</div>
+    <div class="sec">검사 중 상태</div>
+    <div class="row"><div class="fld"><div class="k">HMD 연결 (BLE)</div><div class="v">HMD 연결됨</div></div><div class="fld"><div class="k">HMD 영상</div><div class="v">수신</div></div></div>
+    <div class="row"><div class="fld"><div class="k">HMD 카메라</div><div class="v">정상</div></div><div class="fld"><div class="k">HMD 배터리</div><div class="v">78%</div></div></div>
+    <div class="fld"><div class="k">AI 서버</div><div class="v">연결 · 보냄 1284장</div></div>
+    <div class="fld" style="border-color:var(--teal)"><div class="k">서버 진행</div><div class="v" style="color:var(--teal)">검사 중 · NG 칩찍힘 0.62</div></div>
+    <div class="fld" style="border-color:var(--red)"><div class="k">마지막 제품</div><div class="v" style="color:var(--red)">불합격 (NG 칩찍힘) · 결함 프레임 7/61장</div></div>
+    <div class="sec">연결 설정</div>
+    <div class="tf dis"><span class="lb">AI 서버 주소</span>http://192.168.1.11:8080</div>
+    <div class="tf dis"><span class="lb">HMD 영상 주소 (BLE 로 자동)</span>http://10.213.0.42:8080</div>
+    <div class="choice"><span class="ti">HMD 결함 원</span><span class="o on">● 켜기</span><span class="o">○ 끄기 (판정 글자만)</span></div>
+  </div>
+  <div class="tabs"><div class="on"><div class="i">▣</div><div class="n">검사</div></div><div><div class="i">◉</div><div class="n">영상</div></div><div><div class="i">≣</div><div class="n">이력</div></div></div>
+</div>
+
+<!-- P3: M-07 영상 -->
+<div class="phone" id="m07">
+  <div class="bar" style="background:var(--purple)"><span class="t">영상 모니터링</span><span class="p">P1</span><span class="log" style="color:var(--purple)">로그</span></div>
+  <div class="body">
+    <div id="mirror" style="width:332px;height:186.75px;border-radius:10px;overflow:hidden;background:#000;position:relative"></div>
+    <div class="sec">제품 결과</div>
+    <div class="card">
+      <div style="display:flex;align-items:center"><span class="badge" style="color:var(--red);background:var(--redL)">불합격 (NG)</span>
+        <span style="font-size:12.5px;color:var(--slate);padding-left:10px">칩찍힘 · 프레임 61장 · 결함 7장</span></div>
+      <div style="font-size:12px;color:var(--green);padding-top:4px">■ 상면  ■ 엣지  ■ 하면비닐  ✓ 모든 면</div>
+      <div style="margin-top:8px;width:45%;aspect-ratio:1;border-radius:10px;overflow:hidden;background:#000"><svg data-crop="1" style="width:100%;height:100%"></svg></div>
+      <div style="font-size:14px;font-weight:700;padding-top:10px">AI 판정이 맞나요?</div>
+      <div class="fb"><div style="border-color:var(--green);color:var(--green)">맞음</div><div style="border-color:var(--red);color:var(--red)">틀림</div><div style="border-color:var(--amber);color:var(--amber)">확인필요</div></div>
+    </div>
+    <div class="sec">최근 결함 프레임 (누르면 크게)</div>
+    <div style="width:50%;aspect-ratio:1;border-radius:10px;overflow:hidden;background:#000"><svg data-crop="1" style="width:100%;height:100%"></svg></div>
+  </div>
+  <div class="tabs"><div><div class="i">▣</div><div class="n">검사</div></div><div class="on"><div class="i">◉</div><div class="n">영상</div></div><div><div class="i">≣</div><div class="n">이력</div></div></div>
+</div>
+
+<!-- P4: M-05 이력 목록 -->
+<div class="phone" id="m05_list">
+  <div class="bar" style="background:var(--teal)"><span class="t">검사 이력 조회</span><span class="p">B군</span><span class="log" style="color:var(--teal)">로그</span></div>
+  <div class="body">
+    <div style="display:flex;align-items:center;font-size:13px">
+      <span style="color:var(--purple);padding-right:14px">● 전체</span><span style="color:var(--muted);padding-right:14px">○ 미입력</span><span style="color:var(--muted);padding-right:14px">○ 확인필요</span><span style="color:var(--muted)">○ 불합격</span>
+      <span style="flex:1"></span><span style="color:var(--purple);font-weight:700;padding:4px">새로 고침</span></div>
+    <div class="sec">제품 기록 (최신 순 · 스테이션 ST-02)</div>
+    <div id="histlist"></div>
+  </div>
+  <div class="tabs"><div><div class="i">▣</div><div class="n">검사</div></div><div><div class="i">◉</div><div class="n">영상</div></div><div class="on"><div class="i">≣</div><div class="n">이력</div></div></div>
+</div>
+
+<!-- P5: M-05 제품 상세 -->
+<div class="phone" id="m05_detail" style="padding:12px">
+  <div style="display:flex;align-items:center"><span style="flex:1;font-size:13px;font-weight:700">c311ab4b00e5-p0058</span><span style="font-size:15px;color:var(--purple);font-weight:700;padding:8px">닫기</span></div>
+  <div style="display:flex;align-items:center"><span class="badge" style="color:var(--red);background:var(--redL)">불합격 (NG)</span><span style="font-size:12px;color:var(--slate);padding-left:10px">11-10 17:40:31 ~ 11-10 17:40:38</span></div>
+  <div style="font-size:12px;color:var(--slate);padding-top:4px">칩찍힘 · 프레임 61장 · 결함 7장 · 모드 수동</div>
+  <div style="font-size:12px;color:var(--green);padding-top:2px">■ 상면  ■ 엣지  ■ 하면비닐  ✓ 모든 면</div>
+  <div class="sec">피드백 — 지금 틀림</div>
+  <div class="fb"><div style="border-color:var(--green);color:var(--green)">맞음</div><div style="border-color:var(--red);background:var(--red);color:#fff">틀림</div><div style="border-color:var(--amber);color:var(--amber)">확인필요</div></div>
+  <div class="sec">변경 기록</div>
+  <div style="font-size:11.5px;color:var(--slate)">11-10 17:40:44  미입력 → 맞음  (현장 · SM-S948N)</div>
+  <div style="font-size:11.5px;color:var(--slate)">11-10 17:52:10  맞음 → 틀림  (이력 · SM-S948N)</div>
+  <div style="font-size:13px;color:var(--purple);font-weight:700;padding:10px 0">결함 확대 보기 (2장) ›</div>
+  <div class="sec" style="padding-top:4px">프레임 사진 (61장)</div>
+  <div style="display:flex;align-items:center;justify-content:center;padding:4px 0;color:#fff">
+    <span style="font-size:18px;color:#444;padding:6px 18px">◀</span><span style="font-size:13px">프레임 1204 · NG 칩찍힘 · 1/61</span><span style="font-size:18px;padding:6px 18px">▶</span></div>
+  <div style="width:100%;aspect-ratio:4/3;border-radius:8px;overflow:hidden;background:#000"><svg data-cam="1" data-box="1" style="width:100%;height:100%"></svg></div>
+</div>
+
+<!-- P6: 통신 로그 -->
+<div class="phone" id="commlog" style="background:var(--ink);padding:12px;color:#fff">
+  <div style="display:flex;align-items:center"><span style="flex:1;font-size:16px;font-weight:700">통신 로그</span><span style="font-size:15px;font-weight:700;padding:8px">닫기</span></div>
+  <div style="font-size:11px;color:rgba(255,255,255,.6)">앱 0.1.0-debug · 빌드 2026-11-11 16:20 · AI 서버 규격 2026-11-06 제품 단위 판정·피드백</div>
+  <div style="display:flex;padding:8px 0;font-size:13px;font-weight:700">
+    <span style="background:#fff;color:var(--ink);border-radius:14px;padding:6px 12px;margin-right:8px">모바일 ↔ AI 서버</span>
+    <span style="background:rgba(255,255,255,.12);border-radius:14px;padding:6px 12px">모바일 ↔ HMD</span></div>
+  <div style="font-size:12px;color:#FFE08A;padding-bottom:6px">지금: 엣지 연결 · 검사 중 · NG 칩찍힘 0.62</div>
+  <div id="logbox" class="mono" style="flex:1;background:#000;border-radius:8px;padding:8px;font-size:11px;line-height:14px;overflow:hidden;color:#D0D8E0"></div>
+  <div style="display:flex;gap:8px;padding-top:8px;font-size:13px;font-weight:700">
+    <span style="background:var(--purple);border-radius:8px;padding:9px 14px">복사 (214줄)</span><span style="background:var(--purple);border-radius:8px;padding:9px 14px">지우기</span></div>
+</div>
+
+<script>
+/* 카메라 영상 자리 — 실제 영상이 아니라 그림(작업대 위 금속 부품). n: 0 = 제품 없음 */
+function cam(svg, n, withBox){
+  svg.setAttribute('viewBox','0 0 640 480'); svg.setAttribute('preserveAspectRatio','xMidYMid slice');
+  const part = n===0 ? '' : `
+    <g transform="translate(320 250) rotate(${[0,-8,6,-3][n]})">
+      <rect x="-150" y="-95" width="300" height="190" rx="22" fill="url(#metal)" stroke="#4d555d" stroke-width="3"/>
+      <rect x="-150" y="40" width="300" height="55" rx="0" fill="rgba(170,200,215,.25)"/>
+      <circle cx="-95" cy="-40" r="18" fill="#2a2e33" stroke="#5c646c" stroke-width="3"/>
+      <circle cx="95" cy="-40" r="18" fill="#2a2e33" stroke="#5c646c" stroke-width="3"/>
+      <rect x="-45" y="-30" width="90" height="40" rx="8" fill="none" stroke="#5c646c" stroke-width="3"/>
+      <path d="M118 -95 l14 0 l-6 9 z" fill="#3b4148"/>
+    </g>`;
+  svg.innerHTML = `<defs>
+    <linearGradient id="bench" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3b4046"/><stop offset="1" stop-color="#23272b"/></linearGradient>
+    <linearGradient id="metal" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#b9c1c8"/><stop offset=".55" stop-color="#8d969e"/><stop offset="1" stop-color="#6c747c"/></linearGradient></defs>
+    <rect width="640" height="480" fill="url(#bench)"/>${part}
+    ${withBox ? '<rect x="420" y="131" width="22" height="20" fill="none" stroke="#ff2d2d" stroke-width="3"/><rect x="420" y="109" width="92" height="22" fill="#ff2d2d"/><text x="424" y="125" font-size="15" fill="#fff" font-family="NL,NK">칩찍힘 0.62</text>' : ''}`;
+}
+document.querySelectorAll('svg[data-cam]').forEach(s=>cam(s,+s.dataset.cam, s.dataset.box));
+/* 결함 원 — 결함 상자(부품 오른쪽 위 모서리 홈)를 FIT_CENTER 로 HMD 화면 좌표에 (LiveHold.circle, 최소 반지름 20dp) */
+document.querySelectorAll('circle[data-mark]').forEach(c=>{c.setAttribute("cx",106.5+431);c.setAttribute("cy",141);});
+/* 결함 확대(DefectThumb) — 결함 둘레 정사각 */
+document.querySelectorAll('svg[data-crop]').forEach(s=>{
+  const g=document.createElementNS('http://www.w3.org/2000/svg','svg'); cam(g,1,false);
+  s.setAttribute('viewBox','371 81 120 120'); s.innerHTML=g.innerHTML+'<circle cx="431" cy="141" r="16" fill="none" stroke="#FF6B61" stroke-width="3"/>';
+});
+/* M-07 HMD 따라 그리기 — 853×480 HMD 화면을 332px 상자로 줄임 (HudMirror) */
+(function(){
+  const k=332/853, m=document.getElementById('mirror');
+  const src=document.getElementById('hmd_live').cloneNode(true); src.removeAttribute('id');
+  src.style.transform=`scale(${k})`; src.style.transformOrigin='0 0'; src.style.position='absolute';
+  m.appendChild(src);
+})();
+/* M-05 목록 */
+const H=[
+ ['11-10 17:41:02','p0059','칩찍힘, 프레임 48장 · 결함 5장, 모든 면','미입력','amber','불합격 (NG)','red'],
+ ['11-10 17:40:31','p0058','칩찍힘, 프레임 61장 · 결함 7장, 모든 면','틀림','red','불합격 (NG)','red'],
+ ['11-10 17:40:12','p0057','프레임 52장 · 결함 0장, 모든 면','맞음','green','합격','green'],
+ ['11-10 17:39:55','p0056','긁힘, 프레임 39장 · 결함 3장','확인필요','amber','불합격 (REVIEW)','amber'],
+ ['11-10 17:39:30','p0055','프레임 2장 · 결함 0장','미입력','amber','합격','green'],
+ ['11-10 17:39:02','p0054','프레임 57장 · 결함 1장, 모든 면','맞음','green','합격','green'],
+ ['11-10 17:38:40','p0053','칩찍힘, 프레임 44장 · 결함 4장','맞음','green','불합격 (NG)','red'],
+ ['11-10 17:38:11','p0052','프레임 50장 · 결함 0장, 모든 면','맞음','green','합격','green'],
+ ['11-10 17:37:49','p0051','프레임 1장 · 결함 0장','미입력','amber','합격','green'],
+];
+document.getElementById('histlist').innerHTML=H.map(h=>`<div class="hist"><div class="c">
+  <div class="a">${h[0]}  c311ab4b00e5-${h[1]}</div><div class="b">${h[2]}</div>
+  <div class="f" style="color:var(--${h[4]})">피드백 ${h[3]}</div></div>
+  <span class="badge" style="color:var(--${h[6]});background:var(--${h[6]}L)">${h[5]}</span></div>`).join('');
+/* 통신 로그 */
+const L=[
+ ['17:37:01','연결 시도 http://192.168.1.11:8080 (스테이션 ST-02, 모드 manual)'],
+ ['17:37:01','offer 수락 — 연결 대기 http://192.168.1.11:8080 station=ST-02'],
+ ['17:37:02','연결 상태 CONNECTED (세대 1)'],
+ ['17:37:02','데이터 채널 OPEN'],
+ ['17:37:02','연결됨 — 영상 전송 시작, 서버 메시지 대기 (http://192.168.1.11:8080)'],
+ ['17:37:02','첫 서버 메시지 ← {"state":"searching"}'],
+ ['17:37:07','HMD 영상 들어옴 (연결 후 5초)'],
+ ['17:37:07','최근 5초: HMD 영상 50장 받음 · 서버로 50장 보냄 · 서버 메시지 inspect 0 · searching 1 · product_end 0 · 보냄 1440×1080 · 10fps · 목표 12000kbps · 제한 none · WebRTC 직전 5초: 넣음 50 · 인코딩 50 · 전송 50 · 패킷 4120 · 재전송 96 · NACK 41 · PLI 0 · 서버 보고 손실 131'],
+ ['17:37:12','최근 5초: HMD 영상 50장 받음 · 서버로 50장 보냄 · 서버 메시지 inspect 46 · searching 0 · product_end 0 · 보냄 1440×1080 · 10fps · 목표 12000kbps · 제한 none'],
+ ['17:37:15','제품 끝 c311ab4b00e5-p0051 PASS(OK) · 프레임 1장(결함 0) · 면 - · gap'],
+ ['17:37:17','최근 5초: HMD 영상 50장 받음 · 서버로 50장 보냄 · 서버 메시지 inspect 41 · searching 2 · product_end 1 · 보냄 1440×1080 · 10fps'],
+ ['17:38:11','제품 끝 c311ab4b00e5-p0052 PASS(OK) · 프레임 50장(결함 0) · 면 상면·엣지·하면비닐 완료 · gap'],
+ ['17:38:40','제품 끝 c311ab4b00e5-p0053 FAIL(NG 칩찍힘) · 프레임 44장(결함 4) · 면 상면·엣지 · gap'],
+];
+document.getElementById('logbox').innerHTML=L.map(l=>`<div style="padding:1px 0">${l[0]} ${l[1]}</div>`).join('');
+</script>
+</body></html>

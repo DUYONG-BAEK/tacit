@@ -6,7 +6,24 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, r'C:\Projects\_공용양식')
-from ppt_양식 import Deck, MUTE  # noqa: E402
+from ppt_양식 import Deck, E, MUTE  # noqa: E402
+
+IMG = os.path.join(HERE, 'img')
+REDO = '코드 기준 재현 화면 (실기기 캡처 아님) — 카메라 영상은 그림, 값은 예시'
+
+
+def picture(s, name, x, y, w, h):
+    """양식에 그림 함수가 없어 python-pptx 로 직접 넣는다(좌표는 양식과 같은 px)."""
+    s.s.shapes.add_picture(os.path.join(IMG, name), E(x), E(y), E(w), E(h))
+
+
+def phones(s, shots, y=250, w=300, gap=28, x=96):
+    """폰 화면(360×760dp) 나란히 + 아래 설명"""
+    h = round(w * 760 / 360)
+    for i, (name, cap) in enumerate(shots):
+        px = x + i * (w + gap)
+        picture(s, name, px, y, w, h)
+        s.text(px, y + h + 8, w, cap, 20, MUTE)
 
 deck = Deck('TacitQ 품질검사 지원 시스템 — 개발 현황')
 
@@ -134,7 +151,32 @@ s.memo_grid([('모드 (M-01)', '수동: 제품마다 맞음 · 틀림 · 확인�
              ('이력 (M-05)', '서버 기록 · 프레임 사진 · 피드백 수정 · 변경 기록'),
              ('M-07 따라 그리기', 'HMD와 같은 글자 · 결함 원 · 면 칩 (HudMirror)')], y=800, cols=3)
 
-# 10. AI 서버
+# 10. HMD 화면
+s = deck.slide('HMD 화면', 'HMD 표시 화면 (조준 화면 위)', REDO)
+cw, ch, gx, gy = 587, 330, 24, 48
+for i, (f, cap) in enumerate([('2611_hmd_live.png', '결함 프레임 — ✕ 불량 · 결함 이름 + 결함 원 · 면 칩'),
+                              ('2611_hmd_faces.png', '검사 중 — 세 면 모두 봄 → ✓ 검사 완료'),
+                              ('2611_hmd_result.png', '제품 결과 2초 — ✕ 불합격 · 결함 이름'),
+                              ('2611_hmd_manual.png', '폰 3초 무소식 — 수동 판정 (H-09)')]):
+    x, y = 96 + (i % 2) * (cw + gx), 250 + (i // 2) * (ch + gy)
+    picture(s, f, x, y, cw, ch)
+    s.text(x, y + ch + 8, cw, cap, 20, MUTE)
+s.memos([('화면 구성', '카메라 4:3 화면 맞춤(좌우 검은 띠) 위에 글자 · 결함 원'),
+         ('큰 글자 순서', '제품 결과 > 결함 > 진행 안내'),
+         ('결함 원', '최소 지름 40dp · 마지막 결함 뒤 0.5초 유지'),
+         ('근거', 'HMD hud/Screens · LiveHold · MarkerView · activity_main.xml', True)], x=1320, y=250, w=504)
+
+# 11. 모바일 화면
+s = deck.slide('모바일 화면', '폰 화면 — 검사 · 영상 · 이력', REDO)
+phones(s, [('2611_m01_ready.png', 'M-01 검사 — 시작 전 확인'),
+           ('2611_m07.png', 'M-07 영상 — HMD 화면 + 제품 결과'),
+           ('2611_m05_list.png', 'M-05 이력 — 서버 제품 기록'),
+           ('2611_m05_detail.png', 'M-05 상세 — 피드백 · 프레임 사진')])
+s.memos([('M-07', 'HMD와 같은 글자 · 결함 원을 따라 그림 · 수동 모드면 맞음 · 틀림 · 확인필요'),
+         ('M-05', '미입력 · 확인필요 · 불합격 필터 · 피드백 수정과 변경 기록'),
+         ('근거', 'M01ShiftPrep · M07LiveView · M05InspectionHistory · ProductViews', True)], x=1412, y=250, w=412)
+
+# 12. AI 서버
 s = deck.slide('AI 서버 · server', '주요 기능', '개발 서버 gpudev (Docker) · 판정 API + WebRTC 게이트웨이 · 규격 A4_WEBRTC_API.md (2026-11-06)')
 s.cards([('판정 API', 'FastAPI · YOLO', ['PD 제품 탐지 → QI 불량 탐지', '제품 단위 판정 · 면 진행', '프레임 1장 약 37ms']),
          ('게이트웨이', 'aiortc', ['WebRTC 영상 수신', '원본 프레임 전달 (재압축 없음)', '데이터 채널 중계']),
@@ -144,7 +186,7 @@ s.memo_grid([('처리 여유', 'decode 2 + PD 11 + QI 24ms — 밀림 0'),
              ('임곗값', 'PD · QI 기준은 서버 관리자가 정함'),
              ('사진 저장', '자동 삭제 없음 — 디스크 증가량 확인 필요', True)], y=630, cols=3)
 
-# 11. 전송 규격
+# 13. 전송 규격
 s = deck.slide('전송 규격', '구간별 메시지', '근거: server/A4_WEBRTC_API.md (2026-11-06) · 모르는 필드는 무시')
 s.table(96, 260, [360, 520, 848], [
     ('구간', '메시지', '내용'),
@@ -158,7 +200,7 @@ s.table(96, 260, [360, 520, 848], [
 s.memo_grid([('BLE UUID', '서비스 9e7a1000-3c5b-4f0e-8d21-5a7c0d4e6b01<br>DOWN …1001 쓰기 · UP …1002 알림 · 읽기'),
              ('LIVE 쪽지', '응답 없는 쓰기 · 최신 1개만 — 결함 표시 지연 최소화')], y=800, cols=2)
 
-# 12. 장애 대응
+# 14. 장애 대응
 s = deck.slide('장애 대응', '구간별 장애 대응', '원인 확인은 통신 로그 — 모바일 ↔ AI 서버 / 모바일 ↔ HMD')
 s.cards([('AI 서버 끊김', '재연결 1 → 2 → 4 → 5초', ['HMD "서버 지연" 띠', '시도 마감 10초', '403 설정 오류는 화면 표시']),
          ('HMD(BLE) 끊김', 'HMD 3초 무소식', ['HMD 수동 판정 화면', '폰 자동 재연결', '결함 표시 즉시 지움']),
@@ -167,7 +209,7 @@ s.cards([('AI 서버 끊김', '재연결 1 → 2 → 4 → 5초', ['HMD "서버 
 s.memo_grid([('통신 로그', '5초 요약 (HMD 영상 받음 · 서버로 보냄 · 서버 메시지) · WebRTC 송신 통계 · 복사해 전달 (빌드 시각 포함)'),
              ('실제 사례', '11-05 영상 0장 → 카메라 권한 · 11-10 손실 위치 → 무선 구간', True)], y=700, cols=2)
 
-# 13. 실장비 시험
+# 15. 실장비 시험
 s = deck.slide('실장비 시험', '실장비 · 실서버 시험 결과', '2026-11-05 ~ 11-10 · 개발 서버 gpudev · 사내 Wi-Fi · 스테이션 ST-02')
 s.table(96, 260, [180, 520, 1028], [
     ('날짜', '시험', '결과'),
@@ -181,7 +223,7 @@ s.table(96, 260, [180, 520, 1028], [
 s.memo_grid([('제품 구간', '쪼개짐(1~2장 제품) · 합쳐짐(36초 · 47초) — PD 가모델 · 구간 규칙 문제', True),
              ('확인 대기', '11-11 대기 서비스 · 검사 메뉴 · 피드백 입력은 실기기 미확인', True)], y=800, cols=2)
 
-# 14. 다음 단계
+# 16. 다음 단계
 s = deck.slide('다음 단계', '향후 과제', '실기기 확인 → 판정 품질 → 측정 순')
 s.table(96, 260, [120, 520, 1088], [
     ('순서', '과제', '내용'),
