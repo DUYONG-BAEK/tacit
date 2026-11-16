@@ -58,9 +58,10 @@ class MainActivity : AppCompatActivity() {
      * 약 1.33배 확대돼 보였다. 4:3 이면 센서 화각 전체를 쓴다. 실제 크기는 카메라가 고른다(상태줄·로그에 표시).
      * 2026-11-10: 1920×1440 → 1440×1080 (4:3 1080p, 서버 권장 1080p 이상 유지) — 품질 80·초당 10장과 함께 HMD 영상량을
      * 약 27Mbps → 약 8Mbps(추정)로 줄인다. 같은 Wi-Fi 에서 1920×1440 품질 90 초당 12장일 때 폰 → 서버 패킷 손실 27% 실측.
-     * adb: am start ... --es res 720 → 960×720 (진단용)
+     * 2026-11-16: 사용자 요청으로 기본 1440×1080 → 960×720 (4:3 720p, 화각 그대로).
+     * adb: am start ... --es res 1080 → 1440×1080
      */
-    private val mjpegSize by lazy { if (intent.getStringExtra(EXTRA_RES) == "720") Size(960, 720) else Size(1440, 1080) }
+    private val mjpegSize by lazy { if (intent.getStringExtra(EXTRA_RES) == "1080") Size(1440, 1080) else Size(960, 720) }
     /**
      * 카메라 자동 노출 장수 범위 고정값 — 2026-11-10 dumpsys: 고정 범위는 [15,15]·[24,24]·[30,30] 뿐이고, 정하지 않으면
      * 어두울 때 [10,30] 안에서 초당 10장까지 내려가 송출 12장을 못 채운다. 30 이면 노출이 33ms 이하로 짧아 흔들림도 준다.
@@ -312,6 +313,7 @@ class MainActivity : AppCompatActivity() {
                 // 2026-10-07: 640×480 → 720p. 2026-10-10: 1080p. 2026-11-03 규격: 결함을 640px 타일로 보므로 1080p 이상 권장(API §5.5)
                 // 2026-11-05: 4:3 1920×1440 — 화각을 기본 카메라 앱과 맞추고 가로 화소는 1080p 와 같게
                 // 2026-11-10: 4:3 1440×1080 — 화각 그대로, 영상량을 줄인다([mjpegSize])
+                // 2026-11-16: 4:3 960×720 — 사용자 요청으로 720p([mjpegSize])
                 .setTargetResolution(mjpegSize)
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .build()
