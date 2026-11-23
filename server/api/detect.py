@@ -1,8 +1,6 @@
 """PD(제품 탐지) → QI(불량 탐지) 모델 래퍼. api.py가 쓴다.
 
     read_image(data)                         프레임 바이트 -> BGR 배열 (qi_test.py의 cv2.imread와 같은 채널 순서)
-    read_frame(data)                         /ws 프레임 (게이트웨이의 I420 원본 또는 이미지 파일) -> (BGR, rx_at, 이미지 파일 여부)
-    encode_jpeg(image, quality)              BGR -> JPEG 바이트 (제품 프레임 사진)
     find_products(pd, image)                 PD 상자 목록. 하나라도 있으면(클래스 무관) 그 프레임을 QI로 넘긴다 (api.process_frame)
     inspect(qi, image, conf)                 QI 결함 목록. 프레임을 640 타일로 덮어 추론 -> 프레임 좌표 -> 클래스별 NMS
     filter_in_products(detections, products) 상자 중심이 어느 제품 상자 안에 있는 결함만 남긴다 (stream.judge)
@@ -12,7 +10,6 @@
 """
 
 import io
-import struct
 from pathlib import Path
 
 import cv2
@@ -20,15 +17,15 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 MODEL_DIR = Path("models")  # 호스트 폴더를 읽기 전용으로 붙인다 (docker run -v $PWD/models:/app/models:ro)
-PD_MODEL = MODEL_DIR / "yolo_product_detection_model_20261020111232.pt"
-QI_MODEL = MODEL_DIR / "yolo_quality_inspection_model_20261021091500.pt"
+PD_MODEL = MODEL_DIR / "yolo_product_detection_model_20261110100300.pt"
+QI_MODEL = MODEL_DIR / "yolo_quality_inspection_model_20261117172542.pt"
 
 DEVICE = 0  # 컨테이너에 보이는 첫 GPU (docker run --gpus). GPU가 없으면 api.py 기동 시 예열에서 멈춘다 — CPU로 조용히 돌지 않게
 PD_IMGSZ = 640  # PD 학습 imgsz — 프레임 전체를 줄여서 본다
-PD_CONF = 0.4  # PD 상자로 인정하는 신뢰도 (Ultralytics predict 기본값)
+PD_CONF = 0.25  # PD 상자로 인정하는 신뢰도 (Ultralytics predict 기본값)
 # QI 결함 판정 기준 (임시, 가모델). 프레임 점수 = 그 프레임 결함의 최대 conf, 결함이 없으면 0.
 # 판정은 stream.py: 점수 > QI_CONF × 1.1이면 NG, < QI_CONF × 0.9이면 OK, 그 사이는 REVIEW.
-QI_CONF = 0.4
+QI_CONF = 0.25
 TILE, STEP = 640, 512  # QI 학습 격자 (qi_test.py와 같음, 겹침 128px)
 NMS_IOU = 0.5  # 겹친 타일에서 같은 자리가 두 번 잡힌 것 정리 (qi_test.py와 같은 클래스별 NMS)
 
@@ -42,35 +39,6 @@ def read_image(data: bytes) -> np.ndarray:
     with Image.open(io.BytesIO(data)) as image:
         rgb = np.asarray(ImageOps.exif_transpose(image).convert("RGB"))
     return np.ascontiguousarray(rgb[:, :, ::-1])
-
-
-I420_MAGIC = b"I420"
-I420_HEADER = struct.Struct("<4sHHq")  # magic, width, height, rx_at(epoch ms) — 게이트웨이가 붙인다 (gateway.to_i420)
-
-
-def read_frame(data: bytes) -> tuple[np.ndarray, int | None, bool]:
-    """/ws 프레임 하나 -> (BGR 프레임, rx_at, 이미지 파일 여부).
-    게이트웨이는 디코딩한 원본 픽셀을 I420으로 보낸다 (머리말 I420_HEADER + Y·U·V 평면). rx_at은 게이트웨이가
-    프레임을 받은 시각(epoch ms). 그 밖(JPEG 등 이미지 파일, 테스트 클라이언트·직접 연결)은 read_image로 읽고 rx_at은 None.
-    I420 길이가 머리말과 맞지 않으면 OSError (깨진 프레임으로 건너뛴다).
-    """
-    if data[:4] != I420_MAGIC:
-        return read_image(data), None, True
-    if len(data) < I420_HEADER.size:
-        raise OSError("I420 머리말이 잘렸다")
-    _, w, h, rx_at = I420_HEADER.unpack_from(data)
-    if w == 0 or h == 0 or w % 2 or h % 2 or len(data) - I420_HEADER.size != w * h * 3 // 2:
-        raise OSError(f"I420 크기가 맞지 않는다 ({w}x{h}, {len(data)}바이트)")
-    yuv = np.frombuffer(data, np.uint8, offset=I420_HEADER.size).reshape(h * 3 // 2, w)
-    return cv2.cvtColor(yuv, cv2.COLOR_YUV2BGR_I420), rx_at, False
-
-
-def encode_jpeg(image: np.ndarray, quality: int) -> bytes:
-    """BGR 프레임 -> JPEG 바이트 (제품 프레임 사진 저장용)."""
-    ok, buffer = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, quality])
-    if not ok:
-        raise OSError("JPEG 인코딩 실패")
-    return buffer.tobytes()
 
 
 def find_products(model, image: np.ndarray) -> list[dict]:
