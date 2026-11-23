@@ -1,0 +1,28 @@
+{
+ "trainedAt": "2026-11-10 09:59:13",
+ "datasetSeafilePath": "/학습용데이터/20261110/20261110 100300 ProductDetection YOLO.zip",
+ "fromScratch": true,
+ "baseModelSeafilePath": null,
+ "score": {
+  "mAP50": 0.9533,
+  "mAP50-95": 0.8261,
+  "precision": 0.9289,
+  "recall": 0.879,
+  "epochsRun": 100
+ },
+ "trainedWhere": "PC",
+ "epochs": 100,
+ "imageSize": 640,
+ "batch": 16,
+ "seed": 0,
+ "deterministic": true,
+ "baseModel": "yolo11n.pt",
+ "classNames": [
+  "엣지",
+  "상면",
+  "하면비닐"
+ ],
+ "ultralytics": "8.4.117",
+ "recordedBy": "upload-pd-cpu01.sh",
+ "recordedAt": "2026-11-10 10:05:43"
+}

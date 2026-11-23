@@ -1,0 +1,43 @@
+{
+ "trainedAt": "2026-11-17 17:10:30",
+ "datasetSeafilePath": "/학습용데이터/20261117/20261117_r78 QI QualityInspection YOLO.zip",
+ "fromScratch": true,
+ "baseModelSeafilePath": null,
+ "score": {
+  "mAP50": 0.9746,
+  "mAP50-95": 0.7276,
+  "precision": 0.9564,
+  "recall": 0.9371,
+  "epochsRun": 80
+ },
+ "trainedWhere": "GPU01",
+ "epochs": 80,
+ "imageSize": 640,
+ "batch": 16,
+ "seed": 20261007,
+ "deterministic": true,
+ "baseModel": "yolo11n.pt",
+ "classNames": [
+  "칩찍힘",
+  "라벨불량",
+  "조립불량",
+  "떡짐",
+  "컬링불량",
+  "PET터짐",
+  "LG리턴",
+  "치수불량",
+  "PET밀림",
+  "비닐찍힘",
+  "스크래치",
+  "취급불량",
+  "이물찍힘",
+  "굴곡",
+  "홀누락",
+  "소재불량",
+  "미성형",
+  "크랙"
+ ],
+ "ultralytics": "8.4.117",
+ "recordedBy": "upload-qi-cpu01.sh",
+ "recordedAt": "2026-11-17 17:42:51"
+}
