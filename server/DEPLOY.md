@@ -1098,7 +1098,8 @@ FAIL이 하나라도 있으면 종료 코드 1이다.
 
 ```bash
 # 0. 도구와 새 모델을 둔다 (파일명이 달라 지금 서비스에 영향 없음)
-mkdir -p tools   # check_models.py를 tools/에 둔다
+#    도구는 저장소 server/tools/check_models.py — 새 코드 묶음(저장소 server/ 폴더)을 /tmp/new 에 풀었을 때:
+mkdir -p tools && cp /tmp/new/tools/check_models.py tools/
 ls -l tools/check_models.py models/
 
 # 1. 코드 호환 + 샘플 판정 비교 (예: 2026-11-23 후보 PD 2개·QI 2개)
