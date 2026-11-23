@@ -1,6 +1,8 @@
 # 제품 불량 판정 서버 — 구성·배포·운영
 
-기준: 2026-11-06 코드 (제품 단위 판정·작업자 피드백·제품 프레임 사진 저장). gpudev에 **2026-11-09 배포**했고, 앱(ST-02) 연결의 로그로 처리 속도를 실측했다 (§8). 같은 날 면 기준을 3 → 5장으로 바꾸고 (`stream.FACE_MIN_FRAMES`, §3.4), DB `sessions`에 연결별 판정 설정값(`config`)·연결 통계(`stats`)를 더했다 (§4.3) — 올리려면 §6.1로 API를 다시 빌드한다 (스키마는 기동 때 열만 더한다).
+기준: 2026-11-23 코드 (면 검사 — 아래 변경 표시). 그 전 2026-11-06 코드(제품 단위 판정·작업자 피드백·제품 프레임 사진 저장)를 gpudev에 **2026-11-09 배포**했고, 앱(ST-02) 연결의 로그로 처리 속도를 실측했다 (§8). 같은 날 면 기준을 3 → 5장으로 바꾸고 (`stream.FACE_MIN_FRAMES`, §3.4), DB `sessions`에 연결별 판정 설정값(`config`)·연결 통계(`stats`)를 더했다 (§4.3) — 올리려면 §6.1로 API를 다시 빌드한다 (스키마는 기동 때 열만 더한다).
+
+> **2026-11-23 변경 (면 검사)**: "1초 동안 제품이 안 보이면 제품 끝" 대신 **같은 면 연속 5장 = 검사 1건**으로 판정한다 (§3.4). 현장에서는 제품이 화면에서 완전히 사라지지 않아 `product_end`가 거의 나지 않았기 때문이다. `inspect`·`product_end`에 `face`가 실리고 `faces`·`faces_seen`·`complete`는 빠진다. DB `products`에 `face`·`best_seq` 열을 더한다 (기동 때 자동). 올리려면 §6.1로 **API만** 다시 빌드한다 — 게이트웨이는 그대로. 폰·HMD 앱도 함께 새로 설치한다 (BLE `RESULT`에 면이 들어가고 `FACES`가 없어졌다). 결정과 근거는 `PLAN_product_feedback.md` §15.
 
 이상탐지(DINOv2 + memory bank) 서버를 내리고, **PD(제품 탐지) → QI(불량 탐지)** 두 YOLO 모델로 다시 올린다. 이 문서가 서버의 기준 문서다.
 
@@ -24,7 +26,7 @@
 ```
 헤드마운트 카메라 → 앱 ─┬─ WebRTC 영상 (운영) ──▶ a4-gateway :8080 ── 원본 프레임(I420) ──▶ a4-api /ws :8000
                        └─ JPEG 이미지 (테스트) ──────────────────────────────────▶ a4-api /ws :8000
-a4-api: 프레임마다 PD ─(제품 있음)─▶ QI ─▶ inspect (프레임마다) ─▶ 제품 구간·확정 ─▶ product_end (제품마다)
+a4-api: 프레임마다 PD ─(제품 있음)─▶ QI ─▶ inspect (프레임마다) ─▶ 면 검사 (같은 면 연속 5장) ─▶ product_end (검사마다)
         제품 프레임은 전부 사진 저장, 결함 프레임은 1초에 1장 오버레이 ─▶ a4-db 기록
 결과: a4-api ──▶ a4-gateway ──▶ 데이터 채널(JSON) ──▶ 앱
 조회: 앱 ──▶ :8080/results/*, /products*, /storage ──▶ (프록시) ──▶ a4-api
@@ -33,7 +35,7 @@ a4-api: 프레임마다 PD ─(제품 있음)─▶ QI ─▶ inspect (프레임
 | 컨테이너 | 이미지 | 역할 | GPU | 네트워크 |
 |---|---|---|---|---|
 | `a4-db` | `postgres:17` | 제품·프레임·결함 프레임·피드백 기록 (§4.3) | — | `a4-net` |
-| `a4-api` | `a4-api` (`api/`) | PD·QI 추론, 제품 단위 판정, `/ws`, `/predict`, `/results/*`, `/products*`, `/storage`, DB 기록 | 1장 | `a4-net`, `-p 8000:8000` |
+| `a4-api` | `a4-api` (`api/`) | PD·QI 추론, 면 검사 판정, `/ws`, `/predict`, `/results/*`, `/products*`, `/storage`, DB 기록 | 1장 | `a4-net`, `-p 8000:8000` |
 | `a4-gateway` | `a4-gateway` (`gateway/`) | WebRTC 수신·중계. 분석하지 않는다 | — | `--network host` (:8080) |
 
 **모델** (서버는 추론만 한다. 학습은 서버 밖에서 하고 `.pt`만 가져온다)
@@ -65,8 +67,9 @@ $PWD/
 │   ├── api.py               FastAPI: /ws, /predict, /results/*. 로그·프레임·결과 저장
 │   ├── db.py                PostgreSQL: 스키마, 결함 프레임 기록, 조회
 │   ├── detect.py            PD·QI 호출 (타일 분할·NMS·제품 상자 필터·오버레이 그리기), 모델 경로·기준값
-│   ├── stream.py            프레임 판정(judge), searching 전송 여부
-│   └── stream_client.py     테스트 클라이언트 (사진·영상을 /ws로)
+│   ├── stream.py            프레임 판정(judge), searching 전송 여부, 면 검사(Inspections)
+│   ├── stream_client.py     테스트 클라이언트 (사진·영상을 /ws로)
+│   └── test_stream.py       면 검사 시험 (pytest, GPU·DB 없이 — 이미지에는 들어가도 쓰지 않는다)
 ├── gateway/                 WebRTC 게이트웨이 (이미지 a4-gateway, 빌드 컨텍스트 = gateway/)
 │   ├── Dockerfile
 │   ├── README.md
@@ -121,7 +124,7 @@ archive_product_mode/            제품 단위 단계의 코드·문서·DB 덤�
 - **decision**: 기준값 `T = detect.QI_CONF`(임시 0.25)에 대해 `score > T × 1.1` → `NG`, `score < T × 0.9` → `OK`, 그 사이 → `REVIEW`.
 - QI 추론 하한은 `T × 0.9`로 자동 계산한다. 그보다 낮은 결함은 판정을 OK에서 바꾸지 못하므로 받지 않는다. 그래서 **OK ⇔ `detections == []`** 이고, NG·REVIEW면 `detections`가 1개 이상이다.
 - `defect_label` = 가장 확실한 결함 이름(`detections[0].label`), OK면 `null`.
-- 프레임 사이에서 상자를 합치지 않는다. 깜빡임(결함이 잡혔다 안 잡혔다)은 앱이 표시를 약 0.5초 유지해 처리한다 (`A4_WEBRTC_API.md` §3.4). 프레임을 모아 제품 하나로 판정하는 것은 아래 §3.4의 제품 구간이 한다.
+- 프레임 사이에서 상자를 합치지 않는다. 깜빡임(결함이 잡혔다 안 잡혔다)은 앱이 표시를 약 0.5초 유지해 처리한다 (`A4_WEBRTC_API.md` §3.4). 프레임을 모아 한 건으로 판정하는 것은 아래 §3.4의 면 검사가 한다.
 
 ### 3.4 흐름·저장 (`api.stream_endpoint`)
 
@@ -132,9 +135,8 @@ archive_product_mode/            제품 단위 단계의 코드·문서·DB 덤�
                                        NG·REVIEW이고 마지막 저장 후 SAVE_INTERVAL_S(1초) 지남 → 저장
 ```
 
-- **제품 구간** (`stream.Products`, 2026-11-06 — 옛 앱 규칙을 옮김): 첫 제품 프레임에서 시작, 마지막 제품 프레임 뒤 `SEGMENT_END_S`(1초) 동안 제품 프레임이 없거나 연결이 끊기면 끝. `searching` 한 장은 끝내지 않는다. 프레임이 오지 않아도 `TICK_S`(0.2초)마다 끝을 검사한다. 한 번에 제품 하나를 든다고 본다 (추적기 없음).
-- **결함 확정·제품 판정**: 구간 안 최근 `CONFIRM_WINDOW`(5)장 중 `CONFIRM_HITS`(2)장 이상이 NG·REVIEW면 확정 (안에 NG가 있으면 NG, 없으면 REVIEW, 나중에 NG로 올라갈 수 있다). 확정이 없으면 `PASS`, 있으면 `FAIL`. 끝나면 `product_end`를 보낸다 (연결이 끊겨 끝나면 보내지 못하고 기록만 한다).
-- **면 진행**: PD 라벨(엣지·상면·하면비닐)별로 그 제품에서 잡힌 프레임 수. `FACE_MIN_FRAMES`(5)장 이상이면 그 면을 본 것 (2026-11-09 3 → 5, 결함 확정 창 5장과 맞춤), 모두 보면 `complete`. 구간을 끝내지는 않는다. `inspect`·`product_end`에 실린다.
+- **면 검사** (`stream.Inspections`, 2026-11-23 — 그 전의 "1초 무소식이면 제품 끝"(`stream.Products`)을 대신한다): 프레임의 면 = PD 상자 중 **가장 큰 상자**의 라벨(엣지·상면·하면비닐). 면이 잡히면 검사를 시작하고, **같은 면이 연속 `INSPECT_FRAMES`(5)장**이면 판정해 `product_end`(`end_reason` `done`)를 보낸다. 5장 전에 다른 면이 잡히면 하던 검사는 미완료(`incomplete`)로 두고 그 면으로 새로 시작, 면이 없는 프레임이 오면 미완료. 5장으로 끝난 뒤에도 같은 면이 오면 새 검사를 시작한다 (같은 면 10장 = 2건). 미완료·연결 끊김(`disconnect`)은 `products` 행에 기록만 하고 (`decision` NULL) 앱에는 보내지 않는다. 시간 규칙이 없어 타이머도 없다. 제품 경계는 알지 못한다 (추적기 없음).
+- **판정**: 5장 중 결함(NG·REVIEW) 프레임이 `DEFECT_MIN_FRAMES`(지금 1)장 이상이면 `FAIL` — 그중 NG가 있으면 `ai_decision` NG, 없으면 REVIEW. 아니면 `PASS`(OK). `defect_label`은 점수가 가장 높은 결함 프레임의 것, `best_seq`(대표 프레임)는 FAIL이면 그 프레임, PASS면 마지막 프레임. `inspect`에는 `product_id`(검사 ID)·`face`·`count`(그 검사의 몇 번째 장)가 붙는다.
 - **피드백 모드**: `/ws?mode=manual|auto`(게이트웨이는 `/offer`의 `feedback_mode`를 넘긴다). 제품의 피드백 초기값이 수동이면 `NOT_ENTERED`(미입력), 자동이면 `NONE`(피드백 없음). 사람은 `PUT /products/{id}/feedback`으로 `CORRECT`·`WRONG`·`UNSURE`를 넣고 바꾼다 (누구나, 변경 기록 `feedback_log`).
 - **저장**: 제품 프레임은 **전부** 사진(§4.2)과 `frames` 행을 남긴다. 결함 프레임(NG·REVIEW)은 그와 별도로 **연결마다 1초에 최대 1장** 오버레이와 `results` 행을 남기고, 그 프레임의 `inspect`에만 `result_id`·`overlay_url`이 붙는다 (나머지는 `null`).
 - 순서: `inspect`를 **먼저 보내고** 사진·오버레이·DB 행은 뒤에서 쓴다. 기록은 연결마다 한 줄로 차례대로 한다 (`products` → `results` → `frames` 외래 키 순서). 그래서 `inspect`를 받자마자 오버레이를 요청하면 `404`일 수 있다 (앱은 0.5초 뒤 한 번 더).
@@ -152,12 +154,10 @@ archive_product_mode/            제품 단위 단계의 코드·문서·DB 덤�
 | | `PD_MODEL`, `QI_MODEL` | 파일명 | `models/` 안의 모델 파일 |
 | | `DEVICE` | 0 | 컨테이너에 보이는 첫 GPU |
 | `api/stream.py` | `REVIEW_MARGIN` | 0.1 | REVIEW 폭 (T 대비) |
-| | `SEGMENT_END_S` | 1.0 | 마지막 제품 프레임 뒤 이만큼 없으면 제품 끝 |
-| | `CONFIRM_WINDOW`, `CONFIRM_HITS` | 5, 2 | 결함 확정: 최근 5장 중 2장 |
-| | `FACE_MIN_FRAMES` | 5 | 면을 "봄"으로 치는 프레임 수 (2026-11-09 3 → 5) |
+| | `INSPECT_FRAMES` | 5 | 면 검사 1건 = 같은 면 연속 이 장수 (2026-11-23) |
+| | `DEFECT_MIN_FRAMES` | 1 | 이 중 결함(NG·REVIEW) 프레임이 이 장수 이상이면 FAIL (2026-11-23, 현장 시험으로 2·3 등으로 조정) |
 | `api/api.py` | `SAVE_INTERVAL_S` | 1.0 | 결함 프레임(오버레이·`results`) 저장 간격 (연결마다) |
 | | `FRAME_JPEG_QUALITY` | 90 | 제품 프레임 사진 JPEG 품질 (I420 원본을 받았을 때. JPEG를 받으면 그대로 저장) |
-| | `TICK_S` | 0.2 | 프레임이 없을 때 제품 끝 검사 간격 |
 | | `STORAGE_SCAN_S` | 300 | `/storage` 용량 계산 간격 |
 
 - 게이트웨이의 `FORWARD_FPS`(초당 10장 간격 제한)는 2026-11-06에 없앴다. 도착 간격이 조금만 흔들려도 다음 장을 버리므로 2026-11-05 실측 초당 약 7장의 원인으로 봤다. 그러나 없앤 뒤에도 2026-11-09 서버 도착이 초당 6.9장이었다 — 원인은 앱이 프레임을 넣은 뒤 100ms를 쉬어 주기가 100ms + 변환 시간이 된 것이다. 2026-11-09부터 앱은 HMD 프레임을 받는 대로 보낸다 (초당 약 12장, HMD 송출 속도가 상한). API는 가장 최근 프레임만 처리한다.
@@ -190,11 +190,11 @@ archive_product_mode/            제품 단위 단계의 코드·문서·DB 덤�
 | `inspect_saved` | 결함 프레임을 저장한 뒤 (연결마다 1초에 최대 1건) | result_id, session, source, client, station, seq, decision, defect_label, score, detections, products(개수), frame_size, threshold, checkpoint, file(원본 경로, 실패면 null), ms(decode/pd/qi) |
 | `frame_save_error` | 제품 프레임 사진 저장 실패 (디스크 등) | session, seq, error |
 | `result_save_error` | 오버레이 저장 실패 | result_id, error |
-| `product_end` | 제품이 끝난 뒤 (DB 행을 채운 뒤) | session, source, client, station, mode, product_id, started_at, ended_at, end_reason(`gap`/`disconnect`), decision, ai_decision, defect_label, frames, defect_frames, faces, faces_seen, complete, best_result_id, result_ids, threshold, feedback_mode, feedback |
+| `product_end` | 면 검사가 끝난 뒤 (DB 행을 채운 뒤). 미완료도 남는다 | session, source, client, station, mode, product_id, face, started_at, ended_at, end_reason(`done`/`incomplete`/`disconnect`), decision(미완료는 null), ai_decision, defect_label, frames, defect_frames, best_seq, best_result_id, result_ids, threshold, feedback_mode, feedback |
 | `feedback` | `PUT /products/{id}/feedback` 성공 | product_id, value, source(`live`/`history`), device |
 | `storage_scan`, `storage_scan_error` | `/storage` 용량 계산 (`STORAGE_SCAN_S`마다) | ms, data_bytes / error |
 | `write_error`, `write_timeout` | 연결의 기록 줄에서 예외 · 끊긴 뒤 60초 안에 남은 기록을 못 끝냄 | error / pending |
-| `ws_close` | 연결 종료 | session, source, client, station, mode, duration_s, frames, processed, skipped_frames, product_frames, defect_frames, saved, products, ms_avg(decode/pd/qi), error — duration_s부터 error까지는 DB `sessions.stats`에도 같은 값 (2026-11-09) |
+| `ws_close` | 연결 종료 | session, source, client, station, mode, duration_s, frames, processed, skipped_frames, product_frames, defect_frames, saved, products, done, incomplete, ms_avg(decode/pd/qi), error — duration_s부터 error까지는 DB `sessions.stats`에도 같은 값 (2026-11-09) |
 
 **`ws_close` 숫자** (연결 하나):
 
@@ -206,7 +206,8 @@ archive_product_mode/            제품 단위 단계의 코드·문서·DB 덤�
 | `product_frames` | 제품이 보여 QI를 돌린 수 = 보낸 `inspect` 수 |
 | `defect_frames` | 그중 NG·REVIEW 수 |
 | `saved` | 결함 프레임(오버레이) 저장을 **시작한** 수 = `result_id`를 붙여 보낸 수. 저장 실패는 `result_save_error` 등으로 따로 남는다 |
-| `products` | 이 연결에서 시작한 제품 수 |
+| `products` | 이 연결에서 시작한 면 검사 수 = `done` + `incomplete` |
+| `done`, `incomplete` | 완료한 검사 수(같은 면 5장, 앱에 결과를 보냄) · 끊긴 검사 수(5장 전에 다른 면·면 없음·연결 끊김). **미완료가 많으면** PD가 같은 면을 5장 연속 못 잡는 것 — 규칙 완화를 검토한다 (2026-11-23) |
 | `ms_avg` | 프레임 한 장 평균 ms. decode·pd는 `processed`로, qi는 `product_frames`로 나눈다 (QI는 제품 프레임에서만 돈다). qi는 타일 하나가 아니라 **프레임 한 장**(1080p 8타일, 4K 32타일) 기준이다 |
 
 - **처리가 밀려 건너뛴 수** = `frames − processed − skipped_frames`. 실제 처리 속도(fps)는 `processed / duration_s`다. 단 `duration_s`에는 영상이 오지 않은 시간도 들어가므로, 비추는 동안의 속도는 `frames` 행·`inspect_saved`의 `seq` 간격으로 본다 (2026-11-05 로그 분석).
@@ -230,13 +231,13 @@ archive_product_mode/            제품 단위 단계의 코드·문서·DB 덤�
 
 ### 4.3 DB (`a4-db`, PostgreSQL 17)
 
-스키마는 `a4-api` 기동 시 없으면 만든다 (`db.py`의 `SCHEMA`, `CREATE … IF NOT EXISTS`·`ALTER … ADD COLUMN IF NOT EXISTS`). 기록 주체는 `a4-api`뿐이다. 2026-11-06에 `products`·`frames`·`feedback_log` 테이블과 `sessions.feedback_mode`를, 2026-11-09에 `sessions.config`·`sessions.stats`를 더했다 — 옛 테이블·행은 그대로 둔다 (옛 행의 새 열은 NULL).
+스키마는 `a4-api` 기동 시 없으면 만든다 (`db.py`의 `SCHEMA`, `CREATE … IF NOT EXISTS`·`ALTER … ADD COLUMN IF NOT EXISTS`). 기록 주체는 `a4-api`뿐이다. 2026-11-06에 `products`·`frames`·`feedback_log` 테이블과 `sessions.feedback_mode`를, 2026-11-09에 `sessions.config`·`sessions.stats`를, 2026-11-23에 `products.face`·`products.best_seq`를 더했다 — 옛 테이블·행은 그대로 둔다 (옛 행의 새 열은 NULL).
 
 | 테이블 | 내용 |
 |---|---|
 | `stations` | 등록된 스테이션. SQL로 추가한다 (§5 ⑥) |
-| `sessions` | `/ws` 세션. `feedback_mode`(manual/auto), `config`(연결할 때의 판정 설정값·모델 — `api.CONFIG`: `checkpoint`, `pd_conf`, `qi_conf`, `face_min_frames` 등 15개), `stats`(닫을 때의 연결 통계 — `ws_close` 로그와 같은 값, §4.1) |
-| `products` | **제품 하나**: 시작 때 넣고 끝날 때 채운다. `decision`(PASS/FAIL), `ai_decision`(OK/NG/REVIEW), `defect_label`, `frames`, `defect_frames`, `faces`, `faces_seen`, `complete`, `best_result_id`, `result_ids`, `threshold`, `checkpoint`, `end_reason`, `feedback`(CORRECT/WRONG/UNSURE/NOT_ENTERED/NONE), `feedback_at`. `ended_at`이 NULL이면 서버가 기록 중 멈춘 제품이다 |
+| `sessions` | `/ws` 세션. `feedback_mode`(manual/auto), `config`(연결할 때의 판정 설정값·모델 — `api.CONFIG`: `checkpoint`, `pd_conf`, `qi_conf`, `inspect_frames`, `defect_min_frames` 등 13개. 2026-11-23 전 세션은 `segment_end_s`·`confirm_window`·`confirm_hits`·`face_min_frames`), `stats`(닫을 때의 연결 통계 — `ws_close` 로그와 같은 값, §4.1) |
+| `products` | **면 검사 1건** (2026-11-23 전 행은 제품 하나): 시작 때 넣고 끝날 때 채운다. `face`, `decision`(PASS/FAIL, 미완료는 NULL), `ai_decision`(OK/NG/REVIEW), `defect_label`, `frames`, `defect_frames`, `best_seq`, `best_result_id`, `result_ids`, `threshold`, `checkpoint`, `end_reason`(`done`/`incomplete`/`disconnect`, 옛 행 `gap`), `feedback`(CORRECT/WRONG/UNSURE/NOT_ENTERED/NONE), `feedback_at`. `faces`·`faces_seen`·`complete`는 옛 행에만 있다. `ended_at`이 NULL이면 서버가 기록 중 멈춘 검사다. `GET /products`는 기본으로 `decision`이 있는 행만 준다 (`incomplete=1`이면 모두) |
 | `frames` | **제품 프레임 하나**: (`session_id`, `seq`), `product_id`, `ts`, `decision`, `score`, `defect_label`, `products`(PD 상자), `detections`, `frame_size`, `file`(사진 경로), `result_id`. 스테이션 하나당 초당 약 12행 (앱이 보내는 만큼) |
 | `feedback_log` | 피드백 변경 한 줄: `product_id`, `before`, `after`, `source`(live/history), `device`, `changed_at` |
 | `results` | **저장한 결함 프레임 하나** (1초에 1장): `status`(항상 `done`), `decision`(NG·REVIEW), `defect_label`, `score`, `scores`(`[score]`), `threshold`, `detections`, `frame_size`, `checkpoint`, `frames_dir`(사진 경로 — `frames.file`과 같다), `overlay_path`, `attempt`(그 연결의 `seq`), `captured_at` = `result_at` |
@@ -268,10 +269,10 @@ WHERE status = 'done' AND decision <> 'OK' GROUP BY defect_label, decision ORDER
 - 저장은 1초에 1장으로 솎아낸 것이라, 위 개수는 "결함이 보인 프레임 수"가 아니다 (그건 `ws_close.defect_frames`, 또는 `frames`에서 `decision <> 'OK'`).
 
 ```bash
-# 오늘 제품 판정·피드백 집계
+# 오늘 면 검사 판정·피드백 집계 (decision이 비어 있는 줄 = 미완료 검사)
 docker exec a4-db psql -U a4 -d a4 -c "
-SELECT station_id, decision, feedback, count(*) FROM products
-WHERE started_at >= current_date GROUP BY 1, 2, 3 ORDER BY 1, 2, 3;"
+SELECT station_id, face, decision, feedback, count(*) FROM products
+WHERE started_at >= current_date GROUP BY 1, 2, 3, 4 ORDER BY 1, 2, 3, 4;"
 
 # 학습 라벨이 있는 제품 (맞음·틀림)과 그 사진 수
 docker exec a4-db psql -U a4 -d a4 -c "
@@ -279,14 +280,15 @@ SELECT p.product_id, p.decision, p.feedback, count(f.file) AS photos FROM produc
 JOIN frames f USING (product_id) WHERE p.feedback IN ('CORRECT', 'WRONG')
 GROUP BY 1, 2, 3 ORDER BY p.product_id DESC LIMIT 20;"
 ```
-- 모델을 바꾸면 판정 기준도 바뀐다. 기간을 길게 볼 때는 `checkpoint`로 나눠 본다. 설정값(면 기준 등)이 바뀐 기간은 `sessions.config`로 나눈다 (2026-11-09 전 세션은 NULL — 그때 면 기준은 3장).
+- 모델을 바꾸면 판정 기준도 바뀐다. 기간을 길게 볼 때는 `checkpoint`로 나눠 본다. 설정값(면 검사 장수·결함 기준 등)이 바뀐 기간은 `sessions.config`로 나눈다 (2026-11-09 전 세션은 NULL — 그때 면 기준은 3장, 2026-11-23 전 세션은 제품 구간 규칙).
 
 ```bash
-# 설정값별 제품 수 (면 기준·PD/QI 기준값이 바뀐 기간 나누기)
+# 설정값별 건수 (면 검사 장수·결함 기준·PD/QI 기준값이 바뀐 기간 나누기. 2026-11-23 전은 inspect가 비고 face_min이 찬다)
 docker exec a4-db psql -U a4 -d a4 -c "
-SELECT s.config->>'face_min_frames' AS face_min, s.config->>'pd_conf' AS pd_conf, s.config->>'qi_conf' AS qi_conf,
+SELECT s.config->>'inspect_frames' AS inspect, s.config->>'defect_min_frames' AS defect_min, s.config->>'face_min_frames' AS face_min,
+       s.config->>'pd_conf' AS pd_conf, s.config->>'qi_conf' AS qi_conf,
        min(p.started_at)::date AS first_day, count(*) FROM products p JOIN sessions s USING (session_id)
-GROUP BY 1, 2, 3 ORDER BY first_day;"
+GROUP BY 1, 2, 3, 4, 5 ORDER BY first_day;"
 
 # 최근 연결 10개의 통계 (받은 수·처리 수·밀림·제품 프레임·평균 ms)
 docker exec a4-db psql -U a4 -d a4 -c "
@@ -304,34 +306,35 @@ FROM sessions WHERE stats IS NOT NULL ORDER BY opened_at DESC LIMIT 10;"
 cd /home/admin/odServer
 ```
 
-**① 연결(세션)** — `source` gateway, `mode`는 M-01에서 고른 값, `face_min`·`pd_conf`·`qi_conf`는 설정값(`api.CONFIG`). 닫힌 연결은 `closed`와 통계가 차 있다. `ms_avg` 합이 약 100ms 미만이어야 초당 10장을 처리한다.
+**① 연결(세션)** — `source` gateway, `mode`는 M-01에서 고른 값, `inspect`·`defect_min`·`pd_conf`·`qi_conf`는 설정값(`api.CONFIG`). `done`·`incomplete`는 완료·끊긴 면 검사 수 — 미완료가 완료보다 훨씬 많으면 PD가 같은 면을 5장 연속 못 잡는 것이다. 닫힌 연결은 `closed`와 통계가 차 있다. `ms_avg` 합이 약 100ms 미만이어야 초당 10장을 처리한다.
 
 ```bash
 docker exec -i a4-db psql -U a4 -d a4 <<'SQL'
 SELECT session_id, source, feedback_mode AS mode,
        to_char(opened_at AT TIME ZONE 'Asia/Seoul', 'MM-DD HH24:MI:SS') AS opened,
        to_char(closed_at AT TIME ZONE 'Asia/Seoul', 'HH24:MI:SS') AS closed,
-       config->>'face_min_frames' AS face_min, config->>'pd_conf' AS pd_conf, config->>'qi_conf' AS qi_conf,
+       config->>'inspect_frames' AS inspect, config->>'defect_min_frames' AS defect_min,
+       config->>'pd_conf' AS pd_conf, config->>'qi_conf' AS qi_conf,
        stats->>'frames' AS recv, stats->>'processed' AS proc, stats->>'product_frames' AS pfr,
-       stats->>'products' AS prod, stats->>'saved' AS saved, stats->'ms_avg' AS ms_avg, stats->>'error' AS error
+       stats->>'done' AS done, stats->>'incomplete' AS incomplete, stats->>'saved' AS saved, stats->'ms_avg' AS ms_avg, stats->>'error' AS error
 FROM sessions WHERE station_id = 'ST-02' ORDER BY opened_at DESC LIMIT 10;
 SQL
 ```
 
-**② 제품 (최근 20개)** — 실제로 든 제품 수와 비슷해야 한다 (훨씬 많으면 PD가 1초 넘게 제품을 놓쳐 쪼개진 것). `sec`는 비춘 시간 + 1초, `end`는 `gap`(연결이 끊긴 제품만 `disconnect`), `feedback`은 수동 모드면 누르기 전 `NOT_ENTERED`, 자동 모드면 `NONE`.
+**② 면 검사 (최근 20건)** — 완료(`end` `done`)는 `frames` 5·`decision` 있음, 미완료(`incomplete`·`disconnect`)는 `frames` 1~4·`decision` 비어 있음. 한 면을 오래 비추면 같은 면 `done`이 여러 건 이어진다. `best_seq`는 앱 카드 사진의 프레임. `feedback`은 수동 모드면 누르기 전 `NOT_ENTERED`, 자동 모드면 `NONE`.
 
 ```bash
 docker exec -i a4-db psql -U a4 -d a4 <<'SQL'
 SELECT product_id, to_char(started_at AT TIME ZONE 'Asia/Seoul', 'MM-DD HH24:MI:SS') AS started,
-       round(extract(epoch FROM ended_at - started_at)::numeric, 1) AS sec, end_reason AS end,
-       decision, ai_decision AS ai, defect_label AS label, frames, defect_frames AS dfr,
-       faces, faces_seen, complete, feedback_mode AS mode, feedback,
+       round(extract(epoch FROM ended_at - started_at)::numeric, 1) AS sec, face, end_reason AS end,
+       decision, ai_decision AS ai, defect_label AS label, frames, defect_frames AS dfr, best_seq,
+       feedback_mode AS mode, feedback,
        to_char(feedback_at AT TIME ZONE 'Asia/Seoul', 'HH24:MI:SS') AS fb_at, jsonb_array_length(coalesce(result_ids, '[]')) AS saved
 FROM products WHERE station_id = 'ST-02' ORDER BY started_at DESC LIMIT 20;
 SQL
 ```
 
-**③ 피드백 변경 기록** — 결과 카드(M-07)에서 누른 것은 `source` live, 이력(M-05)에서 바꾼 것은 history. 같은 값을 다시 누르면 남지 않는다.
+**③ 피드백 변경 기록** — 최근 검사 카드(M-07)에서 누른 것은 `source` live, 이력(M-05)에서 바꾼 것은 history. 같은 값을 다시 누르면 남지 않는다.
 
 ```bash
 docker exec -i a4-db psql -U a4 -d a4 <<'SQL'
@@ -342,7 +345,7 @@ WHERE p.station_id = 'ST-02' ORDER BY l.id DESC LIMIT 20;
 SQL
 ```
 
-**④ 일관성 검사 20항목 — 모두 0이어야 한다.** 01은 앱이 연결된 채 제품을 비추는 중이면 1이 될 수 있고, 19는 오류로 끝난 연결 수(①의 `error`를 본다).
+**④ 일관성 검사 22항목 — 모두 0이어야 한다.** 01은 앱이 연결된 채 제품을 비추는 중이면 1이 될 수 있고, 19는 오류로 끝난 연결 수(①의 `error`를 본다).
 
 ```bash
 docker exec -i a4-db psql -U a4 -d a4 <<'SQL'
@@ -361,18 +364,18 @@ UNION ALL SELECT '04 사진 경로 없는 프레임 (사진 저장 실패)', coa
 UNION ALL SELECT '05 OK 프레임에 result_id', coalesce(sum(f.ok_with_result), 0) FROM f JOIN p USING (product_id)
 UNION ALL SELECT '06 판정 규칙 위반 (FAIL↔ai OK, PASS↔ai NG·REVIEW)', count(*) FROM p
   WHERE (decision = 'FAIL' AND ai_decision = 'OK') OR (decision = 'PASS' AND ai_decision <> 'OK')
-UNION ALL SELECT '07 결함 확정 근거 없음 (FAIL 인데 결함 프레임 2장 미만)', count(*) FROM p WHERE decision = 'FAIL' AND defect_frames < 2
+UNION ALL SELECT '07 결함 근거 없음 (FAIL 인데 결함 프레임이 설정 기준 미만)', count(*) FROM p JOIN sessions ss USING (session_id)
+  WHERE p.decision = 'FAIL' AND p.defect_frames < coalesce((ss.config->>'defect_min_frames')::int, 2)
 UNION ALL SELECT '08 best_result_id 가 result_ids 에 없음', count(*) FROM p
   WHERE best_result_id IS NOT NULL AND NOT (coalesce(result_ids, '[]') ? best_result_id)
 UNION ALL SELECT '09 result_ids 중 results 에 없는 것', count(*) FROM p, jsonb_array_elements_text(coalesce(p.result_ids, '[]')) r(id)
   WHERE NOT EXISTS (SELECT 1 FROM results x WHERE x.result_id = r.id)
-UNION ALL SELECT '10 면 진행 ≠ 설정 기준 (faces_seen)', count(*) FROM p JOIN sessions ss USING (session_id)
-  WHERE ss.config IS NOT NULL AND p.faces IS NOT NULL
-    AND (SELECT coalesce(array_agg(k ORDER BY k), '{}') FROM jsonb_each_text(p.faces) e(k, v) WHERE v::int >= (ss.config->>'face_min_frames')::int)
-     <> (SELECT coalesce(array_agg(x ORDER BY x), '{}') FROM jsonb_array_elements_text(coalesce(p.faces_seen, '[]')) x)
-UNION ALL SELECT '11 complete ≠ 모든 면을 봄', count(*) FROM p
-  WHERE p.faces IS NOT NULL AND p.complete <> ((SELECT count(*) FROM jsonb_object_keys(p.faces)) > 0
-        AND jsonb_array_length(coalesce(p.faces_seen, '[]')) = (SELECT count(*) FROM jsonb_object_keys(p.faces)))
+UNION ALL SELECT '10 완료 검사 장수 ≠ 설정 (done 인데 frames ≠ inspect_frames)', count(*) FROM p JOIN sessions ss USING (session_id)
+  WHERE p.end_reason = 'done' AND p.frames <> (ss.config->>'inspect_frames')::int
+UNION ALL SELECT '11 판정 유무 ≠ 끝난 이유 (done 인데 판정 없음 · 미완료인데 판정 있음)', count(*) FROM p
+  WHERE p.face IS NOT NULL AND p.ended_at IS NOT NULL AND (p.decision IS NOT NULL) <> (p.end_reason = 'done')
+UNION ALL SELECT '11b 대표 프레임이 그 검사의 frames 에 없음 (best_seq)', count(*) FROM p
+  WHERE p.best_seq IS NOT NULL AND NOT EXISTS (SELECT 1 FROM frames x WHERE x.product_id = p.product_id AND x.seq = p.best_seq)
 UNION ALL SELECT '12 피드백 초기값 틀림 (변경 기록 없는 제품)', count(*) FROM p
   WHERE NOT EXISTS (SELECT 1 FROM feedback_log l WHERE l.product_id = p.product_id)
     AND p.ended_at IS NOT NULL AND p.feedback <> CASE p.feedback_mode WHEN 'manual' THEN 'NOT_ENTERED' ELSE 'NONE' END
@@ -382,8 +385,10 @@ UNION ALL SELECT '13 피드백 값 ≠ 마지막 변경 기록', count(*) FROM p
 UNION ALL SELECT '14 연결 설정값 없음 (config 비어 있음)', count(*) FROM sessions WHERE station_id = 'ST-02' AND config IS NULL
 UNION ALL SELECT '15 닫힌 연결인데 통계 없음 (stats 비어 있음)', count(*) FROM sessions
   WHERE station_id = 'ST-02' AND closed_at IS NOT NULL AND stats IS NULL
-UNION ALL SELECT '16 통계 제품 수 ≠ products 행 수', count(*) FROM s
+UNION ALL SELECT '16 통계 검사 수 ≠ products 행 수', count(*) FROM s
   WHERE (s.stats->>'products')::int <> (SELECT count(*) FROM products x WHERE x.session_id = s.session_id)
+UNION ALL SELECT '16b 통계 완료 수 ≠ done 행 수', count(*) FROM s
+  WHERE s.stats ? 'done' AND (s.stats->>'done')::int <> (SELECT count(*) FROM products x WHERE x.session_id = s.session_id AND x.end_reason = 'done')
 UNION ALL SELECT '17 통계 제품 프레임 수 ≠ frames 행 수', count(*) FROM s
   WHERE (s.stats->>'product_frames')::int <> (SELECT count(*) FROM frames x WHERE x.session_id = s.session_id)
 UNION ALL SELECT '17b 통계 결함 프레임 수 ≠ frames 의 NG·REVIEW 행 수', count(*) FROM s
@@ -412,18 +417,19 @@ D=$(TZ=Asia/Seoul date +%F)   # ⑤와 같은 날짜
 grep -cE '"event": "(db_error|frame_save_error|result_save_error|write_error|write_timeout)"' logs/a4-api/$D.jsonl
 ```
 
-**⑦ 서버 도착 속도** — `frames.seq`는 받은 순번이라 프레임 20장 이상인 제품에서 도착 속도(`recv_fps`)를 잰다. 앱이 HMD 송출 그대로 보내면 11~12.
+**⑦ 서버 도착 속도** — `frames.seq`는 받은 순번이라 연결(세션)마다 제품 프레임의 첫·끝 순번과 시각으로 도착 속도(`recv_fps`)를 잰다 (면 검사는 5장이라 검사 하나로는 재지 않는다). 비추지 않은 시간이 섞이면 낮게 나오므로 계속 비춘 시험에서 본다. 앱이 HMD 송출 그대로 보내면 11~12. 아래 두 번째 표는 면별 완료·미완료 수.
 
 ```bash
 docker exec -i a4-db psql -U a4 -d a4 <<'SQL'
-SELECT product_id, count(*) AS frames, max(seq) - min(seq) + 1 AS recv,
+SELECT f.session_id, count(*) AS frames, max(seq) - min(seq) + 1 AS recv,
        round(((max(seq) - min(seq)) / nullif(extract(epoch FROM max(ts) - min(ts)), 0))::numeric, 1) AS recv_fps,
        round((count(*) / nullif(extract(epoch FROM max(ts) - min(ts)), 0))::numeric, 1) AS product_fps
-FROM frames f JOIN products p USING (product_id) WHERE p.station_id = 'ST-02'
-GROUP BY product_id HAVING count(*) >= 20 ORDER BY product_id DESC LIMIT 10;
-SELECT count(*) AS products, count(*) FILTER (WHERE frames <= 2) AS one_or_two_frames,
-       count(*) FILTER (WHERE frames >= 20) AS twenty_plus, count(*) FILTER (WHERE complete) AS complete
-FROM products WHERE station_id = 'ST-02';
+FROM frames f JOIN sessions s USING (session_id) WHERE s.station_id = 'ST-02'
+GROUP BY f.session_id HAVING count(*) >= 20 ORDER BY max(ts) DESC LIMIT 10;
+SELECT face, count(*) FILTER (WHERE end_reason = 'done') AS done,
+       count(*) FILTER (WHERE end_reason IN ('incomplete', 'disconnect')) AS incomplete,
+       count(*) FILTER (WHERE decision = 'FAIL') AS fail
+FROM products WHERE station_id = 'ST-02' AND face IS NOT NULL GROUP BY face ORDER BY face;
 SQL
 ```
 
@@ -489,8 +495,8 @@ mkdir -p archive_frame_mode && cp -a api gateway DEPLOY.md A4_WEBRTC_API.md arch
 cp -a /tmp/new/api/. api/
 cp -a /tmp/new/gateway/. gateway/
 cp /tmp/new/DEPLOY.md /tmp/new/A4_WEBRTC_API.md /tmp/new/PLAN_product_feedback.md .
-grep -c "class Products" api/stream.py; grep -c "def to_i420" gateway/gateway.py
-#   기대: 1 / 1
+grep -c "class Inspections" api/stream.py; grep -c "def to_i420" gateway/gateway.py
+#   기대: 1 / 1 (2026-11-23 전 코드로 이 절차를 밟을 때는 "class Products")
 ```
 
 ```bash
@@ -498,7 +504,7 @@ grep -c "class Products" api/stream.py; grep -c "def to_i420" gateway/gateway.py
 #    --no-cache를 쓰지 않는다: Dockerfile·requirements.txt가 그대로라 apt·pip 층은 캐시를 쓰고 코드(COPY)만 새로 들어간다.
 #    gpudev는 컨테이너 안에서 archive.ubuntu.com:80에 닿지 않아(2026-11-09) apt를 다시 돌리면 빌드가 실패한다.
 docker build -t a4-api api/ && docker build -t a4-gateway gateway/ && echo "BUILD OK"
-docker run --rm --entrypoint grep a4-api -c "class Products" stream.py
+docker run --rm --entrypoint grep a4-api -c "class Inspections" stream.py
 docker run --rm --entrypoint grep a4-gateway -c "def to_i420" gateway.py
 #   기대: BUILD OK, 1, 1 — 0이면 이미지가 옛 코드다
 ```
@@ -996,8 +1002,8 @@ rm -f trunc.jpg bomb.png black.jpg
 
 ```bash
 docker build --no-cache -t a4-api api/ && echo "BUILD OK"
-docker run --rm --entrypoint grep a4-api -c "class Products" stream.py
-#   기대: BUILD OK, 1 — 안 나오면 여기서 멈춘다 (아래를 실행하면 옛 이미지로 다시 뜬다)
+docker run --rm --entrypoint grep a4-api -c "class Inspections" stream.py
+#   기대: BUILD OK, 1 — 안 나오면 여기서 멈춘다 (아래를 실행하면 옛 이미지로 다시 뜬다). 2026-11-23 전 코드는 "class Products"
 export A4_DB_PASSWORD=$(docker inspect a4-db --format '{{range .Config.Env}}{{println .}}{{end}}' | sed -n 's/^POSTGRES_PASSWORD=//p')
 [ -n "$A4_DB_PASSWORD" ] && echo "password set" || echo "EMPTY — 여기서 멈춘다"
 docker rm -f a4-api
@@ -1198,7 +1204,7 @@ cat /proc/sys/net/ipv4/ip_local_port_range
 - 원인: **폰 → 게이트웨이 패킷 손실 약 27%**(받음 22,065 · 손실 8,206, jitter 40~113ms, 폰 PLI 77번/약 70초). 디코딩 실패 0 — 패킷이 빠져 완성되지 못한 프레임을 aiortc가 버린 것.
 - 같은 조건에서 HMD만 960×720으로 낮추자 손실 **약 2.8%**, jitter 5~14ms, 디코딩 5초에 60장(빠짐 없음) — HMD → 폰 영상량(약 27Mbps)이 같은 Wi-Fi 무선 구간을 차지한 것으로 본다. 그래서 **1440×1080 · 품질 80 · 초당 10장**(약 8Mbps 추정)으로 바꿨다.
 - **1440×1080 · 품질 80 · 초당 10장** 결과 (17:37~17:41, 약 4분 20초): HMD 송출 초당 10.0장 · 센서 초당 약 29.5장 · NV21 9.6ms + JPEG 24ms(점유 33%) · JPEG 평균 약 90KB(HMD 영상 약 7Mbps) → 패킷 손실 **3.2%**(5,883 / 186,142) · 게이트웨이 디코딩 평균 **초당 10.0장**(빠짐 없음) · 디코딩 실패 0 · jitter 대부분 50~70ms. 영상 경로(HMD → 폰 → 게이트웨이 → API)는 이 설정으로 빠짐 없이 초당 10장.
-- 제품 구간이 실제 제품과 맞지 않는다 — 1920×1440 시험은 약 2분 30초에 39개(9개는 1~4장·면 없음, 쪼개짐), 1440×1080 시험은 프레임 손실 없이도 36초·47초짜리 제품(합쳐짐)과 1~3장 조각이 함께 나왔다. 영상 경로가 아니라 PD 정확도(가모델)·제품 구간 규칙(`SEGMENT_END_S`, 시작 조건)의 문제로 본다 — 다음 과제.
+- 제품 구간이 실제 제품과 맞지 않는다 — 1920×1440 시험은 약 2분 30초에 39개(9개는 1~4장·면 없음, 쪼개짐), 1440×1080 시험은 프레임 손실 없이도 36초·47초짜리 제품(합쳐짐)과 1~3장 조각이 함께 나왔다. 영상 경로가 아니라 PD 정확도(가모델)·제품 구간 규칙(`SEGMENT_END_S`, 시작 조건)의 문제로 본다 — 다음 과제. → 2026-11-23 제품 구간을 없애고 면 검사(같은 면 연속 5장)로 바꿨다 (§3.4).
 
 **확인한 것 — 실서버·실기기 (gpudev, 2026-11-09~10, §4.4 명령)** — 2026-11-09 전부 지우고 다시 설치(11-09 코드)한 뒤 HMD·폰 앱(ST-02, 수동 모드)으로 약 5분 시험, 앱을 끈 뒤 확인:
 
@@ -1230,6 +1236,8 @@ cat /proc/sys/net/ipv4/ip_local_port_range
 - 게이트웨이: `webrtc_client.py --mode manual`로 동영상(10fps, 90장) → 제품 2개(FAIL·PASS) `product_end`, 제품 프레임 40장 모두 `inspect`(간격 제한 삭제로 버린 장 없음), `/products*`·`PUT`·`/storage` 중계, 잘못된 `feedback_mode` 422.
 
 **확인하지 않은 것 (2026-11-10 현재)**: 실서버 배포·실제 YOLO·GPU·I420 처리 속도·DB 기록(설정값·통계 포함)은 위 2026-11-09~10에서 확인했다. 남은 것: 제품 구간(PD 정확도 · 구간 규칙 — 위 2026-11-10), 1440×1080에서의 VP8 화질·결함 검출률, 디스크 증가량, 폰 화면에서의 피드백 입력·이력 수정 종단.
+
+**면 검사 (2026-11-23, 작성 환경)**: `api/test_stream.py` 18건 (5장 완료·4장 미완료·10장 2건·다른 면으로 다시 시작·면 없음·끊김·결함 장수 0~5와 기준 1·2·3·가장 큰 상자·대표 프레임), 가짜 모델·DB로 `/ws` 흐름(상면 5장 PASS → 상면 5장 중 결함 1장 FAIL·`best_seq` → 엣지 3장 뒤 면 없음 incomplete → 끊김 disconnect, `ws_close` done·incomplete). 실서버 배포·실제 PD로 미완료 비율·§4.4 ④ 새 항목(10·11·11b·16b)은 확인하지 않았다.
 
 **확인한 것 — 프레임 단위 (작성 환경, 2026-11-03)** — torch·ultralytics·FastAPI·websockets·psycopg·aiortc를 설치할 수 없어 PD·QI를 색으로 상자를 찾는 가짜 모델로, FastAPI·websockets·aiortc·httpx를 대역으로 바꾸고 실제 `api.py`·`stream.py`·`detect.py`·`db.py`·`stream_client.py`·`gateway.py`·`webrtc_client.py`를 돌렸다. SQL은 psql을 거쳐 실제 PostgreSQL 16에서 실행했다 (드라이버만 대역). 125개 확인 통과.
 
