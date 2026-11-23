@@ -11,29 +11,28 @@
 QI 하한이 threshold × (1 - REVIEW_MARGIN)(api.QI_MIN_CONF)이므로 결함이 하나라도 남으면 REVIEW 이상이다 —
 OK ⇔ detections == [], 그래서 OK면 defect_label이 None이다.
 
-제품 단위 판정 (Products, PLAN_product_feedback.md D2~D4 — 옛 앱 AiFlow의 규칙을 옮겼다):
-    구간    첫 제품 프레임에서 시작, 마지막 제품 프레임 뒤 SEGMENT_END_S 동안 제품 프레임이 없거나(tick) 연결이 끊기면(close) 끝.
-            searching 한 장은 구간을 끝내지 않는다 (PD가 제품을 놓친 한 장에도 searching이 간다)
-    확정    구간 안 최근 CONFIRM_WINDOW장 중 CONFIRM_HITS장 이상이 NG·REVIEW면 확정 — 그 안에 NG가 있으면 NG, 없으면 REVIEW.
-            나중에 NG로 다시 확정되면 올린다. 확정을 만든 프레임은 늘 결함 프레임이다 (OK를 더해도 결함 수는 늘지 않는다)
-    판정    확정이 없으면 PASS(ai_decision OK), 있으면 FAIL(ai_decision = 확정값)
-    면      PD 라벨별로 그 라벨 상자가 있었던 프레임 수. FACE_MIN_FRAMES 이상이면 그 면을 본 것. 모두 보면 complete.
-            complete는 구간을 끝내지 않는다
+면 검사 (Inspections, 2026-11-23 — 제품 하나를 끝까지 본다는 가정을 버리고 면 단위로 검사한다):
+    면      한 프레임의 면 = PD 상자 중 가장 큰 상자의 라벨 (엣지·상면·하면비닐)
+    시작    면이 잡힌 프레임에서, 진행 중인 검사가 없으면 그 면의 검사를 시작한다
+    완료    같은 면이 연속 INSPECT_FRAMES장 → 판정하고 product_end(end_reason "done")를 보낸다.
+            그 뒤에도 같은 면이 계속 들어오면 새 검사를 시작한다 (같은 면을 10장 보면 검사 2건)
+    미완료  INSPECT_FRAMES장 전에 다른 면이 잡히면 그 면으로 새로 시작, 면이 없는 프레임이 오면 처음 상태로.
+            끊긴 검사는 end_reason "incomplete"(연결 종료면 "disconnect")로 기록만 하고 앱에는 보내지 않는다
+    판정    결함 프레임(NG·REVIEW)이 DEFECT_MIN_FRAMES장 이상이면 FAIL — 그중 NG가 있으면 ai_decision NG, 없으면 REVIEW.
+            아니면 PASS(ai_decision OK). defect_label은 점수가 가장 높은 결함 프레임의 것
+    대표    best_seq = FAIL이면 점수가 가장 높은 결함 프레임, PASS면 마지막 프레임 (앱 최근 검사 카드의 사진)
+메시지·DB·API의 이름(product_id, product_end, products 테이블)은 그대로 두고, 한 건이 면 검사 1건을 뜻한다.
 
 GPU·I/O 없는 순수 로직이다. 한 연결의 메서드는 모두 그 연결의 이벤트 루프에서 불린다.
 """
-
-from collections import deque
 
 from detect import filter_in_products
 
 REVIEW_MARGIN = 0.1  # 판정 유보 폭 (threshold 대비). api.QI_MIN_CONF가 이 값을 쓴다
 
-# 제품 단위 판정 출발값 (옛 앱 Profile과 같은 값 — 현장 시험으로 조정)
-SEGMENT_END_S = 1.0  # 마지막 제품 프레임 뒤 이만큼 제품 프레임이 없으면 제품 끝
-CONFIRM_WINDOW = 5  # 결함 확정: 최근 CONFIRM_WINDOW장 중
-CONFIRM_HITS = 2  #   CONFIRM_HITS장 이상이 NG·REVIEW면 확정
-FACE_MIN_FRAMES = 5  # 이 장수 이상 잡힌 PD 라벨(면)을 "봄"으로 친다 (2026-11-09: 3 → 5, 결함 확정 창 CONFIRM_WINDOW와 맞춤)
+# 면 검사 (현장 시험으로 조정 — 숫자만 바꾸면 된다)
+INSPECT_FRAMES = 5  # 면 검사 1건 = 같은 면 연속 이 장수
+DEFECT_MIN_FRAMES = 1  # 이 중 결함(NG·REVIEW) 프레임이 이 장수 이상이면 FAIL
 FEEDBACK_MODES = ("manual", "auto")
 
 
@@ -70,99 +69,87 @@ class Searching:
         self.last = ("inspect", None)
 
 
-def confirm(recent, hits: int) -> str | None:
-    """결함 확정 — 최근 판정 중 NG·REVIEW가 hits장 이상이면 NG(NG가 있으면) 또는 REVIEW, 아니면 None."""
-    defects = [d for d in recent if d != "OK"]
-    if len(defects) < hits:
-        return None
-    return "NG" if "NG" in defects else "REVIEW"
+def face_of(products: list[dict]) -> str:
+    """프레임의 면 — 가장 큰 PD 상자의 라벨 (넓이가 같으면 앞의 것)."""
+    def area(p: dict) -> float:
+        x1, y1, x2, y2 = p["box"]
+        return (x2 - x1) * (y2 - y1)
+    return max(products, key=area)["label"]
 
 
-def _rank(decision: str | None) -> int:
-    return {None: 0, "REVIEW": 1, "NG": 2}[decision]
+class Inspection:
+    """진행 중인 면 검사 하나. Inspections가 만든다."""
 
-
-class Product:
-    """진행 중인 제품 하나 (구간). Products가 만든다."""
-
-    def __init__(self, product_id: str, started_at: str, now: float, faces: list[str]) -> None:
+    def __init__(self, product_id: str, face: str, started_at: str) -> None:
         self.product_id = product_id
+        self.face = face
         self.started_at = started_at
-        self.last = now
-        self.frames = 0
-        self.defect_frames = 0
-        self.faces = dict.fromkeys(faces, 0)
-        self.recent: deque[str] = deque(maxlen=CONFIRM_WINDOW)
-        self.confirmed: str | None = None
-        self.label: str | None = None
+        self.seqs: list[int] = []
+        self.defects: list[dict] = []  # 결함 프레임의 inspect 메시지
         self.threshold: float | None = None
         self.saved: list[tuple[str, float]] = []  # (result_id, score)
 
-    def faces_seen(self) -> list[str]:
-        return [name for name, n in self.faces.items() if n >= FACE_MIN_FRAMES]
 
-    def complete(self) -> bool:
-        return bool(self.faces) and len(self.faces_seen()) == len(self.faces)
+class Inspections:
+    """한 연결의 면 검사. 시각(wall: ISO 문자열)은 호출자가 넘긴다.
 
-
-class Products:
-    """한 연결의 제품 구간·결함 확정·면 진행. 시각은 호출자가 넘긴다 (now: time.monotonic, wall: ISO 문자열).
-
-        inspect(now, wall, message) -> (제품, 새로 시작했는지)   제품 프레임마다. message에 product_id·faces 등을 붙인다
-        tick(now, wall) -> product_end 메시지 또는 None          제품 프레임이 없는 동안 주기적으로 (SEGMENT_END_S 검사)
-        close(wall) -> product_end 메시지 또는 None               연결이 끝날 때 (end_reason "disconnect")
+        inspect(wall, message) -> (끊긴 검사, 검사, 새로 시작했는지, 완료)   면이 잡힌 프레임마다.
+                                   message에 product_id·face·count를 붙인다. 끊긴 검사·완료는 product_end 메시지 또는 None
+        no_product(wall) -> product_end 메시지 또는 None                  면이 없는 프레임 (진행 중이던 검사를 끊는다)
+        close(wall) -> product_end 메시지 또는 None                       연결이 끝날 때
+    product_end는 완료(done)만 앱에 보내고, 끊긴 검사(incomplete·disconnect)는 기록만 한다.
     """
 
-    def __init__(self, prefix: str, feedback_mode: str, faces: list[str]) -> None:
+    def __init__(self, prefix: str, feedback_mode: str) -> None:
         self.prefix = prefix  # "[direct_]<세션 12자리>"
         self.feedback_mode = feedback_mode
-        self.face_names = list(faces)
         self.count = 0
-        self.current: Product | None = None
+        self.current: Inspection | None = None
 
-    def inspect(self, now: float, wall: str, message: dict) -> tuple[Product, bool]:
+    def inspect(self, wall: str, message: dict) -> tuple[dict | None, Inspection, bool, dict | None]:
+        face = face_of(message["products"])
+        dropped = None
+        if self.current is not None and self.current.face != face:
+            dropped = self._end(wall, "incomplete")
         started = self.current is None
         if started:
             self.count += 1
-            self.current = Product(f"{self.prefix}-p{self.count:04d}", wall, now, self.face_names)
-        p = self.current
-        p.last = now
-        p.frames += 1
-        p.threshold = message["threshold"]
-        for name in {box["label"] for box in message["products"]}:
-            p.faces[name] = p.faces.get(name, 0) + 1
-        decision = message["decision"]
-        if decision != "OK":
-            p.defect_frames += 1
+            self.current = Inspection(f"{self.prefix}-p{self.count:04d}", face, wall)
+        c = self.current
+        c.seqs.append(message["seq"])
+        c.threshold = message["threshold"]
+        if message["decision"] != "OK":
+            c.defects.append(message)
             if message["result_id"]:
-                p.saved.append((message["result_id"], message["score"]))
-        p.recent.append(decision)
-        c = confirm(p.recent, CONFIRM_HITS)
-        if c is not None and _rank(c) > _rank(p.confirmed):
-            p.confirmed = c
-            p.label = message["defect_label"]
-        message |= {"product_id": p.product_id, "faces": dict(p.faces), "faces_seen": p.faces_seen(),
-                    "complete": p.complete()}
-        return p, started
+                c.saved.append((message["result_id"], message["score"]))
+        message |= {"product_id": c.product_id, "face": face, "count": len(c.seqs)}
+        done = self._end(wall, "done") if len(c.seqs) >= INSPECT_FRAMES else None
+        return dropped, c, started, done
 
-    def tick(self, now: float, wall: str) -> dict | None:
-        if self.current is None or now - self.current.last < SEGMENT_END_S:
-            return None
-        return self._end(wall, "gap")
+    def no_product(self, wall: str) -> dict | None:
+        return None if self.current is None else self._end(wall, "incomplete")
 
     def close(self, wall: str) -> dict | None:
         return None if self.current is None else self._end(wall, "disconnect")
 
     def _end(self, wall: str, reason: str) -> dict:
-        p, self.current = self.current, None
-        ids = [rid for rid, _ in sorted(p.saved, key=lambda s: -s[1])]
+        c, self.current = self.current, None
+        decision = ai_decision = label = None
+        best_seq = c.seqs[-1]
+        if reason == "done":
+            if len(c.defects) >= DEFECT_MIN_FRAMES:
+                worst = max(c.defects, key=lambda m: m["score"])
+                decision, label, best_seq = "FAIL", worst["defect_label"], worst["seq"]
+                ai_decision = "NG" if any(m["decision"] == "NG" for m in c.defects) else "REVIEW"
+            else:
+                decision, ai_decision = "PASS", "OK"
+        ids = [rid for rid, _ in sorted(c.saved, key=lambda s: -s[1])]
         return {
-            "state": "product_end", "product_id": p.product_id, "started_at": p.started_at, "ended_at": wall,
-            "end_reason": reason, "decision": "FAIL" if p.confirmed else "PASS", "ai_decision": p.confirmed or "OK",
-            "defect_label": p.label, "frames": p.frames, "defect_frames": p.defect_frames, "faces": dict(p.faces),
-            "faces_seen": p.faces_seen(), "complete": p.complete(), "best_result_id": ids[0] if ids else None,
-            "result_ids": ids, "threshold": p.threshold, "feedback_mode": self.feedback_mode,
-            "feedback": initial_feedback(self.feedback_mode),
+            "state": "product_end", "product_id": c.product_id, "face": c.face, "started_at": c.started_at,
+            "ended_at": wall, "end_reason": reason, "decision": decision, "ai_decision": ai_decision,
+            "defect_label": label, "frames": len(c.seqs), "defect_frames": len(c.defects), "best_seq": best_seq,
+            "best_result_id": ids[0] if ids else None, "result_ids": ids, "threshold": c.threshold,
+            "feedback_mode": self.feedback_mode, "feedback": initial_feedback(self.feedback_mode),
         }
 
 

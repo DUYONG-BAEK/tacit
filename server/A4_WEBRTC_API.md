@@ -2,6 +2,24 @@
 
 기준: **2026-11-06 규격 (제품 단위 판정·작업자 피드백).** 서버·앱 코드는 이 규격으로 구현돼 있고 (`PLAN_product_feedback.md`), 개발 서버(gpudev)에 **2026-11-09 배포**했다 (`DEPLOY.md` §5.B). 같은 날 앱(ST-02) 연결의 서버 로그로 `product_end`·면 진행 기록과 원본(I420) 전달을 확인했다 (실측은 `DEPLOY.md` §8).
 
+> **2026-11-23 변경 (면 검사 — 제품 하나를 끝까지 본다는 가정을 버림, `PLAN_product_feedback.md` §15)**: 제품이 화면에서 완전히
+> 사라지지 않는 현장이라 "1초 무소식이면 제품 끝"이 오지 않았다. 이제 **한 건 = 면 검사 1건**이다. PD가 잡은 면(가장 큰 상자의
+> 라벨)이 **연속 5장**이면 그 5장으로 판정하고 `product_end`를 보낸다. 5장 전에 다른 면이 잡히면 그 면으로 다시 시작하고, 면이
+> 없는 프레임이 오면 그 검사는 미완료(기록만, 메시지 없음)다. 5장이 끝난 뒤에도 같은 면이 계속 오면 새 검사를 시작한다.
+> 이름(`product_id`·`product_end`·`/products`)은 그대로 쓴다. 아래 본문의 구간·면 진행 설명은 이 변경 전 규격이다.
+>
+> | 항목 | 2026-11-06 | 2026-11-23 |
+> |---|---|---|
+> | 한 건 | 제품 하나 (1초 무소식이면 끝) | **면 검사 1건** (같은 면 연속 `INSPECT_FRAMES`=5장) |
+> | 판정 | 최근 5장 중 2장 결함이면 확정 | 5장 중 결함(NG·REVIEW) 프레임이 `DEFECT_MIN_FRAMES`(지금 1)장 이상이면 FAIL — 서버 `stream.py` 상수 하나로 바꾼다 |
+> | `inspect` | `faces`, `faces_seen`, `complete` | 대신 **`face`**(검사 중인 면), **`count`**(그 검사의 몇 번째 장, 1~5) |
+> | `product_end` | `faces`, `faces_seen`, `complete`, `end_reason` `gap` | 대신 **`face`**, **`best_seq`**(대표 프레임 — FAIL이면 점수가 가장 높은 결함 프레임, PASS면 마지막), `end_reason` `done`. 완료된 검사만 온다 |
+> | `defect_label` | 확정을 만든 프레임 | 점수가 가장 높은 결함 프레임 |
+> | `GET /products` | 모든 행 | 판정이 없는 행(끊긴 검사·진행 중)은 뺀다. `incomplete=1`이면 넣는다. 항목에 `face`·`best_seq` 추가 |
+> | DB `products` | | `face`·`best_seq` 칼럼 (기동 때 자동 추가). `end_reason` `done` · `incomplete` · `disconnect` |
+> | 앱 | 결과 카드 1장, HMD 면 칩·결과 2초 | M-07 **최근 검사 5건** 카드(대표 프레임 사진 `GET /products/{id}/frames/{best_seq}.jpg?overlay=1`), HMD 오른쪽 위 **직전 검사 결과** 칸(다음 결과까지) |
+> | BLE | `FACES`, `RESULT {d, l}` | `FACES` 없앰, `RESULT {d, l, f}`(f = 면), `HINT` tone `INFO`(흰 글자 — "상면 검사 중") |
+
 > **2026-11-09 변경**: 면을 본 것으로 치는 장수 3 → **5** (§3.3 `faces_seen`, 결함 확정 창 5장과 맞춤). 앱은 HMD 프레임을 **받는 대로** 보낸다 — 초당 약 12장, HMD 송출 속도가 상한 (§5.5). 이전 앱은 넣은 뒤 100ms를 쉬어 서버 도착이 초당 6.9장이었다.
 
 개발 서버 주소: `<서버>` = `<개발 서버 IP>` (서버 관리자에게 받는다). WebRTC `http://<서버>:8080`, WebSocket `ws://<서버>:8000/ws`.

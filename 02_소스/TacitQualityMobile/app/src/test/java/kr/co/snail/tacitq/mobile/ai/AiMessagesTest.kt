@@ -70,17 +70,25 @@ class AiMessagesTest {
         assertEquals("/results/c311ab4b00e5-000030/overlay", v.overlayUrl)
     }
 
-    @Test fun `inspect 제품 단위 필드 - 없으면 기본값`() {
+    @Test fun `inspect 면 검사 필드 - 없으면 기본값`() {
         val m = AiMessages.parse("""{"state":"inspect","seq":3,"frame_size":[1920,1440],"decision":"OK","defect_label":null,
             "score":0,"threshold":0.4,"products":[],"detections":[],"result_id":null,"overlay_url":null,
-            "product_id":"abc-p0002","faces":{"상면":4,"엣지":1,"하면비닐":0},"faces_seen":["상면"],"complete":false,"rx_at":1762390000123}""") as AiMsg.Inspect
+            "product_id":"abc-p0002","face":"상면","count":3,"rx_at":1762390000123}""") as AiMsg.Inspect
         assertEquals("abc-p0002", m.productId)
-        assertEquals(mapOf("상면" to 4, "엣지" to 1, "하면비닐" to 0), m.faces)
-        assertEquals(listOf("상면"), m.facesSeen)
+        assertEquals("상면", m.face); assertEquals(3, m.count)
         assertEquals(1762390000123L, m.rxAt)
         val old = AiMessages.parse("""{"state":"inspect","seq":3,"frame_size":[1920,1080],"decision":"OK","defect_label":null,
             "score":0,"threshold":0.4,"products":[],"detections":[],"result_id":null,"overlay_url":null}""") as AiMsg.Inspect
-        assertEquals(null, old.productId); assertEquals(emptyMap<String, Int>(), old.faces); assertEquals(null, old.rxAt)
+        assertEquals(null, old.productId); assertEquals(null, old.face); assertEquals(0, old.count); assertEquals(null, old.rxAt)
+    }
+
+    @Test fun `면 검사 product_end 를 읽는다`() {
+        val m = AiMessages.parse("""{"state":"product_end","product_id":"c311-p0008","face":"하면비닐","started_at":"a","ended_at":"b",
+            "end_reason":"done","decision":"FAIL","ai_decision":"REVIEW","defect_label":"비닐찍힘","frames":5,"defect_frames":1,
+            "best_seq":42,"best_result_id":null,"result_ids":[],"threshold":0.25,"feedback_mode":"auto","feedback":"NONE"}""") as AiMsg.ProductEnd
+        val p = m.product
+        assertEquals("하면비닐", p.face); assertEquals(42L, p.bestSeq); assertEquals("done", p.endReason)
+        assertEquals(false, p.pass); assertEquals(5, p.frames); assertEquals(null, p.bestResultId)
     }
 
     @Test fun `product_end 를 읽는다`() {

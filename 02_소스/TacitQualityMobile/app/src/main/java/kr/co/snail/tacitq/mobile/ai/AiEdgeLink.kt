@@ -70,16 +70,12 @@ class AiEdgeLink(
     onHint: (text: String, tone: String) -> Unit = { _, _ -> },
     /** 실시간 결함 표시(HMD LIVE · M-07) — NG·REVIEW 프레임과 지우는 순간 */
     onLive: (LiveMark) -> Unit = {},
-    /** 면 진행 표시(HMD FACES · M-07) — 바뀔 때만 */
-    onFaces: (FacesMark) -> Unit = {},
-    /** 제품이 끝남(서버 product_end) — 결과 카드 · HMD 결과 · 진동 */
+    /** 면 검사 완료(서버 product_end) — 최근 검사 카드 · HMD 직전 결과 · 진동 */
     onProduct: (AiProduct) -> Unit = {},
-    /** 연결될 때마다(첫 연결 포함) — 끊긴 사이 끝난 제품을 서버에서 다시 받을 때 쓴다 */
-    private val onLinkUp: () -> Unit = {},
 ) {
     private val appContext = context.applicationContext
     private val api = AiResultsApi(baseUrl)
-    private val flow = AiFlow(emit, profile.markHoldMs, onHint = onHint, onLive = onLive, onFaces = onFaces, onProduct = onProduct)
+    private val flow = AiFlow(emit, profile.markHoldMs, onHint = onHint, onLive = onLive, onProduct = onProduct)
     private val policy = Reconnect()
     // WebRTC 콜백(신호 스레드)에서 pc 를 닫으면 멈추므로, 연결 다루기는 모두 이 한 줄 스레드에서 한다
     private val linkThread = Executors.newSingleThreadExecutor { Thread(it, "AiEdgeLink") }.asCoroutineDispatcher()
@@ -346,8 +342,8 @@ class AiEdgeLink(
                 is AiMsg.ProductEnd -> {
                     nProduct.incrementAndGet()
                     val p = msg.product
-                    CommLog.i(AI, TAG, "제품 끝 ${p.productId} ${p.decision}(${p.aiDecision}${p.defectLabel?.let { " $it" } ?: ""}) · " +
-                        "프레임 ${p.frames}장(결함 ${p.defectFrames}) · 면 ${p.facesSeen.joinToString("·").ifEmpty { "-" }}${if (p.complete) " 완료" else ""} · ${p.endReason}")
+                    CommLog.i(AI, TAG, "면 검사 ${p.productId} ${p.face ?: "-"} ${p.decision}(${p.aiDecision}${p.defectLabel?.let { " $it" } ?: ""}) · " +
+                        "프레임 ${p.frames}장(결함 ${p.defectFrames}) · ${p.endReason}")
                 }
                 is AiMsg.Unknown -> { nUnknown.incrementAndGet(); lastUnknown = text.take(200) }
             }
@@ -365,7 +361,6 @@ class AiEdgeLink(
         sentAtConnect = sent; rtcPrev = RtcCount(); sentInfo = null
         policy.onConnected()
         flow.onConnected()
-        onLinkUp()
         if (unreachable) { unreachable = false; emit(Event.EdgeRecovered) }
     }
 

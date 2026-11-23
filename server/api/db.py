@@ -5,7 +5,8 @@ asyncio.to_thread로, 엔드포인트에서는 스레드풀(동기 def)에서 �
 DATABASE_URL은 init()에서만 읽는다.
 
 results 한 행 = /ws에서 저장한 결함 프레임(NG·REVIEW) 하나 (연결마다 1초에 1장, 실시간 확대 보기용). 오버레이를 쓴 뒤 done으로 넣는다.
-products 한 행 = 제품 하나 (PLAN_product_feedback.md §5). 시작 때 넣고(insert_product), 끝날 때 채운다(end_product).
+products 한 행 = 면 검사 1건 (2026-11-23 전 행은 제품 하나, PLAN_product_feedback.md §5). 시작 때 넣고(insert_product),
+끝날 때 채운다(end_product). 끊긴 검사(incomplete·disconnect)는 decision이 NULL이다.
 frames 한 행 = 제품이 보인 프레임 하나 (사진 파일 경로 포함). feedback_log 한 행 = 피드백 변경 하나.
 한 연결의 products·frames·results 쓰기는 api.py가 연결마다 한 줄로 차례대로 부른다 (외래 키 순서).
 제품 단위 판정 때의 행(pending/failed, 여러 장의 scores, alert_id)과 decisions·alerts 테이블은 옛 데이터 보존용으로
@@ -79,15 +80,15 @@ CREATE TABLE IF NOT EXISTS products (
   feedback_mode  text NOT NULL,                 -- manual | auto (세션 값)
   started_at     timestamptz NOT NULL,
   ended_at       timestamptz,                   -- NULL: 끝나지 않음 (서버가 기록 중 멈춤)
-  end_reason     text,                          -- gap | disconnect
-  decision       text,                          -- PASS | FAIL
+  end_reason     text,                          -- done | incomplete | disconnect (옛 행: gap | disconnect)
+  decision       text,                          -- PASS | FAIL (끊긴 검사는 NULL)
   ai_decision    text,                          -- OK | NG | REVIEW
   defect_label   text,
   frames         int NOT NULL DEFAULT 0,
   defect_frames  int NOT NULL DEFAULT 0,
-  faces          jsonb,                         -- {"상면": 30, …}
-  faces_seen     jsonb,
-  complete       boolean NOT NULL DEFAULT false,
+  faces          jsonb,                         -- 옛 행만: {"상면": 30, …}
+  faces_seen     jsonb,                         -- 옛 행만
+  complete       boolean NOT NULL DEFAULT false,  -- 옛 행만
   best_result_id text REFERENCES results,
   result_ids     jsonb,                         -- 저장된 결함 프레임, 점수 높은 순
   threshold      double precision,
@@ -95,6 +96,9 @@ CREATE TABLE IF NOT EXISTS products (
   feedback       text NOT NULL,                 -- CORRECT | WRONG | UNSURE | NOT_ENTERED | NONE
   feedback_at    timestamptz
 );
+-- 2026-11-23: 면 검사 — 검사한 면, 대표 프레임 (FAIL이면 점수가 가장 높은 결함 프레임, PASS면 마지막). 옛 행은 NULL
+ALTER TABLE products ADD COLUMN IF NOT EXISTS face text;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS best_seq int;
 CREATE INDEX IF NOT EXISTS products_station_started ON products (station_id, started_at DESC, product_id DESC);
 CREATE INDEX IF NOT EXISTS products_started ON products (started_at DESC, product_id DESC);
 CREATE TABLE IF NOT EXISTS frames (
@@ -228,16 +232,16 @@ def _iso(value) -> str | None:
 # ── 제품 (PLAN_product_feedback.md §4·§5) ──
 
 FEEDBACK_VALUES = ("CORRECT", "WRONG", "UNSURE")  # 사람이 넣는 값. NOT_ENTERED·NONE은 서버만 정한다
-_PRODUCT_LIST_COLUMNS = ("product_id, station_id, started_at, ended_at, decision, ai_decision, defect_label, frames,"
-                         " defect_frames, complete, best_result_id, feedback_mode, feedback, feedback_at")
+_PRODUCT_LIST_COLUMNS = ("product_id, station_id, face, started_at, ended_at, decision, ai_decision, defect_label,"
+                         " frames, defect_frames, complete, best_seq, best_result_id, feedback_mode, feedback, feedback_at")
 
 
-def insert_product(product_id: str, session_id: str, station_id: str | None, feedback_mode: str, started_at: str,
-                   feedback: str, checkpoint: str) -> None:
+def insert_product(product_id: str, session_id: str, station_id: str | None, feedback_mode: str, face: str,
+                   started_at: str, feedback: str, checkpoint: str) -> None:
     with pool.connection() as conn:
-        conn.execute("INSERT INTO products (product_id, session_id, station_id, feedback_mode, started_at, feedback,"
-                     " checkpoint) VALUES (%s, %s, %s, %s, %s, %s, %s)",
-                     (product_id, session_id, station_id, feedback_mode, started_at, feedback, checkpoint))
+        conn.execute("INSERT INTO products (product_id, session_id, station_id, feedback_mode, face, started_at,"
+                     " feedback, checkpoint) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                     (product_id, session_id, station_id, feedback_mode, face, started_at, feedback, checkpoint))
 
 
 def insert_frame(session_id: str, message: dict, ts: str, file: str | None) -> None:
@@ -252,15 +256,15 @@ def insert_frame(session_id: str, message: dict, ts: str, file: str | None) -> N
 
 
 def end_product(end: dict) -> None:
-    """product_end 메시지로 제품 행을 채운다. 피드백은 건드리지 않는다 (그 사이에 들어왔을 수 있다)."""
+    """product_end 메시지로 면 검사 행을 채운다. 피드백은 건드리지 않는다 (그 사이에 들어왔을 수 있다)."""
     with pool.connection() as conn:
         conn.execute(
             "UPDATE products SET ended_at = %s, end_reason = %s, decision = %s, ai_decision = %s, defect_label = %s,"
-            " frames = %s, defect_frames = %s, faces = %s, faces_seen = %s, complete = %s, best_result_id = %s,"
-            " result_ids = %s, threshold = %s WHERE product_id = %s",
+            " frames = %s, defect_frames = %s, best_seq = %s, best_result_id = %s, result_ids = %s, threshold = %s"
+            " WHERE product_id = %s",
             (end["ended_at"], end["end_reason"], end["decision"], end["ai_decision"], end["defect_label"],
-             end["frames"], end["defect_frames"], Jsonb(end["faces"]), Jsonb(end["faces_seen"]), end["complete"],
-             end["best_result_id"], Jsonb(end["result_ids"]), end["threshold"], end["product_id"]))
+             end["frames"], end["defect_frames"], end["best_seq"], end["best_result_id"], Jsonb(end["result_ids"]),
+             end["threshold"], end["product_id"]))
 
 
 def set_feedback(product_id: str, value: str, source: str, device: str | None) -> dict | None:
@@ -278,9 +282,12 @@ def set_feedback(product_id: str, value: str, source: str, device: str | None) -
 
 
 def list_products(station: str | None, start, end, feedback: list[str] | None, decision: str | None,
-                  limit: int, before: str | None) -> dict:
-    """이력 목록, 최신 순. start·end는 started_at 범위(aware datetime, end는 미포함). before는 이전 페이지의 마지막 product_id."""
+                  limit: int, before: str | None, incomplete: bool = False) -> dict:
+    """이력 목록, 최신 순. start·end는 started_at 범위(aware datetime, end는 미포함). before는 이전 페이지의 마지막 product_id.
+    incomplete가 거짓이면 판정이 있는 행(완료된 검사·옛 제품)만."""
     where, args = [], []
+    if not incomplete:
+        where.append("decision IS NOT NULL")
     if station is not None:
         where.append("station_id = %s"); args.append(station)
     if start is not None:
@@ -340,8 +347,10 @@ def get_frame(product_id: str, seq: int) -> dict | None:
 
 
 def _product_item(row: dict) -> dict:
-    return {"product_id": row["product_id"], "station_id": row["station_id"], "started_at": _iso(row["started_at"]),
+    return {"product_id": row["product_id"], "station_id": row["station_id"], "face": row["face"],
+            "started_at": _iso(row["started_at"]),
             "ended_at": _iso(row["ended_at"]), "decision": row["decision"], "ai_decision": row["ai_decision"],
             "defect_label": row["defect_label"], "frames": row["frames"], "defect_frames": row["defect_frames"],
-            "complete": row["complete"], "best_result_id": row["best_result_id"], "feedback_mode": row["feedback_mode"],
+            "complete": row["complete"], "best_seq": row["best_seq"], "best_result_id": row["best_result_id"],
+            "feedback_mode": row["feedback_mode"],
             "feedback": row["feedback"], "feedback_at": _iso(row["feedback_at"])}

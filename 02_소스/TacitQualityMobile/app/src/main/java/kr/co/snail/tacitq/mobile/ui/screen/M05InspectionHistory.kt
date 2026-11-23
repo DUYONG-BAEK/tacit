@@ -42,14 +42,15 @@ import kr.co.snail.tacitq.mobile.vm.AppViewModel
  * M-05 검사 이력 — AI 서버의 제품 기록(`GET /products`)을 최신 순으로 본다. 2026-11-06: 이력의 원본은 서버다
  * (폰 DB 가 아님 — 폰을 바꿔도 남는다). 제품을 누르면 상세: 프레임 사진 전부 넘겨 보기, 결함 확대, 피드백
  * 맞음·틀림·확인필요 바꾸기(누구나, 서버가 변경 기록을 남긴다), 변경 기록.
- * 서버 주소·스테이션은 M-01 설정값을 쓴다. 새 제품이 끝나면(검사 중) 목록을 다시 받는다.
+ * 서버 주소·스테이션은 M-01 설정값을 쓴다. 새 검사가 끝나면(검사 중) 목록을 다시 받는다.
+ * 2026-11-23부터 한 건 = 면 검사 1건(같은 면 연속 N장). 끊긴 검사는 서버가 목록에서 뺀다.
  */
 @Composable
 fun InspectionHistoryScreen(@Suppress("UNUSED_PARAMETER") vm: AppViewModel) {
     val ctx = LocalContext.current
     val settings = remember { DevSettings(ctx) }
     val api = remember { AiResultsApi(settings.aiUrl) }
-    val card by InspectionService.lastProduct.collectAsStateWithLifecycle()
+    val recent by InspectionService.recentProducts.collectAsStateWithLifecycle()
     var filter by remember { mutableStateOf(Filter.ALL) }
     var items by remember { mutableStateOf<List<AiProduct>>(emptyList()) }
     var next by remember { mutableStateOf<String?>(null) }
@@ -77,7 +78,7 @@ fun InspectionHistoryScreen(@Suppress("UNUSED_PARAMETER") vm: AppViewModel) {
             }
         }
     }
-    LaunchedEffect(filter, reload, card?.product?.productId) { page(null) }
+    LaunchedEffect(filter, reload, recent.firstOrNull()?.product?.productId) { page(null) }
 
     Row(verticalAlignment = Alignment.CenterVertically) {
         Filter.entries.forEach { f ->
@@ -92,10 +93,10 @@ fun InspectionHistoryScreen(@Suppress("UNUSED_PARAMETER") vm: AppViewModel) {
              modifier = Modifier.clickable { reload++ }.padding(4.dp))
     }
 
-    SectionTitle("제품 기록 (최신 순 · 스테이션 ${settings.stationId})")
+    SectionTitle("검사 기록 (최신 순 · 스테이션 ${settings.stationId})")
     error?.let { NoteBox("조회 실패", "$it — AI 서버 주소(${settings.aiUrl})와 연결을 확인하세요.", T.Red, T.RedLight) }
     if (items.isEmpty() && error == null) {
-        NoteBox(if (loading) "불러오는 중" else "기록 없음", "검사 탭에서 검사를 시작하면 제품이 끝날 때마다 여기에 추가됩니다.")
+        NoteBox(if (loading) "불러오는 중" else "기록 없음", "검사 탭에서 검사를 시작하면 면 검사가 끝날 때마다 여기에 추가됩니다.")
         return
     }
     items.forEach { p -> HistoryRow(p) { open = p.productId } }
@@ -130,7 +131,7 @@ private fun HistoryRow(p: AiProduct, onOpen: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            Text("${time(p.startedAt)}  ${p.productId}", fontSize = 12.5.sp, color = T.Ink, fontWeight = FontWeight.Bold)
+            Text("${time(p.startedAt)}  ${p.face?.let { "$it  " } ?: ""}${p.productId}", fontSize = 12.5.sp, color = T.Ink, fontWeight = FontWeight.Bold)
             Text(
                 listOfNotNull(p.defectLabel, "프레임 ${p.frames}장 · 결함 ${p.defectFrames}장", if (p.complete) "모든 면" else null)
                     .joinToString(", "),
@@ -176,6 +177,7 @@ private fun ProductDialog(productId: String, api: AiResultsApi, settings: DevSet
                 p == null -> NoteBox("조회 실패", error ?: "", T.Red, T.RedLight)
                 else -> Column(Modifier.verticalScroll(rememberScrollState())) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
+                        p.face?.let { Text(it, fontSize = 15.sp, color = T.Ink, fontWeight = FontWeight.Bold, modifier = Modifier.padding(end = 8.dp)) }
                         ProductBadge(p)
                         Text("${time(p.startedAt)} ~ ${time(p.endedAt)}", fontSize = 12.sp, color = T.Slate, modifier = Modifier.padding(start = 10.dp))
                     }

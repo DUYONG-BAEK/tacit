@@ -1,6 +1,5 @@
 package kr.co.snail.tacitq.mobile.hmd
 
-import kr.co.snail.tacitq.mobile.ai.FacesMark
 import kr.co.snail.tacitq.mobile.ai.LiveMark
 import kr.co.snail.tacitq.mobile.core.Profile
 import kr.co.snail.tacitq.mobile.core.Screens
@@ -35,18 +34,16 @@ class HudMirrorTest {
         assertEquals("⚠ 서버 지연 · 검사 계속", HudMirror.view(aim, null, null, "서버 지연 · 검사 계속").overlay)
     }
 
-    @Test fun `제품 결과는 LIVE 보다 먼저`() {
-        val v = HudMirror.view(aim, "검사 중" to "OK", LiveMark("NG", "칩찍힘"), null, result = "FAIL" to "칩찍힘")
-        assertEquals("✕ 불합격 · 칩찍힘", v.big); assertEquals(HudMirror.Tone.BAD, v.bigTone)
-        assertEquals("✓ 합격" to HudMirror.Tone.OK, HudMirror.view(aim, null, null, null, result = "PASS" to null).let { it.big to it.bigTone })
-    }
-
-    @Test fun `면 칩 줄`() {
-        val all = listOf("상면", "엣지", "하면비닐")
-        val v = HudMirror.view(aim, null, null, null, faces = FacesMark(listOf("상면"), all, false))
-        assertEquals(listOf("■ 상면   □ 엣지   □ 하면비닐"), v.lines); assertEquals(HudMirror.Tone.STOP, v.linesTone)
-        val done = HudMirror.view(aim, null, null, null, faces = FacesMark(all, all, true))
-        assertEquals(listOf("■ 상면   ■ 엣지   ■ 하면비닐   ✓ 검사 완료"), done.lines); assertEquals(HudMirror.Tone.OK, done.linesTone)
-        assertEquals(emptyList<String>(), HudMirror.view(aim, null, null, null, faces = FacesMark.CLEAR).lines)
+    @Test fun `직전 결과는 오른쪽 위 칸 - 큰 글자(검사 중)를 가리지 않는다`() {
+        val v = HudMirror.view(aim, "하면비닐 검사 중" to "INFO", null, null, result = Triple("FAIL", "비닐찍힘", "상면"))
+        assertEquals("하면비닐 검사 중", v.big); assertEquals(HudMirror.Tone.STOP, v.bigTone)
+        assertEquals("상면 ✕ 비닐찍힘", v.result); assertEquals(HudMirror.Tone.BAD, v.resultTone)
+        assertEquals("✕ 불량 · 칩찍힘", HudMirror.view(aim, null, LiveMark("NG", "칩찍힘"), null, result = Triple("PASS", null, "엣지")).big)
+        val pass = HudMirror.view(aim, null, null, null, result = Triple("PASS", null, "엣지"))
+        assertEquals("엣지 ✓ 정상" to HudMirror.Tone.OK, pass.result to pass.resultTone)
+        assertEquals("✕ 불합격", HudMirror.view(aim, null, null, null, result = Triple("FAIL", null, null)).result)
+        assertEquals(null, HudMirror.view(aim, null, null, null).result)
+        assertEquals("대기 화면에는 없다", null, HudMirror.view(Screens.idle(), null, null, null, result = Triple("PASS", null, "엣지")).result)
+        assertEquals(emptyList<String>(), v.lines)
     }
 }

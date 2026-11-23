@@ -19,9 +19,10 @@ WebSocket /ws — 앱이 프레임(JPEG 등 이미지 바이너리)을 계속 �
     {"state": "searching", "reason": "no_product"}  제품이 안 보임. (state, reason)이 바뀔 때만
     {"state": "inspect", "seq", "frame_size", "decision", "defect_label", "score", "threshold",
      "products", "detections", "result_id", "overlay_url"}   제품이 보인 프레임마다
-    inspect에는 product_id, faces, faces_seen, complete, rx_at도 붙는다 (PLAN_product_feedback.md §3.2)
-    {"state": "product_end", "product_id", …}      제품이 끝날 때 한 번 (PLAN_product_feedback.md §3.3)
-판정 규칙과 제품 구간은 stream.py. 결함 프레임(NG·REVIEW)은 연결마다 SAVE_INTERVAL_S에 한 장까지 오버레이·results 행을
+    inspect에는 product_id(면 검사 ID), face(검사 중인 면), count(그 검사의 몇 번째 장), rx_at도 붙는다
+    (PLAN_product_feedback.md §3.2)
+    {"state": "product_end", "product_id", "face", …}  면 검사가 완료될 때 한 번 (PLAN_product_feedback.md §3.3)
+판정 규칙과 면 검사는 stream.py. 결함 프레임(NG·REVIEW)은 연결마다 SAVE_INTERVAL_S에 한 장까지 오버레이·results 행을
 남기고, 그 프레임의 inspect에만 result_id·overlay_url이 붙는다 (나머지는 null). 제품 프레임은 전부 사진(JPEG)과 frames 행을
 남긴다. inspect를 먼저 보내고 저장은 뒤에서(연결마다 한 줄로 차례대로) 한다.
 프레임은 게이트웨이의 I420 원본(detect.read_frame) 또는 이미지 파일. 읽을 수 없는 프레임은 메시지 없이 건너뛴다.
@@ -36,7 +37,7 @@ DB 장애면 4503.
     GET  /results/<result_id>/overlay       오버레이 이미지 (results/<날짜>/<result_id>/overlay.jpg)
 제품·피드백·저장소 (PLAN_product_feedback.md §4):
     PUT  /products/<id>/feedback            피드백 입력·수정 {"value", "source", "device"}
-    GET  /products                          이력 목록 (station, from, to, feedback, decision, limit, before)
+    GET  /products                          이력 목록 (station, from, to, feedback, decision, limit, before, incomplete)
     GET  /products/<id>                     제품 상세 (변경 기록 포함)
     GET  /products/<id>/frames              제품의 프레임 목록 (offset, limit)
     GET  /products/<id>/frames/<seq>.jpg    프레임 사진 (?overlay=1이면 결함 상자를 그려서)
@@ -74,7 +75,7 @@ from ultralytics import YOLO, settings
 import db
 import detect
 import stream
-from stream import FEEDBACK_MODES, REVIEW_MARGIN, Products, Searching, initial_feedback, judge
+from stream import FEEDBACK_MODES, REVIEW_MARGIN, Inspections, Searching, initial_feedback, judge
 
 # Ultralytics는 기본값으로 사용 통계(추론 포함)를 외부로 보낸다 — 판정 서버에서는 끈다 (DEPLOY.md §7).
 settings.update({"sync": False})
@@ -90,7 +91,6 @@ qi_lock = threading.Lock()
 
 SAVE_INTERVAL_S = 1.0  # 결함 프레임 저장 간격 (연결마다). A4_WEBRTC_API.md §2.2
 
-TICK_S = 0.2  # 프레임이 없을 때도 이 간격으로 제품 끝(stream.SEGMENT_END_S)을 검사한다
 FRAME_JPEG_QUALITY = 90  # 제품 프레임 사진 (I420 원본을 받았을 때). PLAN_product_feedback.md §6
 STORAGE_SCAN_S = 300  # /storage 용량 계산 간격
 
@@ -116,8 +116,7 @@ CONFIG = {
     "pd_conf": detect.PD_CONF, "pd_imgsz": detect.PD_IMGSZ,
     "qi_conf": detect.QI_CONF, "qi_min_conf": round(QI_MIN_CONF, 6), "review_margin": REVIEW_MARGIN,
     "tile": detect.TILE, "step": detect.STEP, "nms_iou": detect.NMS_IOU,
-    "segment_end_s": stream.SEGMENT_END_S, "confirm_window": stream.CONFIRM_WINDOW, "confirm_hits": stream.CONFIRM_HITS,
-    "face_min_frames": stream.FACE_MIN_FRAMES,
+    "inspect_frames": stream.INSPECT_FRAMES, "defect_min_frames": stream.DEFECT_MIN_FRAMES,
     "save_interval_s": SAVE_INTERVAL_S, "frame_jpeg_quality": FRAME_JPEG_QUALITY,
 }
 
@@ -285,10 +284,10 @@ def save_frame(fields: dict, data: bytes, image: np.ndarray, is_file: bool, mess
         log_event("db_error", where="insert_frame", error=f"{type(e).__name__}: {e}")
 
 
-def start_product(fields: dict, product_id: str, wall: str) -> None:
-    """제품 행을 넣는다 (그 제품의 첫 프레임 기록보다 먼저, 같은 writer에서)."""
+def start_product(fields: dict, product_id: str, face: str, wall: str) -> None:
+    """면 검사 행을 넣는다 (그 검사의 첫 프레임 기록보다 먼저, 같은 writer에서)."""
     try:
-        db.insert_product(product_id, fields["session"], fields["station"], fields["mode"], wall,
+        db.insert_product(product_id, fields["session"], fields["station"], fields["mode"], face, wall,
                           initial_feedback(fields["mode"]), MODEL_ID)
     except Exception as e:
         log_event("db_error", where="insert_product", error=f"{type(e).__name__}: {e}")
@@ -356,14 +355,15 @@ def _local_midnight(day: datetime.date) -> datetime.datetime:
 def products_endpoint(station: str | None = None, from_: datetime.date | None = Query(default=None, alias="from"),
                       to: datetime.date | None = None, feedback: str | None = None,
                       decision: Literal["PASS", "FAIL"] | None = None, limit: int = Query(default=50, ge=1, le=200),
-                      before: str | None = None) -> dict:
-    """이력 목록, 최신 순. from·to는 시작 날짜 범위(둘 다 포함), feedback은 쉼표로 여러 값."""
+                      before: str | None = None, incomplete: bool = False) -> dict:
+    """이력 목록, 최신 순. from·to는 시작 날짜 범위(둘 다 포함), feedback은 쉼표로 여러 값.
+    판정이 없는 행(끊긴 면 검사·진행 중)은 incomplete=1일 때만 넣는다."""
     states = [v for v in feedback.split(",") if v] if feedback else None
     if states and any(v not in FEEDBACK_STATES for v in states):
         raise HTTPException(status_code=422, detail=f"feedback은 {', '.join(FEEDBACK_STATES)} 중에서 고른다.")
     start = _local_midnight(from_) if from_ else None
     end = _local_midnight(to + datetime.timedelta(days=1)) if to else None
-    return db.list_products(station, start, end, states, decision, limit, before)
+    return db.list_products(station, start, end, states, decision, limit, before, incomplete)
 
 
 @app.get("/products/{product_id}")
@@ -503,14 +503,20 @@ async def stream_endpoint(ws: WebSocket) -> None:
     opened = time.monotonic()
     # ws_close 집계. frames(받은 수) = processed + skipped_frames(깨진 프레임) + 처리가 밀려 건너뛴 수.
     # saved는 저장을 시작한 수(result_id를 보낸 수)다 — 저장 실패는 frame_save_error 등으로 따로 남는다.
-    counts = {"processed": 0, "skipped_frames": 0, "product_frames": 0, "defect_frames": 0, "saved": 0, "products": 0}
+    # products = 시작한 면 검사 수 = done(완료) + incomplete(끊김, 연결 종료 포함)
+    counts = {"processed": 0, "skipped_frames": 0, "product_frames": 0, "defect_frames": 0, "saved": 0, "products": 0,
+              "done": 0, "incomplete": 0}
     totals = {"decode": 0, "pd": 0, "qi": 0}  # ms 합계. decode·pd는 processed, qi는 product_frames로 나눈다
     log_event("ws_open", **log_fields, peer=ws.client.host if ws.client else None)
     await db_call(db.open_session, session_id, station, log_fields["source"], client, mode, CONFIG)
 
     searching = Searching()
-    products = Products(f"{'' if client else 'direct_'}{session_id}", mode, list(pd_model.names.values()))
+    inspections = Inspections(f"{'' if client else 'direct_'}{session_id}", mode)
     last_saved = float("-inf")
+    def finish(end: dict) -> None:
+        counts["done" if end["end_reason"] == "done" else "incomplete"] += 1
+        writes.put_nowait((finish_product, log_fields, end))
+
     # 기록(사진·DB)은 연결마다 한 줄로 차례대로 한다 — products → results → frames 행의 외래 키 순서를 지키려고.
     # 끊긴 뒤에도 남은 기록을 끝낸다.
     writes: asyncio.Queue = asyncio.Queue()
@@ -542,15 +548,11 @@ async def stream_endpoint(ws: WebSocket) -> None:
     try:
         while True:
             waiter = asyncio.create_task(arrived.wait())
-            await asyncio.wait({receiver, waiter}, timeout=TICK_S, return_when=asyncio.FIRST_COMPLETED)
+            await asyncio.wait({receiver, waiter}, return_when=asyncio.FIRST_COMPLETED)
             waiter.cancel()
             if receiver.done():  # 앱이 연결을 끊음
                 break
             messages = []
-            end = products.tick(time.monotonic(), now_iso())  # 프레임이 없어도 제품 끝을 본다
-            if end:
-                writes.put_nowait((finish_product, log_fields, end))
-                messages.append(end)
             if arrived.is_set():
                 arrived.clear()
                 data, latest = latest, None
@@ -566,6 +568,9 @@ async def stream_endpoint(ws: WebSocket) -> None:
                     for key, value in timing.items():
                         totals[key] += value
                     if not found:
+                        end = inspections.no_product(now_iso())  # 면이 없는 프레임 — 진행 중이던 검사는 미완료
+                        if end:
+                            finish(end)
                         messages += searching.no_product()
                     else:
                         counts["product_frames"] += 1
@@ -579,17 +584,23 @@ async def stream_endpoint(ws: WebSocket) -> None:
                             now = time.monotonic()
                             if now - last_saved >= SAVE_INTERVAL_S:
                                 last_saved = now
-                                result_id = f"{products.prefix}-{seq:06d}"
+                                result_id = f"{inspections.prefix}-{seq:06d}"
                                 message |= {"result_id": result_id, "overlay_url": f"/results/{result_id}/overlay"}
                                 counts["saved"] += 1
-                        product, started = products.inspect(time.monotonic(), wall, message)
+                        dropped, inspection, started, done = inspections.inspect(wall, message)
+                        if dropped:  # 다른 면이 잡혀 끊긴 검사 (기록만, 앱에는 보내지 않는다)
+                            finish(dropped)
                         if started:
                             counts["products"] += 1
-                            writes.put_nowait((start_product, log_fields, product.product_id, product.started_at))
+                            writes.put_nowait((start_product, log_fields, inspection.product_id, inspection.face,
+                                               inspection.started_at))
                         # inspect를 먼저 보내고 기록은 뒤에서 한다 — 오버레이 인코딩(4K 약 90ms)·사진 압축이 전송을 늦추지 않게.
                         # 이 뒤로 message를 바꾸지 않는다 (기록 스레드와 전송이 같은 dict를 읽는다)
                         writes.put_nowait((save_frame, log_fields, data, image, is_file, message, wall, timing))
                         messages.append(message)
+                        if done:  # 같은 면 INSPECT_FRAMES장 — 판정을 앱에 보낸다
+                            finish(done)
+                            messages.append(done)
             try:
                 for message in messages:
                     await ws.send_json(message)
@@ -603,9 +614,9 @@ async def stream_endpoint(ws: WebSocket) -> None:
             receiver.cancel()
         elif not receiver.cancelled():
             receiver.exception()  # 연결 종료 예외를 회수 (미회수 경고 방지)
-        end = products.close(now_iso())  # 진행 중인 제품은 disconnect로 끝낸다 (앱에는 못 보낸다)
+        end = inspections.close(now_iso())  # 진행 중인 검사는 disconnect로 끝낸다 (앱에는 못 보낸다)
         if end:
-            writes.put_nowait((finish_product, log_fields, end))
+            finish(end)
         writes.put_nowait(None)
         try:  # 끊겨도 남은 기록은 끝낸다
             await asyncio.wait_for(asyncio.shield(writing), timeout=60)

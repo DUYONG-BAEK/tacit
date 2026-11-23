@@ -14,7 +14,8 @@ import kotlinx.serialization.json.longOrNull
 
 /**
  * AI 서버 → 폰 메시지 — 「제품 불량 판정 — 모바일 앱 연동 API」 2026-11-03 규격 §3 + 2026-11-06 제품 단위 판정
- * (`server/PLAN_product_feedback.md` §3·§4). `state` 필드로 구분, 모르는 필드는 무시. 설계서 §3.
+ * + 2026-11-23 면 검사 (`server/PLAN_product_feedback.md` §3·§4). `state` 필드로 구분, 모르는 필드는 무시. 설계서 §3.
+ * 2026-11-23부터 "제품"(product_id · product_end · /products) 한 건은 면 검사 1건(같은 면 연속 N장)이다.
  */
 sealed interface AiMsg {
     /** 제품이 안 보임. reason: no_product · (없음 — WebSocket 연결 직후) */
@@ -33,15 +34,14 @@ sealed interface AiMsg {
         val detections: List<AiBox>,          // OK 면 빈 배열, 신뢰도 높은 순
         val resultId: String?,                // 서버가 저장한 결함 프레임에만
         val overlayUrl: String?,
-        // ── 2026-11-06 제품 단위 — 옛 서버는 없음(기본값) ──
-        val productId: String? = null,
-        val faces: Map<String, Int> = emptyMap(),   // 이 제품에서 면(PD 라벨)별로 잡힌 프레임 수
-        val facesSeen: List<String> = emptyList(),  // 서버 기준 이상 잡힌 면
-        val complete: Boolean = false,              // 모든 면을 봤는지
+        // ── 2026-11-06 제품 단위 · 2026-11-23 면 검사 — 옛 서버는 없음(기본값) ──
+        val productId: String? = null,              // 면 검사 ID
+        val face: String? = null,                   // 검사 중인 면(PD 라벨)
+        val count: Int = 0,                         // 그 검사의 몇 번째 장(1~N)
         val rxAt: Long? = null,                     // 게이트웨이가 프레임을 받은 시각(epoch ms) — 지연 측정용
     ) : AiMsg
 
-    /** 제품 하나가 끝남 — 서버가 정한 제품 판정(§3.3) */
+    /** 면 검사 하나가 완료됨 — 서버가 정한 판정(§3.3) */
     data class ProductEnd(val product: AiProduct) : AiMsg
 
     data class Unknown(val raw: String) : AiMsg
@@ -51,16 +51,17 @@ sealed interface AiMsg {
 data class AiBox(val label: String, val conf: Double, val box: List<Double>)
 
 /**
- * 제품 하나 — `product_end` 메시지 · `GET /products` 항목 · `GET /products/{id}` 상세 공통.
- * decision: PASS · FAIL (서버 제품 판정), aiDecision: OK · NG · REVIEW (확정 결과). 목록 항목에는 faces 등이 없다(빈 값).
+ * 면 검사 1건(2026-11-23 전 기록은 제품 하나) — `product_end` 메시지 · `GET /products` 항목 · `GET /products/{id}` 상세 공통.
+ * decision: PASS · FAIL (서버 판정), aiDecision: OK · NG · REVIEW. faces·facesSeen·complete 는 옛 제품 기록에만 있다.
  */
 data class AiProduct(
     val productId: String,
     val stationId: String? = null,
+    val face: String? = null,                  // 검사한 면 (옛 제품 기록은 null)
     val startedAt: String? = null,
     val endedAt: String? = null,
-    val endReason: String? = null,             // gap · disconnect
-    val decision: String? = null,              // PASS · FAIL (끝나지 않은 제품은 null)
+    val endReason: String? = null,             // done · incomplete · disconnect (옛 기록: gap · disconnect)
+    val decision: String? = null,              // PASS · FAIL (끊긴·끝나지 않은 검사는 null)
     val aiDecision: String? = null,
     val defectLabel: String? = null,
     val frames: Int = 0,
@@ -68,6 +69,7 @@ data class AiProduct(
     val faces: Map<String, Int> = emptyMap(),
     val facesSeen: List<String> = emptyList(),
     val complete: Boolean = false,
+    val bestSeq: Long? = null,                 // 대표 프레임 — FAIL 이면 점수가 가장 높은 결함 프레임, PASS 면 마지막
     val bestResultId: String? = null,
     val resultIds: List<String> = emptyList(),
     val feedbackMode: String? = null,          // manual · auto
@@ -125,7 +127,7 @@ data class AiResultView(
 
 object AiMessages {
     /** 이 앱이 따르는 서버 규격 날짜 — 통신 로그 창에 띄워 앱 빌드가 새 규격인지 확인한다 */
-    const val SPEC = "2026-11-06 제품 단위 판정·피드백"
+    const val SPEC = "2026-11-23 면 검사·피드백"
 
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -165,9 +167,8 @@ object AiMessages {
             resultId = o.str("result_id"),
             overlayUrl = o.str("overlay_url"),
             productId = o.str("product_id"),
-            faces = o.counts("faces"),
-            facesSeen = o.strings("faces_seen"),
-            complete = o.bool("complete") ?: false,
+            face = o.str("face"),
+            count = o.int("count") ?: 0,
             rxAt = (o["rx_at"] as? JsonPrimitive)?.longOrNull,
         )
     }
@@ -211,11 +212,12 @@ object AiMessages {
     }
 
     private fun product(o: JsonObject) = AiProduct(
-        productId = o.str("product_id")!!, stationId = o.str("station_id"), startedAt = o.str("started_at"),
+        productId = o.str("product_id")!!, stationId = o.str("station_id"), face = o.str("face"), startedAt = o.str("started_at"),
         endedAt = o.str("ended_at"), endReason = o.str("end_reason"), decision = o.str("decision"),
         aiDecision = o.str("ai_decision"), defectLabel = o.str("defect_label"), frames = o.int("frames") ?: 0,
         defectFrames = o.int("defect_frames") ?: 0, faces = o.counts("faces"), facesSeen = o.strings("faces_seen"),
-        complete = o.bool("complete") ?: false, bestResultId = o.str("best_result_id"), resultIds = o.strings("result_ids"),
+        complete = o.bool("complete") ?: false, bestSeq = o.long("best_seq"), bestResultId = o.str("best_result_id"),
+        resultIds = o.strings("result_ids"),
         feedbackMode = o.str("feedback_mode"), feedback = o.str("feedback"), feedbackAt = o.str("feedback_at"),
         feedbackLog = (o["feedback_log"] as? JsonArray)?.map { e ->
             val l = e.jsonObject

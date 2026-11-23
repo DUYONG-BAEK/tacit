@@ -27,8 +27,8 @@ data class ShowWire(
 )
 
 /**
- * 진행 안내 쪽지 — `{"cmd":"HINT","text":"수집 4/10 — 그대로","tone":"OK"}`. HMD 조준 화면(카메라 위)에만 띄운다.
- * SHOW 와 달리 순번·ACK 없음(최신 것만 의미 있음). tone: OK · WARN · IDLE.
+ * 진행 안내 쪽지 — `{"cmd":"HINT","text":"상면 검사 중","tone":"INFO"}`. HMD 조준 화면(카메라 위)에만 띄운다.
+ * SHOW 와 달리 순번·ACK 없음(최신 것만 의미 있음). tone: OK(초록) · WARN · IDLE(회색) · INFO(흰색).
  */
 object HintWire {
     fun encode(text: String, tone: String): ByteArray =
@@ -40,27 +40,15 @@ object HintWire {
 }
 
 /**
- * 면 진행 쪽지 — `{"cmd":"FACES","s":["상면"],"all":["상면","엣지","하면비닐"],"c":false}` · 지우기 `{"cmd":"FACES","s":[],"all":[],"c":false}`.
- * 조준 화면에 면 칩 줄([HudMirror.facesText])을 띄운다. 순번·ACK 없음(최신 것만 의미 있음), 바뀔 때만 보낸다.
- */
-object FacesWire {
-    fun encode(f: kr.co.snail.tacitq.mobile.ai.FacesMark): ByteArray = kotlinx.serialization.json.buildJsonObject {
-        put("cmd", kotlinx.serialization.json.JsonPrimitive("FACES"))
-        put("s", kotlinx.serialization.json.JsonArray(f.seen.map { kotlinx.serialization.json.JsonPrimitive(it) }))
-        put("all", kotlinx.serialization.json.JsonArray(f.all.map { kotlinx.serialization.json.JsonPrimitive(it) }))
-        put("c", kotlinx.serialization.json.JsonPrimitive(f.complete))
-    }.toString().encodeToByteArray()
-}
-
-/**
- * 제품 결과 쪽지 — `{"cmd":"RESULT","d":"FAIL","l":"칩찍힘"}`. HMD 조준 화면 가운데에 합격/불합격을
- * [HudMirror.RESULT_SHOW_MS] 동안 크게 띄운다(LIVE·HINT 보다 앞). 순번·ACK 없음.
+ * 직전 검사 결과 쪽지 — `{"cmd":"RESULT","d":"FAIL","l":"칩찍힘","f":"상면"}`. HMD 조준 화면 오른쪽 위 칸에
+ * [HudMirror.resultText] 로 띄우고 다음 결과가 올 때까지 둔다(BLE 가 끊기면 HMD 가 지운다). 순번·ACK 없음.
  */
 object ResultWire {
-    fun encode(decision: String, label: String?): ByteArray = kotlinx.serialization.json.buildJsonObject {
+    fun encode(decision: String, label: String?, face: String?): ByteArray = kotlinx.serialization.json.buildJsonObject {
         put("cmd", kotlinx.serialization.json.JsonPrimitive("RESULT"))
         put("d", kotlinx.serialization.json.JsonPrimitive(decision))
         put("l", kotlinx.serialization.json.JsonPrimitive(label))
+        put("f", kotlinx.serialization.json.JsonPrimitive(face))
     }.toString().encodeToByteArray()
 }
 
