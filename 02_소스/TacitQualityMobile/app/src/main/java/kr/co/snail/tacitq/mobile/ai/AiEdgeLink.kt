@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
@@ -31,6 +32,7 @@ import org.webrtc.MediaConstraints
 import org.webrtc.MediaStream
 import org.webrtc.PeerConnection
 import org.webrtc.PeerConnectionFactory
+import org.webrtc.RTCStatsReport
 import org.webrtc.RtpParameters
 import org.webrtc.RtpSender
 import org.webrtc.SdpObserver
@@ -166,6 +168,7 @@ class AiEdgeLink(
         val now = System.currentTimeMillis()
         if (policy.expired(now)) {
             CommLog.w(AI, TAG, "연결 시도 ${Reconnect.ATTEMPT_TIMEOUT_MS}ms 초과 — 닫고 다시")
+            pc?.let { logPairs(it) }
             closePc()
             lost("연결 시간 초과")
         }
@@ -202,12 +205,17 @@ class AiEdgeLink(
 
             val offer = sdp { p.createOffer(it, MediaConstraints()) } ?: error("offer 생성 실패")
             sdpSet { p.setLocalDescription(it, offer) }
-            withTimeoutOrNull(GATHER_MS) { gathered.await() }                // trickle 없음 — 후보 수집 끝까지 기다린다
+            val done = withTimeoutOrNull(GATHER_MS) { gathered.await() } != null   // trickle 없음 — 후보 수집 끝까지 기다린다
+            val local = candidates(p.localDescription.description)
+            CommLog.i(AI, TAG, "폰 ICE 후보 ${local.size}개${if (done) "" else " (수집 ${GATHER_MS}ms 초과)"}: " +
+                local.joinToString(" · ").ifEmpty { "없음" })
 
             val reply = withContext(Dispatchers.IO) { api.offer(p.localDescription.description, stationId, feedbackMode) }
             when (reply.code) {
                 200 -> {
                     val answer = Json.parseToJsonElement(reply.body).jsonObject["sdp"]!!.jsonPrimitive.content
+                    val remote = candidates(answer)
+                    CommLog.i(AI, TAG, "서버 ICE 후보 ${remote.size}개: " + remote.joinToString(" · ").ifEmpty { "없음" })
                     sdpSet { p.setRemoteDescription(it, SessionDescription(SessionDescription.Type.ANSWER, answer)) }
                     keepResolution(sender)                                    // 협상 뒤에야 encodings 가 채워진다 — 다시 건다
                     CommLog.i(AI, TAG, "offer 수락 — 연결 대기 $baseUrl station=$stationId")
@@ -311,13 +319,18 @@ class AiEdgeLink(
                     // 연결 전(시도 중)에 온 것도 실패로 센다 — Reconnect 가 다음 간격을 정한다
                     PeerConnection.PeerConnectionState.DISCONNECTED,
                     PeerConnection.PeerConnectionState.FAILED,
-                    PeerConnection.PeerConnectionState.CLOSED -> { closePc(); lost("연결 $s") }
+                    PeerConnection.PeerConnectionState.CLOSED -> {
+                        if (s != PeerConnection.PeerConnectionState.CLOSED) pc?.let { logPairs(it) }
+                        closePc(); lost("연결 $s")
+                    }
                     else -> Unit
                 }
             }
         }
         override fun onSignalingChange(s: PeerConnection.SignalingState) = Unit
-        override fun onIceConnectionChange(s: PeerConnection.IceConnectionState) = Unit
+        override fun onIceConnectionChange(s: PeerConnection.IceConnectionState) {
+            CommLog.i(AI, TAG, "ICE 상태 $s (세대 $myGen)")
+        }
         override fun onIceConnectionReceivingChange(b: Boolean) = Unit
         override fun onIceCandidate(c: IceCandidate) = Unit
         override fun onIceCandidatesRemoved(c: Array<out IceCandidate>) = Unit
@@ -437,6 +450,31 @@ class AiEdgeLink(
             override fun onSetSuccess() = c.resume(Unit)
             override fun onSetFailure(e: String?) { c.resumeWith(Result.failure(IllegalStateException("SDP 설정 실패 $e"))) }
         })
+    }
+
+    /** SDP 의 a=candidate 줄 → "host udp 192.168.1.11:54321" (a=candidate:<f> <comp> <proto> <prio> <ip> <port> typ <type> …) */
+    private fun candidates(sdp: String): List<String> = sdp.lineSequence()
+        .map { it.trim() }
+        .filter { it.startsWith("a=candidate:") }
+        .map { val f = it.split(' '); "${f.getOrNull(7)} ${f.getOrNull(2)?.lowercase()} ${f.getOrNull(4)}:${f.getOrNull(5)}" }
+        .distinct().toList()
+
+    /** 연결이 안 될 때 — 후보 쌍(폰 주소 → 서버 주소)마다 상태와 점검 요청·응답 수 (getStats candidate-pair) */
+    private suspend fun logPairs(p: PeerConnection) {
+        val report = withTimeoutOrNull(1_000) { suspendCancellableCoroutine<RTCStatsReport> { c -> p.getStats { c.resume(it) } } }
+        if (report == null) { CommLog.w(AI, TAG, "ICE 후보 쌍 통계를 받지 못함"); return }
+        val m = report.statsMap
+        fun addr(id: Any?) = (id as? String)?.let { m[it] }?.members?.let {
+            "${it["candidateType"]} ${it["protocol"]} ${it["address"] ?: it["ip"]}:${it["port"]}"
+        } ?: "?"
+        val pairs = m.values.filter { it.type == "candidate-pair" }
+        if (pairs.isEmpty()) { CommLog.w(AI, TAG, "ICE 후보 쌍 없음"); return }
+        pairs.take(10).forEach {
+            val x = it.members
+            CommLog.w(AI, TAG, "ICE 쌍 폰 ${addr(x["localCandidateId"])} → 서버 ${addr(x["remoteCandidateId"])} · ${x["state"]} · " +
+                "점검 요청 ${x["requestsSent"]} · 응답 ${x["responsesReceived"]}")
+        }
+        if (pairs.size > 10) CommLog.w(AI, TAG, "ICE 쌍 ${pairs.size - 10}개 더 (생략)")
     }
 
     private fun detail(body: String) = runCatching {
