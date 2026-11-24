@@ -587,6 +587,7 @@ ls -A api; ls gateway
 for m in $(grep -o 'yolo_[a-z_]*_[0-9]*\.pt' api/detect.py | sort -u); do
   ls -l "models/$m" || { echo "[멈춤] models/$m 없음"; false; }
 done
+
 echo; echo '══ ② 빌드'
 #   --no-cache: 캐시 없이 처음부터 빌드한다 (apt·pip 패키지도 새로 받는다).
 #   a4-api 의 apt 는 mirror.kakao.com 을 쓴다 — gpudev DNS 가 archive.ubuntu.com 을 접속 안 되는 주소로 알려 주기 때문 (2026-11-09, Dockerfile)
@@ -1185,6 +1186,47 @@ cat /proc/sys/net/ipv4/ip_local_port_range
   - `--list-rich-rules`에 `192.168.1.0/24` 규칙이 있으면 대역 제한이다.
 - 어느 쪽으로 둘지는 운영에서 정한다. API에 인증이 없으므로, 앱이 있는 대역으로 제한하는 편이 안전하다. 대역 제한으로 되돌리는 명령은 `gateway/README.md` "방화벽"에 있다.
 - `:8000`은 Docker 포트 매핑(`-p 8000:8000`)이라 Docker가 방화벽 규칙을 직접 넣는다. firewalld 설정과 별개로 열려 있을 수 있으니, 앱과 같은 망의 기기에서 `http://<서버 IP>:8000/docs`가 열리는지로 확인한다.
+
+**방화벽 열기** — 새 서버에 처음 설치했을 때, 위 확인에서 `8080/tcp`도 `192.168.1.0/24` 같은 대역 규칙도 없으면 8080과 WebRTC(UDP)가 막혀 있다. `a4-gateway`는 `--network host`라 Docker가 규칙을 넣지 않는다 (`:8000`과 다르다). 그래서 서버 안의 `curl localhost:8080/docs`는 200인데 밖에서는 안 열린다 (2026-11-24 ohsungsa: `wlp10s0`가 `public` zone, ports·rich rules 비어 있음).
+
+```bash
+# 1. 앱이 들어오는 네트워크 카드의 zone과 대역
+firewall-cmd --get-active-zones
+ip -4 -br addr
+cat /proc/sys/net/ipv4/ip_local_port_range
+#   예: wlp10s0 이 public, 192.168.0.23/24, 32768 60999 → 아래 ZONE·NET·UDP를 그 값으로
+ZONE=public
+NET=192.168.0.0/24
+UDP=32768-60999
+```
+
+```bash
+# 2-가. 앱 대역만 허용 (권장 — API에 인증이 없다)
+firewall-cmd --permanent --zone=$ZONE --add-rich-rule="rule family=\"ipv4\" source address=\"$NET\" port port=\"8080\" protocol=\"tcp\" accept"
+firewall-cmd --permanent --zone=$ZONE --add-rich-rule="rule family=\"ipv4\" source address=\"$NET\" port port=\"$UDP\" protocol=\"udp\" accept"
+firewall-cmd --reload
+firewall-cmd --zone=$ZONE --list-rich-rules
+#   기대: 두 줄 (8080 tcp, 32768-60999 udp)
+```
+
+```bash
+# 2-나. 출처 제한 없이 열기 (2-가 대신)
+firewall-cmd --permanent --zone=$ZONE --add-port=8080/tcp --add-port=$UDP/udp
+firewall-cmd --reload
+firewall-cmd --zone=$ZONE --list-ports
+#   기대: 8080/tcp 32768-60999/udp
+```
+
+```bash
+# 3. 확인 — 앱과 같은 망의 다른 기기에서
+curl -s -o /dev/null -w "%{http_code}\n" --max-time 5 http://<서버 IP>:8080/docs
+#   기대: 200. 그다음 앱(또는 webrtc_client.py)으로 연결해 게이트웨이 로그에 connected가 남는지 본다
+```
+
+- UDP 범위까지 열어야 한다. TCP 8080만 열면 `/docs`·`/offer`는 되지만 WebRTC 영상이 들어오지 않아 앱이 `connected`에 이르지 못한다.
+- `--permanent` 뒤 `--reload`를 해야 바로 적용되고 재부팅 뒤에도 남는다. `--list-ports`·`--list-rich-rules`는 zone을 주지 않으면 기본 zone만 보여 준다 — 네트워크 카드가 다른 zone에 있으면 `--zone`으로 본다.
+- 되돌리기: 같은 명령에서 `--add-rich-rule`을 `--remove-rich-rule`로, `--add-port`를 `--remove-port`로 바꿔 실행하고 `--reload`.
+- ufw를 쓰는 서버: `ufw allow from $NET to any port 8080 proto tcp`, `ufw allow from $NET to any port 32768:60999 proto udp`.
 
 **그 밖의 보안 사항**
 
