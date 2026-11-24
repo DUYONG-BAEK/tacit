@@ -59,8 +59,8 @@ I420_HEADER = struct.Struct("<4sHHq")  # magic, width, height, rx_at — A4 API 
 LOG_DIR = Path("logs")  # 날짜와 시각은 컨테이너 시간대(Dockerfile의 TZ=Asia/Seoul)를 따른다
 STATS_S = 5.0  # 영상 수신 통계(video_stats) 간격 — 앱 통신 로그의 5초 요약과 같다
 VIDEO_CLOCK_KHZ = 90  # 영상 RTP 시계 90kHz — aiortc jitter(시계 단위)를 ms로
-# WebRTC(UDP) 포트 — 공유기 UDP 포트포워딩·서버 방화벽과 같아야 한다 (DEPLOY.md §7). 2026-11-24: OS 임시 포트(32768-60999) 대신
-UDP_PORTS = range(50000, 50101)
+# WebRTC(UDP) 포트 — 공유기 UDP 포트포워딩·서버 방화벽과 같아야 한다 (DEPLOY.md §7). 2026-11-24: OS 임시 포트(32768-60999) 대신 — 50000번대는 공유기의 다른 포워딩(50022)과 겹쳐 51000번대
+UDP_PORTS = range(51000, 51101)
 
 
 def limit_udp_ports(loop: asyncio.AbstractEventLoop) -> None:
