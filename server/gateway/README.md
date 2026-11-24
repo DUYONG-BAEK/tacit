@@ -70,26 +70,25 @@ until curl -sf -o /dev/null localhost:8080/docs; do sleep 1; done; echo "gateway
 게이트웨이는 `--network host`라 호스트 방화벽을 그대로 탄다. 앱(사내 Wi-Fi `192.168.1.0/24`)이 붙으려면 두 가지를 열어야 한다.
 
 - TCP 8080: `POST /offer`, `/results/*`·`/products*`·`/storage`.
-- UDP 임시 포트 범위: WebRTC 미디어. aiortc는 ICE용 UDP 소켓을 포트 0으로 열어 커널의 임시 포트 범위(`net.ipv4.ip_local_port_range`)에서 받는다. 연결마다 포트가 달라 범위 전체를 연다.
+- UDP 50000-50100: WebRTC 미디어. aiortc는 ICE용 UDP 소켓을 포트 0으로 열지만, 게이트웨이가 이를 `UDP_PORTS`(50000-50100) 안의 빈 포트로 바꿔 연다 (2026-11-24, 이전에는 커널 임시 포트 범위 32768-60999). 연결마다 포트가 달라 범위 전체를 연다.
 
-출처는 사내 Wi-Fi 대역으로만 제한한다. 대역이나 포트 범위가 다른 서버에서는 아래 확인 명령의 출력에 맞춰 값을 바꾼다.
+출처는 사내 Wi-Fi 대역으로만 제한한다. 대역이 다른 서버에서는 값을 바꾼다. 외부망(공인 IP) 접속은 DEPLOY.md §7 "외부망(공인 IP)에서 접속".
 
 ```bash
-# 켜져 있는 방화벽과 UDP 임시 포트 범위 확인
+# 켜져 있는 방화벽 확인
 systemctl is-active firewalld ufw
-cat /proc/sys/net/ipv4/ip_local_port_range
-#   gpudev(2026-10-07): firewalld active, ufw inactive(설치돼 있지 않음), 범위 32768 60999
+#   gpudev(2026-10-07): firewalld active, ufw inactive(설치돼 있지 않음)
 
-# firewalld일 때 (gpudev에 적용한 규칙)
+# firewalld일 때 (gpudev에 적용한 규칙 — UDP는 2026-11-24 전 32768-60999)
 firewall-cmd --permanent --add-rich-rule='rule family="ipv4" source address="192.168.1.0/24" port port="8080" protocol="tcp" accept'
-firewall-cmd --permanent --add-rich-rule='rule family="ipv4" source address="192.168.1.0/24" port port="32768-60999" protocol="udp" accept'
+firewall-cmd --permanent --add-rich-rule='rule family="ipv4" source address="192.168.1.0/24" port port="50000-50100" protocol="udp" accept'
 firewall-cmd --reload
 firewall-cmd --list-rich-rules
 #   기대: 위 두 규칙이 출력된다
 
 # ufw일 때 (gpudev에는 ufw가 없어 쓰지 않았다)
 ufw allow from 192.168.1.0/24 to any port 8080 proto tcp
-ufw allow from 192.168.1.0/24 to any port 32768:60999 proto udp
+ufw allow from 192.168.1.0/24 to any port 50000:50100 proto udp
 ufw status
 ```
 
@@ -162,7 +161,7 @@ until curl -sf -o /dev/null localhost:8000/docs; do sleep 1; done; echo "API rea
 
 ## 알려진 제약
 
-- **네트워크**: 앱과 서버가 같은 망(사내 Wi-Fi 등)이라는 전제다. 서버 방화벽에서 TCP 8080과 UDP 임시 포트 범위를 그 대역에 열어 둔다 (위 "방화벽"). 다른 망(LTE 등)에서 붙으려면 STUN/TURN 서버가 필요하다 — 지금은 설정하지 않았다. USB(`adb reverse`)는 TCP만 전달해 WebRTC 미디어가 통과하지 못한다.
+- **네트워크**: 앱과 서버가 같은 망(사내 Wi-Fi 등)이라는 전제다. 서버 방화벽에서 TCP 8080과 UDP 50000-50100을 그 대역에 열어 둔다 (위 "방화벽"). 다른 망(LTE 등)에서는 공유기 TCP·UDP 포트포워딩으로 붙는다 (DEPLOY.md §7). TURN은 설정하지 않았다. USB(`adb reverse`)는 TCP만 전달해 WebRTC 미디어가 통과하지 못한다.
 - **ICE restart 없음**: aiortc가 구현하지 않았다. 네트워크가 끊기면 새 `POST /offer`로 다시 연결한다. aiortc를 유지한 이유는 `A4_PLAN.md`(보관) §7.5.
 - **밀린 메시지**: 데이터 채널은 순서 보장·재전송이라 망이 느리면 오래된 `inspect`가 쌓여 늦게 도착할 수 있다. 게이트웨이는 지금 버리지 않는다 (`PLAN_realtime_inspect.md` §9 R2 — 실기기에서 확인 후 정한다).
 - 인증·HTTPS 없음 (동작 확인용).

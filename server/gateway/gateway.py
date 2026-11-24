@@ -33,10 +33,13 @@ relay_summary 한 줄로 남긴다.
 
 import asyncio
 import datetime
+import errno
 import json
 import os
+import random
 import time
 import uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import quote
 
@@ -56,8 +59,39 @@ I420_HEADER = struct.Struct("<4sHHq")  # magic, width, height, rx_at — A4 API 
 LOG_DIR = Path("logs")  # 날짜와 시각은 컨테이너 시간대(Dockerfile의 TZ=Asia/Seoul)를 따른다
 STATS_S = 5.0  # 영상 수신 통계(video_stats) 간격 — 앱 통신 로그의 5초 요약과 같다
 VIDEO_CLOCK_KHZ = 90  # 영상 RTP 시계 90kHz — aiortc jitter(시계 단위)를 ms로
+# WebRTC(UDP) 포트 — 공유기 UDP 포트포워딩·서버 방화벽과 같아야 한다 (DEPLOY.md §7). 2026-11-24: OS 임시 포트(32768-60999) 대신
+UDP_PORTS = range(50000, 50101)
 
-app = FastAPI(title="A4 WebRTC gateway")
+
+def limit_udp_ports(loop: asyncio.AbstractEventLoop) -> None:
+    """aiortc(aioice)는 host 후보마다 UDP를 local_addr=(주소, 0)으로 열어 OS 임시 포트를 쓰고, 포트 범위 설정이 없다.
+    포트 0 요청만 UDP_PORTS 안의 빈 포트로 바꿔 연다. 이 프로세스에서 포트 0으로 UDP를 여는 것은 aioice뿐이다
+    (httpx·websockets는 TCP). 연결 하나가 서버 주소(네트워크 카드)마다 포트 하나를 쓴다."""
+    open_udp = loop.create_datagram_endpoint
+
+    async def create_datagram_endpoint(protocol_factory, local_addr=None, *args, **kwargs):
+        if not local_addr or local_addr[1] != 0:
+            return await open_udp(protocol_factory, local_addr, *args, **kwargs)
+        for port in random.sample(UDP_PORTS, len(UDP_PORTS)):
+            try:
+                return await open_udp(protocol_factory, (local_addr[0], port, *local_addr[2:]), *args, **kwargs)
+            except OSError as e:
+                if e.errno != errno.EADDRINUSE:
+                    raise
+        log_event(f"[udp] {local_addr[0]} UDP {UDP_PORTS.start}-{UDP_PORTS.stop - 1} 모두 사용 중", "udp_ports_full",
+                  address=local_addr[0])
+        raise OSError(errno.EADDRINUSE, f"UDP {UDP_PORTS.start}-{UDP_PORTS.stop - 1} 모두 사용 중")
+
+    loop.create_datagram_endpoint = create_datagram_endpoint
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    limit_udp_ports(asyncio.get_running_loop())
+    yield
+
+
+app = FastAPI(title="A4 WebRTC gateway", lifespan=lifespan)
 peers: set[RTCPeerConnection] = set()
 http = httpx.AsyncClient(base_url=A4_HTTP_URL, timeout=10)
 

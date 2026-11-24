@@ -587,6 +587,7 @@ ls -A api; ls gateway
 for m in $(grep -o 'yolo_[a-z_]*_[0-9]*\.pt' api/detect.py | sort -u); do
   ls -l "models/$m" || { echo "[멈춤] models/$m 없음"; false; }
 done
+
 echo; echo '══ ② 빌드'
 #   --no-cache: 캐시 없이 처음부터 빌드한다 (apt·pip 패키지도 새로 받는다).
 #   a4-api 의 apt 는 mirror.kakao.com 을 쓴다 — gpudev DNS 가 archive.ubuntu.com 을 접속 안 되는 주소로 알려 주기 때문 (2026-11-09, Dockerfile)
@@ -1171,20 +1172,74 @@ ls model_diff/
 
 ## 7. 방화벽·보안
 
-**방화벽** — 이번 재배포는 포트(TCP 8000, 8080, UDP 임시 포트 범위)를 바꾸지 않으므로 규칙을 건드릴 필요가 없다. 다만 기록이 서로 맞지 않으니 현재 상태를 한 번 확인한다.
+**방화벽** — 열 포트는 TCP 8000, 8080과 **UDP 50000-50100**(WebRTC 영상)이다. 2026-11-24부터 게이트웨이가 WebRTC UDP 포트를 OS 임시 포트(32768-60999) 대신 `gateway.UDP_PORTS`(50000-50100) 안에서만 연다 — 공유기 포트포워딩을 좁게 하려고. 이 코드로 재배포하면 UDP 규칙을 50000-50100으로 바꾼다 (아래 "방화벽 열기"). 먼저 현재 상태를 확인한다.
 
 ```bash
 systemctl is-active firewalld ufw
 firewall-cmd --list-ports
 firewall-cmd --list-rich-rules
-cat /proc/sys/net/ipv4/ip_local_port_range
 ```
 
 - 이전 문서들에는 두 가지가 함께 적혀 있었다: 사내 Wi-Fi 대역(`192.168.1.0/24`)에만 여는 규칙(`gateway/README.md`, 앱 규격)과, 그 규칙을 지우고 **출처 제한 없이** 여는 명령(`A4_PLAN.md` §11.2 ⑥).
-  - `--list-ports`에 `8080/tcp 32768-60999/udp`가 있으면 출처 제한 없이 열려 있는 것이다.
+  - `--list-ports`에 `8080/tcp 50000-50100/udp`(옛 코드는 `32768-60999/udp`)가 있으면 출처 제한 없이 열려 있는 것이다.
   - `--list-rich-rules`에 `192.168.1.0/24` 규칙이 있으면 대역 제한이다.
 - 어느 쪽으로 둘지는 운영에서 정한다. API에 인증이 없으므로, 앱이 있는 대역으로 제한하는 편이 안전하다. 대역 제한으로 되돌리는 명령은 `gateway/README.md` "방화벽"에 있다.
 - `:8000`은 Docker 포트 매핑(`-p 8000:8000`)이라 Docker가 방화벽 규칙을 직접 넣는다. firewalld 설정과 별개로 열려 있을 수 있으니, 앱과 같은 망의 기기에서 `http://<서버 IP>:8000/docs`가 열리는지로 확인한다.
+
+**방화벽 열기** — 새 서버에 처음 설치했을 때, 위 확인에서 `8080/tcp`도 `192.168.1.0/24` 같은 대역 규칙도 없으면 8080과 WebRTC(UDP)가 막혀 있다. `a4-gateway`는 `--network host`라 Docker가 규칙을 넣지 않는다 (`:8000`과 다르다). 그래서 서버 안의 `curl localhost:8080/docs`는 200인데 밖에서는 안 열린다 (2026-11-24 ohsungsa: `wlp10s0`가 `public` zone, ports·rich rules 비어 있음).
+
+```bash
+# 1. 앱이 들어오는 네트워크 카드의 zone과 대역
+firewall-cmd --get-active-zones
+ip -4 -br addr
+#   예: wlp10s0 이 public, 192.168.0.23/24 → 아래 ZONE·NET을 그 값으로. UDP는 gateway.UDP_PORTS와 같게
+ZONE=public
+NET=192.168.0.0/24
+UDP=50000-50100
+```
+
+```bash
+# 2-가. 앱 대역만 허용 (권장 — API에 인증이 없다)
+firewall-cmd --permanent --zone=$ZONE --add-rich-rule="rule family=\"ipv4\" source address=\"$NET\" port port=\"8080\" protocol=\"tcp\" accept"
+firewall-cmd --permanent --zone=$ZONE --add-rich-rule="rule family=\"ipv4\" source address=\"$NET\" port port=\"$UDP\" protocol=\"udp\" accept"
+firewall-cmd --reload
+firewall-cmd --zone=$ZONE --list-rich-rules
+#   기대: 두 줄 (8080 tcp, 50000-50100 udp)
+```
+
+```bash
+# 2-나. 출처 제한 없이 열기 (2-가 대신)
+firewall-cmd --permanent --zone=$ZONE --add-port=8080/tcp --add-port=$UDP/udp
+firewall-cmd --reload
+firewall-cmd --zone=$ZONE --list-ports
+#   기대: 8080/tcp 50000-50100/udp
+```
+
+```bash
+# 3. 확인 — 앱과 같은 망의 다른 기기에서
+curl -s -o /dev/null -w "%{http_code}\n" --max-time 5 http://<서버 IP>:8080/docs
+#   기대: 200. 그다음 앱(또는 webrtc_client.py)으로 연결해 게이트웨이 로그에 connected가 남는지 본다
+```
+
+- UDP 범위까지 열어야 한다. TCP 8080만 열면 `/docs`·`/offer`는 되지만 WebRTC 영상이 들어오지 않아 앱이 `connected`에 이르지 못한다.
+- `--permanent` 뒤 `--reload`를 해야 바로 적용되고 재부팅 뒤에도 남는다. `--list-ports`·`--list-rich-rules`는 zone을 주지 않으면 기본 zone만 보여 준다 — 네트워크 카드가 다른 zone에 있으면 `--zone`으로 본다.
+- 되돌리기: 같은 명령에서 `--add-rich-rule`을 `--remove-rich-rule`로, `--add-port`를 `--remove-port`로 바꿔 실행하고 `--reload`.
+- ufw를 쓰는 서버: `ufw allow from $NET to any port 8080 proto tcp`, `ufw allow from $NET to any port 50000:50100 proto udp`.
+- 옛 코드(2026-11-24 전)로 연 `32768-60999/udp` 규칙은 새 코드에서 쓰지 않는다. 되돌리기와 같은 방법으로 지운다.
+
+**외부망(공인 IP)에서 접속** — 앱이 사내 Wi-Fi가 아닌 망(LTE 등)에서 공인 IP로 붙을 때. 공유기 포트포워딩 두 줄이 모두 있어야 한다.
+
+| 프로토콜 | 외부 포트 | 내부 IP:포트 | 용도 |
+|---|---|---|---|
+| TCP | 48080 (예) | `<서버 IP>`:8080 | `/offer`·`/storage`·`/products*` 등 HTTP |
+| UDP | 50000-50100 | `<서버 IP>`:50000-50100 (같은 번호) | WebRTC 영상 |
+
+- 앱의 AI 서버 주소는 `http://<공인 IP>:48080`. 서버 방화벽은 외부 출발지도 받아야 하므로 위 2-나(출처 제한 없이)로 연다.
+- 공유기 UDP 포트포워딩이 없으면 HTTP는 되는데 영상이 안 된다. 2026-11-24 ohsungsa(서버 `192.168.1.8`, 공유기 규칙 TCP·UDP 48080 → 8080뿐): 앱(LTE)의 `offer 수락`까지 되고, 앱 통신 로그의 ICE 후보 쌍이 모두 `점검 요청 35 · 응답 0` → 10초 시간 초과. 서버 후보 포트(38643 등, 임시 포트 범위)로 오는 UDP를 공유기가 버렸다.
+- 서버는 aiortc 기본 STUN(`stun.l.google.com:19302`)으로 공인 주소 후보(`srflx <공인 IP>:<포트>`)를 앱에 알린다. 서버가 이 STUN에 닿지 못하면 공인 주소 후보가 없어 외부망에서 붙지 않는다. 앱은 STUN/TURN을 쓰지 않는다.
+- 포트포워딩된 공인 IP를 사내 Wi-Fi에서 쓰면 공유기가 NAT 루프백을 지원해야 한다. 사내에서는 내부 주소(`http://<서버 IP>:8080`)를 쓴다.
+- 확인: 앱 통신 로그의 `ICE 쌍 … → 서버 srflx udp <공인 IP>:500xx`에 응답 수가 0보다 크고 `ICE 상태 CONNECTED`. 안 되면 서버에서 앱 연결 시도 중에 `tcpdump -ni any udp portrange 50000-50100`으로 UDP가 들어오는지 본다.
+- 동시 연결: 연결 하나가 서버 주소(네트워크 카드·Docker 브리지 포함)마다 UDP 포트 하나를 쓴다. 주소마다 101개까지. 다 차면 게이트웨이 로그에 `[udp] … 모두 사용 중`.
 
 **그 밖의 보안 사항**
 
@@ -1266,6 +1321,6 @@ cat /proc/sys/net/ipv4/ip_local_port_range
 - **PD 놓침**: PD가 제품을 못 찾은 프레임은 QI 없이 `searching`이다. 모양이 크게 바뀐 불량품을 PD가 놓칠 수 있다 — 제품을 비추는데 `inspect`가 안 나오면 의심한다.
 - **흔들린 프레임**: 선명도 조건이 없어 흐린 프레임도 판정한다. 빨리 돌리면 작은 결함을 놓친다.
 - **밀린 메시지**: 데이터 채널은 순서 보장·재전송이라 망이 느리면 오래된 `inspect`가 늦게 도착할 수 있다. 실기기에서 확인한다 (`PLAN_realtime_inspect.md` §9 R2).
-- **같은 네트워크 전제**: STUN/TURN이 없다. ICE restart 없음 (aiortc). 근거는 `A4_PLAN.md`(보관) §7.5.
+- **외부망 접속**: 공유기 TCP·UDP 포트포워딩이 필요하다 (§7 "외부망(공인 IP)에서 접속"). TURN이 없어 서버 쪽 포워딩 없이는 붙지 않는다. ICE restart 없음 (aiortc). 근거는 `A4_PLAN.md`(보관) §7.5.
 - **`-devel` 베이스 이미지**: 크다. CUDA 확장을 빌드하지 않으므로 같은 버전의 `-runtime`으로도 될 것으로 보이지만 확인하지 않았다.
 - **ultralytics 외 패키지 버전은 고정하지 않았다** (fastapi, psycopg 등). 실서버에서 빌드가 확인되면 `pip freeze`로 고정하는 것을 권한다.
